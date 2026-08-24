@@ -31,3 +31,15 @@ _Avoid_: Morality, approval, reputation
 **Self-sustaining ecological cycle**:
 A network of life and environmental processes that continues without consuming the astronaut's finite wreck supplies.
 _Avoid_: Victory garden, completed biome
+
+**Emergent ecological episode**:
+A consequential chain of ecological events produced by reusable interacting rules rather than a sequence authored for that particular situation.
+_Avoid_: Random event, scripted event
+
+**Ecological trajectory**:
+The developing state and direction of an ecosystem as its rules, disturbances, and interventions compound over time.
+_Avoid_: Outcome, route
+
+**Playtest gate**:
+An independently required standard of observable player behavior that the prototype must meet before its design is considered validated.
+_Avoid_: Score, survey rating
