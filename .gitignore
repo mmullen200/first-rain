@@ -1,0 +1,12 @@
+# Godot 4+
+.godot/
+
+# Imported resources and export output
+*.translation
+export.cfg
+export_presets.cfg
+build/
+
+# Local/editor state
+.DS_Store
+*.tmp
