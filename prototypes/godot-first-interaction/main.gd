@@ -7,9 +7,16 @@ extends Node3D
 const WALK_SPEED := 4.3
 const WORLD_X := 8.8
 const WORLD_Z := 6.2
+const ECOLOGY_STEP_SECONDS := 0.34
+const EcologyGridModel = preload("res://ecology_grid.gd")
 
 var astronaut: CharacterBody3D
 var camera: Camera3D
+var ecology
+var ecology_cells: Array[MeshInstance3D] = []
+var ecology_step_accumulator := 0.0
+var moss_spread_announced := false
+var fungus_announced := false
 var water_doses := 0
 var ration_packs := 0
 var exposure := 0.0
@@ -36,10 +43,12 @@ var scanner_title: Label
 var scanner_readout: Label
 var discovery_readout: Label
 var time_label: Label
+var ecosystem_label: Label
 
 
 func _ready() -> void:
 	_build_world()
+	_build_ecology_grid()
 	_build_astronaut()
 	_build_patches()
 	_build_presence()
@@ -54,6 +63,7 @@ func _physics_process(delta: float) -> void:
 	_update_nearby_interactions()
 	_update_exposure(delta)
 	_update_ecology(delta)
+	_update_ecology_grid(delta)
 	_update_presence()
 	_update_interface()
 
@@ -146,6 +156,25 @@ func _build_world() -> void:
 	shade_panel = _create_box(shade_panel_home, Vector3(1.45, 0.09, 0.85), Color("839199"), Vector3(0.0, 0.22, -0.08))
 	shade_panel.name = "LooseShadePanel"
 	_create_world_label("LOOSE WRECK PANEL", shade_panel_home + Vector3(0.0, 0.45, 0.0), Color("e4e8e4"), 0.0055)
+
+
+func _build_ecology_grid() -> void:
+	ecology = EcologyGridModel.new()
+	var root := Node3D.new()
+	root.name = "ProvisionalEcologicalCells"
+	add_child(root)
+	for y in range(EcologyGridModel.HEIGHT):
+		for x in range(EcologyGridModel.WIDTH):
+			var cell := MeshInstance3D.new()
+			var mesh := BoxMesh.new()
+			mesh.size = Vector3(EcologyGridModel.CELL_SIZE - 0.08, 0.024, EcologyGridModel.CELL_SIZE - 0.08)
+			cell.mesh = mesh
+			var world: Vector2 = ecology.world_position(x, y)
+			cell.position = Vector3(world.x, 0.012, world.y)
+			cell.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			root.add_child(cell)
+			ecology_cells.append(cell)
+	_refresh_ecology_visuals()
 
 
 func _build_astronaut() -> void:
@@ -266,6 +295,12 @@ func _build_interface() -> void:
 	time_label.add_theme_color_override("font_color", Color("8f9b98"))
 	canvas.add_child(time_label)
 
+	ecosystem_label = Label.new()
+	ecosystem_label.position = Vector2(24, 126)
+	ecosystem_label.add_theme_font_size_override("font_size", 14)
+	ecosystem_label.add_theme_color_override("font_color", Color("8fc99a"))
+	canvas.add_child(ecosystem_label)
+
 	var controls := Label.new()
 	controls.position = Vector2(24, 606)
 	controls.text = "WASD / ARROWS  move    E  interact    F  scan    SPACE  water ecology    Q  drink    R  restart"
@@ -289,7 +324,7 @@ func _build_interface() -> void:
 
 	scanner_card = PanelContainer.new()
 	scanner_card.position = Vector2(765, 24)
-	scanner_card.size = Vector2(360, 340)
+	scanner_card.size = Vector2(360, 410)
 	var card_style := StyleBoxFlat.new()
 	card_style.bg_color = Color(0.055, 0.09, 0.095, 0.94)
 	card_style.border_color = Color("6f8079")
@@ -336,7 +371,7 @@ func _build_interface() -> void:
 	stack.add_child(discovery_readout)
 
 	# A visible crack makes the instrument's damage legible without corrupting readings.
-	for crack_data in [[Vector2(1015, 29), Vector2(2, 310), 0.43], [Vector2(1055, 86), Vector2(2, 210), -0.72]]:
+	for crack_data in [[Vector2(1015, 29), Vector2(2, 380), 0.43], [Vector2(1055, 86), Vector2(2, 275), -0.72]]:
 		var crack := ColorRect.new()
 		crack.position = crack_data[0]
 		crack.size = crack_data[1]
@@ -446,6 +481,50 @@ func _update_ecology(delta: float) -> void:
 			presence_root.visible = true
 
 
+func _update_ecology_grid(delta: float) -> void:
+	ecology_step_accumulator += delta
+	while ecology_step_accumulator >= ECOLOGY_STEP_SECONDS:
+		ecology_step_accumulator -= ECOLOGY_STEP_SECONDS
+		ecology.step()
+		_refresh_ecology_visuals()
+		var state: Dictionary = ecology.summary()
+		if not moss_spread_announced and state["moss_cells"] >= 5:
+			moss_spread_announced = true
+			_add_discovery("Moss spread — follows connected cool, moist cells")
+			_set_status("Living green crosses the square cell boundaries. The moss is spreading beyond the watered point.")
+		if not fungus_announced and state["fungus_cells"] >= 2:
+			fungus_announced = true
+			_add_discovery("Fungus — awakens in wet dead biomass; releases nutrients")
+			_set_status("Pale violet threads appear beneath older moss. Dead material falls as nearby nutrient readings rise.")
+
+
+func _refresh_ecology_visuals() -> void:
+	for y in range(EcologyGridModel.HEIGHT):
+		for x in range(EcologyGridModel.WIDTH):
+			var index: int = y * EcologyGridModel.WIDTH + x
+			var sample: Dictionary = ecology.cell_snapshot(x, y)
+			var color := Color("46433d")
+			color = color.lerp(Color("31515a"), clamp(sample["moisture"] * 0.52, 0.0, 0.5))
+			color = color.lerp(Color("9a7240"), clamp(sample["toxicity"] * 0.32, 0.0, 0.3))
+			color = color.lerp(Color("81553d"), clamp(sample["dead_biomass"] * 1.8, 0.0, 0.72))
+			color = color.lerp(Color("4fa45e"), clamp(sample["moss"] * 1.45, 0.0, 0.9))
+			color = color.lerp(Color("c064d3"), clamp(sample["fungus"] * 3.2, 0.0, 0.96))
+			var material := StandardMaterial3D.new()
+			material.albedo_color = color
+			material.roughness = 0.9
+			if sample["fungus"] >= 0.035:
+				material.emission_enabled = true
+				material.emission = Color("7b2c89") * min(sample["fungus"] * 2.4, 0.85)
+				material.emission_energy_multiplier = 1.15
+			ecology_cells[index].material_override = material
+			if sample["fungus"] >= 0.012:
+				ecology_cells[index].position.y = 0.14
+			elif sample["moss"] >= 0.03 or sample["dead_biomass"] >= 0.035:
+				ecology_cells[index].position.y = 0.105
+			else:
+				ecology_cells[index].position.y = 0.012
+
+
 func _scan_nearby_patch() -> void:
 	if not scanner_recovered:
 		_set_status("The astronaut needs the scientific kit from the emergency cache before local conditions can be compared.")
@@ -457,27 +536,37 @@ func _scan_nearby_patch() -> void:
 	var patch: Dictionary = patches[nearest_patch]
 	patch["scanned"] = true
 	var state_text: String = patch["state"].to_upper()
+	var patch_position: Vector3 = patch["node"].global_position
+	var cell: Dictionary = ecology.sample_world(Vector2(patch_position.x, patch_position.z))
+	var moisture_percent := roundi(cell["moisture"] * 100.0)
+	var surface_celsius := roundi(-8.0 + cell["temperature"] * 66.0)
+	var toxicity_percent := roundi(cell["toxicity"] * 100.0)
+	var cell_life := "MOSS %02d%%   DEAD %02d%%   FUNGUS %02d%%" % [
+		roundi(cell["moss"] * 100.0),
+		roundi(cell["dead_biomass"] * 100.0),
+		roundi(cell["fungus"] * 100.0)
+	]
 	if nearest_patch == "hollow":
 		_add_discovery("Dormant moss analogue — sheltered trace")
 		scanner_title.text = "FIELD SCANNER  /  SHELTERED FILM"
 		scanner_readout.text = (
 			"BIO TRACE     %s\n" % state_text
-			+ "MOISTURE      18%%  / retained\n"
-			+ "SURFACE       11 C below ambient\n"
-			+ "TOXICITY      low band / confidence 62%%\n\n"
+			+ "MOISTURE      %02d%%\n" % moisture_percent
+			+ "SURFACE       %d C\n" % surface_celsius
+			+ "TOXICITY      %02d%% / confidence 62%%\n" % toxicity_percent
+			+ cell_life + "\n\n"
 			+ _scanner_consequence_text(patch)
 		)
 		_set_status("The cracked screen cannot name the organism, but the hollow retains moisture and stays cool.")
 	else:
 		_add_discovery("Dormant moss analogue — exposed trace")
 		scanner_title.text = "FIELD SCANNER  /  SUN-STRUCK FILM"
-		var heat_text := "46 C / direct heat" if not patch["shade"] else "24 C / falling under shade"
-		var toxicity_text := "high amber band" if patch["state"] == "failed" else "amber band / rises with heat"
 		scanner_readout.text = (
 			"BIO TRACE     %s\n" % state_text
-			+ "MOISTURE      2%%  / rapid loss\n"
-			+ "SURFACE       %s\n" % heat_text
-			+ "TOXICITY      %s\n\n" % toxicity_text
+			+ "MOISTURE      %02d%%\n" % moisture_percent
+			+ "SURFACE       %d C%s\n" % [surface_celsius, " / shaded" if patch["shade"] else " / direct heat"]
+			+ "TOXICITY      %02d%% / amber band\n" % toxicity_percent
+			+ cell_life + "\n\n"
 			+ _scanner_consequence_text(patch)
 		)
 		if patch["state"] == "failed":
@@ -509,6 +598,8 @@ func _water_nearby_patch() -> void:
 	water_doses -= 1
 	patch["state"] = "wet"
 	patch["age"] = 0.0
+	var patch_position: Vector3 = patch["node"].global_position
+	ecology.add_water(Vector2(patch_position.x, patch_position.z))
 	_set_patch_color(nearest_patch, Color("3e6653"), Color("18372d"))
 	if patch["shade"]:
 		_set_status("The film darkens with a dry crackle. Water remains pooled between its cells.")
@@ -562,6 +653,8 @@ func _interact_with_shade() -> void:
 		shade_panel.global_position = patches["crust"]["node"].global_position + Vector3(0.0, 1.15, 0.0)
 		shade_panel.rotation = Vector3(0.0, 0.18, -0.04)
 		patches["crust"]["shade"] = true
+		var crust_position: Vector3 = patches["crust"]["node"].global_position
+		ecology.add_shade(Vector2(crust_position.x, crust_position.z))
 		_set_status("The panel cuts the direct sun. The surface begins cooling, but lost water does not return.")
 		return
 
@@ -591,6 +684,10 @@ func _update_interface() -> void:
 	exposure_label.text = "SUIT EXPOSURE  %02d%%  /  %s" % [roundi(exposure), exposure_state]
 	var field_seconds := int(field_time * 12.0)
 	time_label.text = "FIELD TIME  %02d:%02d  /  ecological response accelerated" % [field_seconds / 60, field_seconds % 60]
+	var ecosystem: Dictionary = ecology.summary()
+	ecosystem_label.text = "ECOLOGICAL CELLS  moss %d     fungus %d     dead biomass %d     tick %d" % [
+		ecosystem["moss_cells"], ecosystem["fungus_cells"], ecosystem["dead_cells"], ecosystem["tick"]
+	]
 
 
 func _scanner_consequence_text(patch: Dictionary) -> String:

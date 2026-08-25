@@ -24,3 +24,14 @@ Open `project.godot` in Godot 4.6 and press **F6/F5**, or run:
 Can one tiny 2.5D space carry the player from the crashed ship and finite wreck supplies through comparison with the damaged Field Scanner, a scarce ecological intervention, immediate and delayed feedback, a legible failure and recovery, a persistent scanner discovery record, and the first successful cultivation—without issuing a quest or revealing a recipe?
 
 Moss behavior, water quantities, environmental variables, timing, and the loose shade panel are disposable test fixtures. They do not settle the later rule-set, survival-balance, feedback-tool, or toolkit decisions.
+
+## Cellular ecology added for this revision
+
+The visible square cells now carry provisional moisture, temperature, toxicity, nutrients, dormant moss, living moss, dead biomass, fungus, and shade values. A fixed deterministic tick updates all cells through double-buffered local rules:
+
+- Water wakes dormant moss where temperature and toxicity permit.
+- Living moss spreads into adjacent suitable cells and slows evaporation.
+- Moss stress and ordinary turnover create dead biomass.
+- Fungus awakens where dead biomass remains wet, spreads locally, decomposes it into nutrients, and slightly reduces toxicity.
+
+Cell color is the readable prototype overlay: blue-green indicates moisture, green living moss, brown dead biomass, and violet fungus. The Field Scanner exposes the precise local values while the top-left summary shows the system-wide cell counts.
