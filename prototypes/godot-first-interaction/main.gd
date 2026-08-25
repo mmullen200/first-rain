@@ -169,7 +169,10 @@ func _build_world() -> void:
 	_create_world_label("EMERGENCY CACHE", Vector3(-5.15, 0.68, -1.72), Color("ffd18b"), 0.0055)
 
 	# The sheltered hollow reads through shade, darker ground, and surrounding stones.
-	_create_box(Vector3(-2.8, 1.25, -1.55), Vector3(3.2, 0.16, 1.55), Color("555b59"), Vector3(0.0, -0.18, -0.08))
+	var shelter_panel_color := Color("555b59")
+	shelter_panel_color.a = 0.5
+	var shelter_panel := _create_box(Vector3(-2.8, 1.25, -1.55), Vector3(3.2, 0.16, 1.55), shelter_panel_color, Vector3(0.0, -0.18, -0.08))
+	shelter_panel.name = "ShelterPanel"
 	for position in [Vector3(-3.7, 0.28, -0.8), Vector3(-1.8, 0.22, -2.35), Vector3(-3.65, 0.2, -2.35)]:
 		_create_rock(position, 0.55)
 
@@ -1157,6 +1160,8 @@ func _material(color: Color, roughness: float, emission := Color(0.0, 0.0, 0.0, 
 	var material := StandardMaterial3D.new()
 	material.albedo_color = color
 	material.roughness = roughness
+	if color.a < 0.999:
+		material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	if emission.r + emission.g + emission.b > 0.01:
 		material.emission_enabled = true
 		material.emission = emission
