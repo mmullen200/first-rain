@@ -21,8 +21,32 @@ A deliberate action by the astronaut intended to alter the ecosystem and reveal 
 _Avoid_: Spell, command
 
 **Presence**:
-The planet's localized, non-corporeal manifestation, provisionally perceived as a floating flame, which develops an individual relationship with the astronaut.
+The planet's localized, non-corporeal manifestation, provisionally perceived as a floating flame, which becomes the astronaut's alien co-investigator.
 _Avoid_: Spirit, guide, companion
+
+**Nudge**:
+A limited communication from the Presence that directs the astronaut's attention toward an ecological place, condition, or possibility without prescribing an objective or solution.
+_Avoid_: Quest, instruction, hint
+
+**Trust**:
+The Presence's willingness to approach the astronaut, reveal vulnerable planetary life, and risk consequential cooperation based on observed patterns of behavior.
+_Avoid_: Approval, affection, reputation
+
+**Mutual comprehension**:
+The degree to which the astronaut and Presence can reliably interpret one another's attention, intent, and ecological observations.
+_Avoid_: Translation, shared language, knowledge level
+
+**Signal**:
+A nonverbal expression used by the astronaut or Presence to point, acknowledge, question, or draw attention without prescribing an action.
+_Avoid_: Command, dialogue option, quest marker
+
+**Reciprocity**:
+The established pattern in which the astronaut and Presence notice, answer, and build upon one another's ecological interventions.
+_Avoid_: Obedience, favor, exchange
+
+**First Rain**:
+The first deliberate cooperation in which the astronaut prepares a resilient ecosystem to receive water and the Presence concentrates dormant planetary processes into rainfall.
+_Avoid_: Victory cutscene, summoned storm
 
 **Awakening**:
 The planet's increasing capacity to perceive, respond, and act as the restored ecosystem becomes more diverse and resilient.
