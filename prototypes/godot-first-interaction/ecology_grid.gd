@@ -18,13 +18,14 @@ var dormant_moss := PackedFloat32Array()
 var moss := PackedFloat32Array()
 var dead_biomass := PackedFloat32Array()
 var fungus := PackedFloat32Array()
+var fruiting := PackedFloat32Array()
 var shade := PackedFloat32Array()
 var tick := 0
 
 
 func _init() -> void:
 	var count: int = WIDTH * HEIGHT
-	for field in [moisture, temperature, toxicity, nutrients, dormant_moss, moss, dead_biomass, fungus, shade]:
+	for field in [moisture, temperature, toxicity, nutrients, dormant_moss, moss, dead_biomass, fungus, fruiting, shade]:
 		field.resize(count)
 	_seed_barren_basin()
 
@@ -59,6 +60,7 @@ func step() -> void:
 	var next_moss: PackedFloat32Array = moss.duplicate()
 	var next_dead: PackedFloat32Array = dead_biomass.duplicate()
 	var next_fungus: PackedFloat32Array = fungus.duplicate()
+	var next_fruiting: PackedFloat32Array = fruiting.duplicate()
 
 	for y in range(HEIGHT):
 		for x in range(WIDTH):
@@ -69,6 +71,7 @@ func step() -> void:
 			var local_moss: float = moss[index]
 			var local_dead: float = dead_biomass[index]
 			var local_fungus: float = fungus[index]
+			var local_fruiting: float = fruiting[index]
 
 			var neighbor_moisture: float = _neighbor_average(moisture, x, y)
 			var neighbor_moss: float = _neighbor_average(moss, x, y)
@@ -108,6 +111,9 @@ func step() -> void:
 			next_dead[index] = clamp(local_dead + moss_loss - consumption, 0.0, 1.0)
 			next_nutrients[index] = clamp(nutrients[index] + consumption * 0.82 - moss_growth * 0.12, 0.0, 1.0)
 			next_toxicity[index] = clamp(local_toxicity - consumption * 0.045, 0.0, 1.0)
+			var fruiting_growth: float = local_fungus * (nutrients[index] + 0.08) * local_moisture * fungal_suitability * 0.75
+			var fruiting_decay: float = local_fruiting * (0.004 + maxf(0.0, 0.16 - local_moisture) * 0.08)
+			next_fruiting[index] = clamp(local_fruiting + fruiting_growth - fruiting_decay, 0.0, 1.0)
 
 	moisture = next_moisture
 	temperature = next_temperature
@@ -117,6 +123,7 @@ func step() -> void:
 	moss = next_moss
 	dead_biomass = next_dead
 	fungus = next_fungus
+	fruiting = next_fruiting
 	tick += 1
 
 
@@ -142,6 +149,53 @@ func add_shade(world: Vector2, amount := 0.95, radius := 1.45) -> void:
 			shade[index] = clamp(shade[index] + amount * strength, 0.0, 1.0)
 
 
+func reveal_subsurface_refuge(world: Vector2) -> void:
+	add_water(world, 0.62, 1.45)
+	add_shade(world, 0.28, 1.55)
+	var cell: Vector2i = world_to_cell(world)
+	var index: int = _index(cell.x, cell.y)
+	dormant_moss[index] = maxf(dormant_moss[index], 0.42)
+	nutrients[index] = maxf(nutrients[index], 0.16)
+
+
+func harvest_world(world: Vector2) -> int:
+	var cell: Vector2i = world_to_cell(world)
+	var index: int = _index(cell.x, cell.y)
+	if fruiting[index] < 0.055:
+		return 0
+	var amount: float = minf(fruiting[index], 0.24)
+	fruiting[index] -= amount
+	fungus[index] = maxf(0.0, fungus[index] - amount * 0.16)
+	nutrients[index] = maxf(0.0, nutrients[index] - amount * 0.11)
+	dead_biomass[index] = clampf(dead_biomass[index] + amount * 0.04, 0.0, 1.0)
+	return 1
+
+
+func graze_cell(cell: Vector2i, amount := 0.13) -> float:
+	var x: int = clampi(cell.x, 0, WIDTH - 1)
+	var y: int = clampi(cell.y, 0, HEIGHT - 1)
+	var index: int = _index(x, y)
+	var eaten: float = minf(moss[index], amount)
+	moss[index] -= eaten
+	dead_biomass[index] = clampf(dead_biomass[index] + eaten * 0.12, 0.0, 1.0)
+	nutrients[index] = clampf(nutrients[index] + eaten * 0.34, 0.0, 1.0)
+	return eaten
+
+
+func apply_dust_front(column: int) -> void:
+	var x: int = clampi(column, 0, WIDTH - 1)
+	for y in range(HEIGHT):
+		var index: int = _index(x, y)
+		var protection: float = clampf(moss[index] * 0.58 + fungus[index] * 0.22, 0.0, 0.72)
+		var moss_damage: float = moss[index] * (1.0 - protection) * 0.12
+		moisture[index] = maxf(0.0, moisture[index] - 0.2 * (1.0 - protection))
+		temperature[index] = clampf(temperature[index] + 0.16, 0.0, 1.0)
+		toxicity[index] = clampf(toxicity[index] + 0.075 * (1.0 - protection), 0.0, 1.0)
+		moss[index] = maxf(0.0, moss[index] - moss_damage)
+		dead_biomass[index] = clampf(dead_biomass[index] + moss_damage, 0.0, 1.0)
+		fruiting[index] *= 0.72 + protection * 0.2
+
+
 func sample_world(world: Vector2) -> Dictionary:
 	var cell: Vector2i = world_to_cell(world)
 	var index: int = _index(cell.x, cell.y)
@@ -154,6 +208,7 @@ func sample_world(world: Vector2) -> Dictionary:
 		"moss": moss[index],
 		"dead_biomass": dead_biomass[index],
 		"fungus": fungus[index],
+		"fruiting": fruiting[index],
 		"shade": shade[index]
 	}
 
@@ -162,6 +217,7 @@ func summary() -> Dictionary:
 	var moss_cells := 0
 	var fungus_cells := 0
 	var dead_cells := 0
+	var fruiting_cells := 0
 	var total_moss := 0.0
 	var total_fungus := 0.0
 	for index in range(WIDTH * HEIGHT):
@@ -173,10 +229,13 @@ func summary() -> Dictionary:
 			fungus_cells += 1
 		if dead_biomass[index] >= 0.035:
 			dead_cells += 1
+		if fruiting[index] >= 0.055:
+			fruiting_cells += 1
 	return {
 		"moss_cells": moss_cells,
 		"fungus_cells": fungus_cells,
 		"dead_cells": dead_cells,
+		"fruiting_cells": fruiting_cells,
 		"total_moss": total_moss,
 		"total_fungus": total_fungus,
 		"tick": tick
@@ -194,6 +253,7 @@ func cell_snapshot(x: int, y: int) -> Dictionary:
 		"moss": moss[index],
 		"dead_biomass": dead_biomass[index],
 		"fungus": fungus[index],
+		"fruiting": fruiting[index],
 		"shade": shade[index]
 	}
 

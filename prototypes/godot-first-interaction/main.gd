@@ -17,8 +17,11 @@ var ecology_cells: Array[MeshInstance3D] = []
 var ecology_step_accumulator := 0.0
 var moss_spread_announced := false
 var fungus_announced := false
+var fruiting_announced := false
 var water_doses := 0
 var ration_packs := 0
+var fresh_food := 0
+var hunger := 34.0
 var exposure := 0.0
 var field_time := 0.0
 var scanner_recovered := false
@@ -27,15 +30,36 @@ var discoveries: Array[String] = []
 var patches: Dictionary = {}
 var nearest_patch := ""
 var near_cache := false
+var nearest_harvest_cell := Vector2i(-1, -1)
+var near_refuge := false
+var refuge_position := Vector3(0.35, 0.03, 3.25)
+var refuge_marker: Node3D
+var refuge_revealed := false
 var emergency_cache: MeshInstance3D
 var shade_panel: MeshInstance3D
 var shade_panel_home := Vector3(-5.4, 0.32, 2.7)
 var carrying_shade := false
 var shade_placed := false
 var presence_root: Node3D
+var presence_target := Vector3(0.8, 1.3, -5.45)
+
+var grazer_root: Node3D
+var grazer_body: MeshInstance3D
+var grazer_awake := false
+var grazer_cell := Vector2i.ZERO
+var grazer_target_position := Vector3.ZERO
+var grazer_step_timer := 0.0
+var grazer_failed_to_feed := 0
+
+var disturbance_state := "quiet"
+var disturbance_timer := 0.0
+var disturbance_column := -1
+var dust_front: MeshInstance3D
 
 var water_label: Label
 var exposure_label: Label
+var hunger_label: Label
+var weather_label: Label
 var prompt_label: Label
 var status_label: Label
 var scanner_card: PanelContainer
@@ -52,6 +76,9 @@ func _ready() -> void:
 	_build_astronaut()
 	_build_patches()
 	_build_presence()
+	_build_refuge()
+	_build_grazer()
+	_build_disturbance()
 	_build_interface()
 	_set_status("The crash has stopped. The ship is dead, but an emergency cache still blinks beneath the broken wing.")
 
@@ -62,8 +89,11 @@ func _physics_process(delta: float) -> void:
 	_update_camera()
 	_update_nearby_interactions()
 	_update_exposure(delta)
+	_update_hunger(delta)
 	_update_ecology(delta)
 	_update_ecology_grid(delta)
+	_update_grazer(delta)
+	_update_disturbance(delta)
 	_update_presence()
 	_update_interface()
 
@@ -81,6 +111,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_interact()
 		KEY_Q:
 			_use_water_for_survival()
+		KEY_Z:
+			_eat_food()
 		KEY_R:
 			get_tree().reload_current_scene()
 
@@ -267,6 +299,70 @@ func _build_presence() -> void:
 	presence_root.add_child(glow)
 
 
+func _build_refuge() -> void:
+	refuge_marker = Node3D.new()
+	refuge_marker.name = "PresenceMoistureNudge"
+	refuge_marker.position = refuge_position
+	refuge_marker.visible = false
+	add_child(refuge_marker)
+
+	var ring := MeshInstance3D.new()
+	var ring_mesh := CylinderMesh.new()
+	ring_mesh.top_radius = 0.78
+	ring_mesh.bottom_radius = 0.88
+	ring_mesh.height = 0.035
+	ring_mesh.radial_segments = 48
+	ring.mesh = ring_mesh
+	ring.material_override = _material(Color("3f7180"), 0.45, Color("214957"))
+	refuge_marker.add_child(ring)
+
+	var glow := OmniLight3D.new()
+	glow.position.y = 0.35
+	glow.light_color = Color("68c7d3")
+	glow.light_energy = 1.35
+	glow.omni_range = 2.2
+	refuge_marker.add_child(glow)
+
+
+func _build_grazer() -> void:
+	grazer_cell = ecology.world_to_cell(Vector2(-1.25, 0.15))
+	var world: Vector2 = ecology.world_position(grazer_cell.x, grazer_cell.y)
+	grazer_root = Node3D.new()
+	grazer_root.name = "PrototypeGrazer"
+	grazer_root.position = Vector3(world.x, 0.28, world.y)
+	grazer_target_position = grazer_root.position
+	add_child(grazer_root)
+
+	grazer_body = MeshInstance3D.new()
+	var body_mesh := SphereMesh.new()
+	body_mesh.radius = 0.24
+	body_mesh.height = 0.38
+	grazer_body.mesh = body_mesh
+	grazer_body.scale = Vector3(1.35, 0.62, 0.9)
+	grazer_body.material_override = _material(Color("65665f"), 0.94)
+	grazer_root.add_child(grazer_body)
+
+	var head := MeshInstance3D.new()
+	var head_mesh := SphereMesh.new()
+	head_mesh.radius = 0.13
+	head_mesh.height = 0.22
+	head.mesh = head_mesh
+	head.position = Vector3(0.0, 0.02, -0.27)
+	head.material_override = _material(Color("5b5c56"), 0.9)
+	grazer_root.add_child(head)
+
+
+func _build_disturbance() -> void:
+	dust_front = _create_box(Vector3(-6.0, 1.15, 0.0), Vector3(0.34, 2.3, 8.2), Color("b97845"))
+	dust_front.name = "HeatDustFront"
+	var dust_material := StandardMaterial3D.new()
+	dust_material.albedo_color = Color(0.78, 0.39, 0.16, 0.34)
+	dust_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	dust_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	dust_front.material_override = dust_material
+	dust_front.visible = false
+
+
 func _build_interface() -> void:
 	var canvas := CanvasLayer.new()
 	add_child(canvas)
@@ -284,26 +380,38 @@ func _build_interface() -> void:
 	canvas.add_child(water_label)
 
 	exposure_label = Label.new()
-	exposure_label.position = Vector2(24, 78)
+	exposure_label.position = Vector2(24, 102)
 	exposure_label.add_theme_font_size_override("font_size", 14)
 	exposure_label.add_theme_color_override("font_color", Color("b9c1be"))
 	canvas.add_child(exposure_label)
 
+	hunger_label = Label.new()
+	hunger_label.position = Vector2(24, 78)
+	hunger_label.add_theme_font_size_override("font_size", 14)
+	hunger_label.add_theme_color_override("font_color", Color("d6b986"))
+	canvas.add_child(hunger_label)
+
 	time_label = Label.new()
-	time_label.position = Vector2(24, 102)
+	time_label.position = Vector2(24, 126)
 	time_label.add_theme_font_size_override("font_size", 14)
 	time_label.add_theme_color_override("font_color", Color("8f9b98"))
 	canvas.add_child(time_label)
 
 	ecosystem_label = Label.new()
-	ecosystem_label.position = Vector2(24, 126)
+	ecosystem_label.position = Vector2(24, 150)
 	ecosystem_label.add_theme_font_size_override("font_size", 14)
 	ecosystem_label.add_theme_color_override("font_color", Color("8fc99a"))
 	canvas.add_child(ecosystem_label)
 
+	weather_label = Label.new()
+	weather_label.position = Vector2(24, 174)
+	weather_label.add_theme_font_size_override("font_size", 14)
+	weather_label.add_theme_color_override("font_color", Color("d89662"))
+	canvas.add_child(weather_label)
+
 	var controls := Label.new()
 	controls.position = Vector2(24, 606)
-	controls.text = "WASD / ARROWS  move    E  interact    F  scan    SPACE  water ecology    Q  drink    R  restart"
+	controls.text = "WASD / ARROWS move   E interact/harvest   F scan   SPACE water   Q drink   Z eat   R restart"
 	controls.add_theme_font_size_override("font_size", 14)
 	controls.add_theme_color_override("font_color", Color("aeb7b4"))
 	canvas.add_child(controls)
@@ -414,7 +522,9 @@ func _update_camera() -> void:
 
 func _update_nearby_interactions() -> void:
 	nearest_patch = ""
+	nearest_harvest_cell = Vector2i(-1, -1)
 	near_cache = not cache_opened and _flat_distance(astronaut.global_position, emergency_cache.global_position) < 1.45
+	near_refuge = refuge_revealed and _flat_distance(astronaut.global_position, refuge_position) < 1.5
 	var closest := 1.75
 	for id in patches:
 		var patch: Dictionary = patches[id]
@@ -423,9 +533,25 @@ func _update_nearby_interactions() -> void:
 			closest = distance
 			nearest_patch = id
 
+	var player_world := Vector2(astronaut.global_position.x, astronaut.global_position.z)
+	var player_cell: Vector2i = ecology.world_to_cell(player_world)
+	var fruit_distance := 1.15
+	for y in range(maxi(0, player_cell.y - 1), mini(EcologyGridModel.HEIGHT, player_cell.y + 2)):
+		for x in range(maxi(0, player_cell.x - 1), mini(EcologyGridModel.WIDTH, player_cell.x + 2)):
+			var sample: Dictionary = ecology.cell_snapshot(x, y)
+			if sample["fruiting"] < 0.055:
+				continue
+			var cell_world: Vector2 = ecology.world_position(x, y)
+			var distance := player_world.distance_to(cell_world)
+			if distance < fruit_distance:
+				fruit_distance = distance
+				nearest_harvest_cell = Vector2i(x, y)
+
 	var panel_distance := _flat_distance(astronaut.global_position, shade_panel.global_position)
 	if near_cache:
 		prompt_label.text = "E  open blinking emergency cache"
+	elif nearest_harvest_cell.x >= 0:
+		prompt_label.text = "E  harvest fungal fruiting body     Z  eat carried food"
 	elif not carrying_shade and not shade_placed and panel_distance < 1.55:
 		prompt_label.text = "E  pick up loose shade panel"
 	elif carrying_shade and nearest_patch == "crust":
@@ -435,6 +561,8 @@ func _update_nearby_interactions() -> void:
 			prompt_label.text = "F  scan     SPACE  commit one water dose"
 		else:
 			prompt_label.text = "The film is unusual, but bare eyes reveal little."
+	elif near_refuge:
+		prompt_label.text = "F  scan the bare depression     SPACE  commit water here"
 	elif carrying_shade:
 		prompt_label.text = "Carry the panel to a place where shade might change conditions."
 	elif not scanner_recovered:
@@ -451,6 +579,10 @@ func _update_exposure(delta: float) -> void:
 		exposure = min(100.0, exposure + delta * 0.14)
 	else:
 		exposure = min(100.0, exposure + delta * 0.42)
+
+
+func _update_hunger(delta: float) -> void:
+	hunger = min(100.0, hunger + delta * 0.28)
 
 
 func _update_ecology(delta: float) -> void:
@@ -496,6 +628,94 @@ func _update_ecology_grid(delta: float) -> void:
 			fungus_announced = true
 			_add_discovery("Fungus — awakens in wet dead biomass; releases nutrients")
 			_set_status("Pale violet threads appear beneath older moss. Dead material falls as nearby nutrient readings rise.")
+		if not fruiting_announced and state["fruiting_cells"] >= 2:
+			fruiting_announced = true
+			_add_discovery("Fungal fruiting body — edible; depends on wet nutrient-rich mycelium")
+			_set_status("Amber fruiting bodies rise from the violet network. The scanner marks their tissue as edible.")
+
+
+func _update_grazer(delta: float) -> void:
+	if not grazer_awake:
+		var dormant_state: Dictionary = ecology.summary()
+		if dormant_state["moss_cells"] >= 7 and dormant_state["fungus_cells"] >= 3 and dormant_state["fruiting_cells"] >= 2:
+			grazer_awake = true
+			grazer_body.material_override = _material(Color("88a4a0"), 0.72, Color("263d3a"))
+			_add_discovery("Grazer — wakes above biomass threshold; eats moss and returns nutrients")
+			_set_status("A stone-like shell unfolds into a small grazer. It turns toward the strongest moss signal.")
+			disturbance_state = "warning"
+			disturbance_timer = 14.0
+		return
+
+	grazer_root.position = grazer_root.position.lerp(grazer_target_position, minf(delta * 4.2, 1.0))
+	grazer_step_timer -= delta
+	if grazer_step_timer > 0.0:
+		return
+	grazer_step_timer = 1.05
+
+	var best_cell := grazer_cell
+	var best_score := -1.0
+	for offset in [Vector2i.ZERO, Vector2i(-1, 0), Vector2i(1, 0), Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, -1), Vector2i(1, -1), Vector2i(-1, 1), Vector2i(1, 1)]:
+		var candidate: Vector2i = grazer_cell + offset
+		if candidate.x < 0 or candidate.x >= EcologyGridModel.WIDTH or candidate.y < 0 or candidate.y >= EcologyGridModel.HEIGHT:
+			continue
+		var sample: Dictionary = ecology.cell_snapshot(candidate.x, candidate.y)
+		var score: float = sample["moss"] + sample["fruiting"] * 0.18 - sample["toxicity"] * 0.42
+		if score > best_score:
+			best_score = score
+			best_cell = candidate
+
+	if best_score < 0.015:
+		grazer_failed_to_feed += 1
+		if grazer_failed_to_feed == 4:
+			_set_status("The grazer finds no viable moss. Its movement slows; this ecological trajectory cannot support it.")
+		return
+
+	grazer_failed_to_feed = 0
+	grazer_cell = best_cell
+	var target_world: Vector2 = ecology.world_position(grazer_cell.x, grazer_cell.y)
+	grazer_target_position = Vector3(target_world.x, 0.28, target_world.y)
+	ecology.graze_cell(grazer_cell)
+	_refresh_ecology_visuals()
+
+
+func _update_disturbance(delta: float) -> void:
+	if disturbance_state == "quiet" or disturbance_state == "passed":
+		return
+	if disturbance_state == "warning":
+		disturbance_timer -= delta
+		if disturbance_timer <= 9.0 and not refuge_revealed:
+			_reveal_presence_nudge()
+		if disturbance_timer <= 0.0:
+			disturbance_state = "active"
+			disturbance_timer = 0.0
+			disturbance_column = 0
+			dust_front.visible = true
+			_add_discovery("Heat-and-dust front — dries cells and carries toxicity eastward")
+			_set_status("The heat-and-dust front enters the basin. Living cover slows moisture loss where bare cells cannot.")
+		return
+
+	disturbance_timer += delta
+	var desired_column := mini(int(disturbance_timer / 0.42), EcologyGridModel.WIDTH - 1)
+	while disturbance_column <= desired_column and disturbance_column < EcologyGridModel.WIDTH:
+		ecology.apply_dust_front(disturbance_column)
+		disturbance_column += 1
+		_refresh_ecology_visuals()
+	if disturbance_column < EcologyGridModel.WIDTH:
+		var front_world: Vector2 = ecology.world_position(disturbance_column, int(EcologyGridModel.HEIGHT / 2))
+		dust_front.position.x = front_world.x
+	else:
+		dust_front.visible = false
+		disturbance_state = "passed"
+		_set_status("The front passes. Some bare cells are hot and toxic; connected moss and fungus begin recovering from retained moisture and nutrients.")
+
+
+func _reveal_presence_nudge() -> void:
+	refuge_revealed = true
+	refuge_marker.visible = true
+	ecology.reveal_subsurface_refuge(Vector2(refuge_position.x, refuge_position.z))
+	presence_root.visible = true
+	presence_target = refuge_position + Vector3(0.0, 1.15, 0.0)
+	_set_status("As the wind rises, the Presence leaves the ridge and hovers over an apparently bare depression. It offers no instruction.")
 
 
 func _refresh_ecology_visuals() -> void:
@@ -509,6 +729,7 @@ func _refresh_ecology_visuals() -> void:
 			color = color.lerp(Color("81553d"), clamp(sample["dead_biomass"] * 1.8, 0.0, 0.72))
 			color = color.lerp(Color("4fa45e"), clamp(sample["moss"] * 1.45, 0.0, 0.9))
 			color = color.lerp(Color("c064d3"), clamp(sample["fungus"] * 3.2, 0.0, 0.96))
+			color = color.lerp(Color("efb34f"), clamp(sample["fruiting"] * 4.0, 0.0, 0.98))
 			var material := StandardMaterial3D.new()
 			material.albedo_color = color
 			material.roughness = 0.9
@@ -517,7 +738,9 @@ func _refresh_ecology_visuals() -> void:
 				material.emission = Color("7b2c89") * min(sample["fungus"] * 2.4, 0.85)
 				material.emission_energy_multiplier = 1.15
 			ecology_cells[index].material_override = material
-			if sample["fungus"] >= 0.012:
+			if sample["fruiting"] >= 0.055:
+				ecology_cells[index].position.y = 0.19
+			elif sample["fungus"] >= 0.012:
 				ecology_cells[index].position.y = 0.14
 			elif sample["moss"] >= 0.03 or sample["dead_biomass"] >= 0.035:
 				ecology_cells[index].position.y = 0.105
@@ -528,6 +751,19 @@ func _refresh_ecology_visuals() -> void:
 func _scan_nearby_patch() -> void:
 	if not scanner_recovered:
 		_set_status("The astronaut needs the scientific kit from the emergency cache before local conditions can be compared.")
+		return
+	if near_refuge:
+		var refuge_cell: Dictionary = ecology.sample_world(Vector2(refuge_position.x, refuge_position.z))
+		scanner_title.text = "FIELD SCANNER  /  BARE DEPRESSION"
+		scanner_readout.text = (
+			"SUBSURFACE MOISTURE  %02d%%\n" % roundi(refuge_cell["moisture"] * 100.0)
+			+ "SURFACE             %d C\n" % roundi(-8.0 + refuge_cell["temperature"] * 66.0)
+			+ "TOXICITY            %02d%%\n" % roundi(refuge_cell["toxicity"] * 100.0)
+			+ "DORMANT BIO TRACE   %02d%%\n\n" % roundi(refuge_cell["dormant_moss"] * 100.0)
+			+ "The Presence indicated this place, not an action."
+		)
+		_add_discovery("Subsurface refuge — moist, cooler, dormant trace present")
+		_set_status("The bare depression hides moisture below the scanner's normal surface range. The Presence waits without instructing.")
 		return
 	if nearest_patch == "":
 		_set_status("The scanner finds no local biological trace. Move closer to an unusual surface.")
@@ -541,10 +777,11 @@ func _scan_nearby_patch() -> void:
 	var moisture_percent := roundi(cell["moisture"] * 100.0)
 	var surface_celsius := roundi(-8.0 + cell["temperature"] * 66.0)
 	var toxicity_percent := roundi(cell["toxicity"] * 100.0)
-	var cell_life := "MOSS %02d%%   DEAD %02d%%   FUNGUS %02d%%" % [
+	var cell_life := "MOSS %02d%%  DEAD %02d%%  FUNGUS %02d%%  FRUIT %02d%%" % [
 		roundi(cell["moss"] * 100.0),
 		roundi(cell["dead_biomass"] * 100.0),
-		roundi(cell["fungus"] * 100.0)
+		roundi(cell["fungus"] * 100.0),
+		roundi(cell["fruiting"] * 100.0)
 	]
 	if nearest_patch == "hollow":
 		_add_discovery("Dormant moss analogue — sheltered trace")
@@ -583,6 +820,14 @@ func _water_nearby_patch() -> void:
 	if not cache_opened:
 		_set_status("No usable water is on hand. The blinking emergency cache may still be intact.")
 		return
+	if near_refuge:
+		if water_doses <= 0:
+			_set_status("No water remains to test the Presence's indicated refuge.")
+			return
+		water_doses -= 1
+		ecology.add_water(Vector2(refuge_position.x, refuge_position.z), 0.72, 1.4)
+		_set_status("Water sinks into the bare depression instead of flashing away. The Presence watches the cells, not the astronaut.")
+		return
 	if nearest_patch == "":
 		_set_status("Water must be committed at a specific patch, not poured from a distance.")
 		return
@@ -611,7 +856,21 @@ func _interact() -> void:
 	if near_cache:
 		_open_emergency_cache()
 		return
+	if nearest_harvest_cell.x >= 0:
+		_harvest_fruiting()
+		return
 	_interact_with_shade()
+
+
+func _harvest_fruiting() -> void:
+	var world: Vector2 = ecology.world_position(nearest_harvest_cell.x, nearest_harvest_cell.y)
+	var harvested: int = ecology.harvest_world(world)
+	if harvested <= 0:
+		_set_status("The fruiting body is not mature enough to harvest.")
+		return
+	fresh_food += harvested
+	_refresh_ecology_visuals()
+	_set_status("The astronaut harvests one fresh fungal fruit. The cell loses some fungus and nutrients; repeated harvests could break the cycle.")
 
 
 func _open_emergency_cache() -> void:
@@ -646,6 +905,23 @@ func _use_water_for_survival() -> void:
 	_set_status("One shared water dose becomes personal survival margin. The ecosystem now has fewer possible interventions.")
 
 
+func _eat_food() -> void:
+	if hunger < 9.0:
+		_set_status("The astronaut is not hungry enough to justify consuming food.")
+		return
+	if fresh_food > 0:
+		fresh_food -= 1
+		hunger = max(0.0, hunger - 34.0)
+		_set_status("The first renewable food replaces a finite ration. Its ecological source must remain healthy to feed the astronaut again.")
+		return
+	if ration_packs > 0:
+		ration_packs -= 1
+		hunger = max(0.0, hunger - 42.0)
+		_set_status("A finite ration buys time but creates no living replacement.")
+		return
+	_set_status("No carried food remains. The ecosystem is now the only path to another meal.")
+
+
 func _interact_with_shade() -> void:
 	if carrying_shade and nearest_patch == "crust":
 		carrying_shade = false
@@ -671,7 +947,7 @@ func _interact_with_shade() -> void:
 
 func _update_interface() -> void:
 	if cache_opened:
-		water_label.text = "WATER  %d / 3 shared doses     RATIONS  %d" % [water_doses, ration_packs]
+		water_label.text = "WATER %d     RATIONS %d     FRESH FOOD %d" % [water_doses, ration_packs, fresh_food]
 	else:
 		water_label.text = "SUPPLIES  — emergency cache sealed"
 	var exposure_state := "grace period"
@@ -682,12 +958,27 @@ func _update_interface() -> void:
 	if _near_thriving_moss():
 		exposure_state = "moss microclimate slows exposure"
 	exposure_label.text = "SUIT EXPOSURE  %02d%%  /  %s" % [roundi(exposure), exposure_state]
+	var hunger_state := "fed"
+	if hunger >= 45.0:
+		hunger_state = "meal needed soon"
+	if hunger >= 75.0:
+		hunger_state = "survival pressure"
+	hunger_label.text = "HUNGER  %02d%%  /  %s" % [roundi(hunger), hunger_state]
 	var field_seconds := int(field_time * 12.0)
 	time_label.text = "FIELD TIME  %02d:%02d  /  ecological response accelerated" % [field_seconds / 60, field_seconds % 60]
 	var ecosystem: Dictionary = ecology.summary()
-	ecosystem_label.text = "ECOLOGICAL CELLS  moss %d     fungus %d     dead biomass %d     tick %d" % [
-		ecosystem["moss_cells"], ecosystem["fungus_cells"], ecosystem["dead_cells"], ecosystem["tick"]
+	ecosystem_label.text = "CELLS  moss %d  fungus %d  fruit %d  dead %d   GRAZER %s   tick %d" % [
+		ecosystem["moss_cells"], ecosystem["fungus_cells"], ecosystem["fruiting_cells"], ecosystem["dead_cells"], "awake" if grazer_awake else "dormant", ecosystem["tick"]
 	]
+	match disturbance_state:
+		"quiet":
+			weather_label.text = "WEATHER  still / no active disturbance"
+		"warning":
+			weather_label.text = "WEATHER  heat-and-dust front approaching in %02ds" % ceili(disturbance_timer)
+		"active":
+			weather_label.text = "WEATHER  HEAT-AND-DUST FRONT crossing basin"
+		_:
+			weather_label.text = "WEATHER  front passed / recovery in progress"
 
 
 func _scanner_consequence_text(patch: Dictionary) -> String:
@@ -795,8 +1086,11 @@ func _update_discovery_readout() -> void:
 		discovery_readout.text = "DISCOVERY RECORD\n— no species or relationships catalogued —"
 		return
 	var lines: Array[String] = ["DISCOVERY RECORD"]
-	for entry in discoveries:
-		lines.append("• " + entry)
+	var start := maxi(0, discoveries.size() - 6)
+	if start > 0:
+		lines.append("• … %d earlier records" % start)
+	for index in range(start, discoveries.size()):
+		lines.append("• " + discoveries[index])
 	discovery_readout.text = "\n".join(lines)
 
 
@@ -804,7 +1098,9 @@ func _update_presence() -> void:
 	if not presence_root.visible:
 		return
 	var pulse := Time.get_ticks_msec() / 520.0
-	presence_root.position.y = 1.3 + sin(pulse) * 0.13
+	var drift_target := Vector3(presence_target.x, presence_root.position.y, presence_target.z)
+	presence_root.position = presence_root.position.lerp(drift_target, 0.025)
+	presence_root.position.y = presence_target.y + sin(pulse) * 0.13
 
 
 func _create_box(position: Vector3, size: Vector3, color: Color, rotation := Vector3.ZERO) -> MeshInstance3D:

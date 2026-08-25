@@ -14,9 +14,11 @@ Open `project.godot` in Godot 4.6 and press **F6/F5**, or run:
 
 - **WASD / arrow keys** — move
 - **E** — open the emergency cache, then pick up or place the loose shade panel
+- **E** — harvest when standing beside a mature fungal fruiting cell
 - **F** — scan a nearby moss patch
 - **Space** — spend one water dose on a nearby moss patch
 - **Q** — spend one water dose on the astronaut when exposure is meaningful
+- **Z** — eat carried fresh food first, otherwise a finite ration
 - **R** — restart the experiment
 
 ## Question under test
@@ -34,4 +36,14 @@ The visible square cells now carry provisional moisture, temperature, toxicity, 
 - Moss stress and ordinary turnover create dead biomass.
 - Fungus awakens where dead biomass remains wet, spreads locally, decomposes it into nutrients, and slightly reduces toxicity.
 
-Cell color is the readable prototype overlay: blue-green indicates moisture, green living moss, brown dead biomass, and violet fungus. The Field Scanner exposes the precise local values while the top-left summary shows the system-wide cell counts.
+Cell color is the readable prototype overlay: blue-green indicates moisture, green living moss, brown dead biomass, violet fungus, and gold edible fruiting bodies. The Field Scanner exposes the precise local values while the top-left summary shows the system-wide cell counts.
+
+## Expanded ecological arc
+
+- Wet, nutrient-rich fungus produces harvestable fruiting bodies. Harvest removes some fungus and nutrients, so repeated harvesting can damage the food source.
+- Hunger creates a provisional survival reason to replace finite rations with renewable food.
+- A simple agent-based grazer awakens when moss, fungus, and fruiting biomass cross thresholds. It moves toward nearby moss, consumes it, and returns some nutrients and dead biomass to the cells.
+- Grazer awakening starts a warning for a moving heat-and-dust front. The front dries cells, raises heat and toxicity, and converts damaged moss to dead biomass; established living cover reduces the damage.
+- During the warning, the Presence moves from the ridge to a bare depression and exposes a subsurface-moisture signal. This is a directional nudge, not an instruction: the player can scan, ignore, or spend water there.
+
+All thresholds, meters, timings, yields, and weather damage values are accelerated prototype fixtures rather than balance decisions.
