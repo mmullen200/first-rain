@@ -20,6 +20,14 @@ _Avoid_: Tile, pixel
 A deliberate action by the astronaut intended to alter the ecosystem and reveal how it responds.
 _Avoid_: Spell, command
 
+**Field Scanner**:
+The astronaut's damaged scientific device, used to measure a limited set of local environmental properties, record discovered species and substances, and build an ecological map. Its readings may be incomplete, coarse, or visibly uncertain, but it does not secretly provide false information.
+_Avoid_: Journal, codex, omniscient scanner
+
+**Field Experiment**:
+A repeatable passage from noticing an ecological opportunity or problem through local inspection, hypothesis, situated intervention, observation, interpretation, and adaptation. It concludes with a meaningful change in ecological understanding or capability rather than a declared quest result.
+_Avoid_: Quest, recipe, minigame
+
 **Presence**:
 The planet's localized, non-corporeal manifestation, provisionally perceived as a floating flame, which becomes the astronaut's alien co-investigator.
 _Avoid_: Spirit, guide, companion
