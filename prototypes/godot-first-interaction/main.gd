@@ -10,10 +10,17 @@ const WORLD_Z := 6.2
 
 var astronaut: CharacterBody3D
 var camera: Camera3D
-var water_doses := 3
+var water_doses := 0
+var ration_packs := 0
 var exposure := 0.0
+var field_time := 0.0
+var scanner_recovered := false
+var cache_opened := false
+var discoveries: Array[String] = []
 var patches: Dictionary = {}
 var nearest_patch := ""
+var near_cache := false
+var emergency_cache: MeshInstance3D
 var shade_panel: MeshInstance3D
 var shade_panel_home := Vector3(-5.4, 0.32, 2.7)
 var carrying_shade := false
@@ -27,6 +34,8 @@ var status_label: Label
 var scanner_card: PanelContainer
 var scanner_title: Label
 var scanner_readout: Label
+var discovery_readout: Label
+var time_label: Label
 
 
 func _ready() -> void:
@@ -35,15 +44,17 @@ func _ready() -> void:
 	_build_patches()
 	_build_presence()
 	_build_interface()
-	_set_status("Nothing here looks alive. Two mineral films catch the light differently.")
+	_set_status("The crash has stopped. The ship is dead, but an emergency cache still blinks beneath the broken wing.")
 
 
 func _physics_process(delta: float) -> void:
+	field_time += delta
 	_move_astronaut(delta)
 	_update_camera()
 	_update_nearby_interactions()
 	_update_exposure(delta)
 	_update_ecology(delta)
+	_update_presence()
 	_update_interface()
 
 
@@ -57,7 +68,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		KEY_SPACE:
 			_water_nearby_patch()
 		KEY_E:
-			_interact_with_shade()
+			_interact()
+		KEY_Q:
+			_use_water_for_survival()
 		KEY_R:
 			get_tree().reload_current_scene()
 
@@ -102,6 +115,16 @@ func _build_world() -> void:
 	_create_box(Vector3(-5.8, 0.55, -3.7), Vector3(3.6, 1.05, 1.65), Color("697276"), Vector3(0.0, 0.28, 0.0))
 	_create_box(Vector3(-4.3, 0.28, -2.6), Vector3(4.7, 0.13, 1.2), Color("879095"), Vector3(0.0, -0.24, 0.05))
 	_create_box(Vector3(-6.1, 1.15, -3.55), Vector3(1.25, 0.52, 1.1), Color("29343b"), Vector3(0.0, 0.28, 0.0))
+	emergency_cache = _create_box(Vector3(-5.15, 0.24, -1.72), Vector3(0.9, 0.45, 0.62), Color("8e7048"), Vector3(0.0, 0.16, 0.0))
+	emergency_cache.name = "EmergencyCache"
+	var cache_light := OmniLight3D.new()
+	cache_light.name = "CacheBeacon"
+	cache_light.position = Vector3(-5.15, 0.62, -1.72)
+	cache_light.light_color = Color("e7a34f")
+	cache_light.light_energy = 1.5
+	cache_light.omni_range = 1.35
+	add_child(cache_light)
+	_create_world_label("EMERGENCY CACHE", Vector3(-5.15, 0.68, -1.72), Color("ffd18b"), 0.0055)
 
 	# The sheltered hollow reads through shade, darker ground, and surrounding stones.
 	_create_box(Vector3(-2.8, 1.25, -1.55), Vector3(3.2, 0.16, 1.55), Color("555b59"), Vector3(0.0, -0.18, -0.08))
@@ -221,7 +244,7 @@ func _build_interface() -> void:
 
 	var title := Label.new()
 	title.position = Vector2(24, 18)
-	title.text = "FIRST RAIN  /  THROWAWAY FIRST INTERACTION"
+	title.text = "FIRST RAIN  /  THROWAWAY OPENING SLICE"
 	title.add_theme_font_size_override("font_size", 15)
 	title.add_theme_color_override("font_color", Color("e9b36e"))
 	canvas.add_child(title)
@@ -237,9 +260,15 @@ func _build_interface() -> void:
 	exposure_label.add_theme_color_override("font_color", Color("b9c1be"))
 	canvas.add_child(exposure_label)
 
+	time_label = Label.new()
+	time_label.position = Vector2(24, 102)
+	time_label.add_theme_font_size_override("font_size", 14)
+	time_label.add_theme_color_override("font_color", Color("8f9b98"))
+	canvas.add_child(time_label)
+
 	var controls := Label.new()
 	controls.position = Vector2(24, 606)
-	controls.text = "WASD / ARROWS  move     F  scan     SPACE  water     E  handle panel     R  restart"
+	controls.text = "WASD / ARROWS  move    E  interact    F  scan    SPACE  water ecology    Q  drink    R  restart"
 	controls.add_theme_font_size_override("font_size", 14)
 	controls.add_theme_color_override("font_color", Color("aeb7b4"))
 	canvas.add_child(controls)
@@ -260,7 +289,7 @@ func _build_interface() -> void:
 
 	scanner_card = PanelContainer.new()
 	scanner_card.position = Vector2(765, 24)
-	scanner_card.size = Vector2(360, 218)
+	scanner_card.size = Vector2(360, 340)
 	var card_style := StyleBoxFlat.new()
 	card_style.bg_color = Color(0.055, 0.09, 0.095, 0.94)
 	card_style.border_color = Color("6f8079")
@@ -284,20 +313,30 @@ func _build_interface() -> void:
 	margin.add_child(stack)
 
 	scanner_title = Label.new()
-	scanner_title.text = "CRACKED FIELD SCANNER"
+	scanner_title.text = "FIELD SCANNER  /  NOT RECOVERED"
 	scanner_title.add_theme_font_size_override("font_size", 16)
 	scanner_title.add_theme_color_override("font_color", Color("83d1b2"))
 	stack.add_child(scanner_title)
 
 	scanner_readout = Label.new()
-	scanner_readout.text = "NO LOCAL SAMPLE\n\nMove close to an unusual surface and press F."
+	scanner_readout.text = "NO DEVICE LINK\n\nThe astronaut's scientific kit was thrown into the emergency cache during impact."
 	scanner_readout.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	scanner_readout.add_theme_font_size_override("font_size", 14)
 	scanner_readout.add_theme_color_override("font_color", Color("c4d4cd"))
 	stack.add_child(scanner_readout)
 
+	var separator := HSeparator.new()
+	stack.add_child(separator)
+
+	discovery_readout = Label.new()
+	discovery_readout.text = "DISCOVERY RECORD\n— unavailable —"
+	discovery_readout.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	discovery_readout.add_theme_font_size_override("font_size", 13)
+	discovery_readout.add_theme_color_override("font_color", Color("8fa99e"))
+	stack.add_child(discovery_readout)
+
 	# A visible crack makes the instrument's damage legible without corrupting readings.
-	for crack_data in [[Vector2(1015, 29), Vector2(2, 202), 0.43], [Vector2(1055, 86), Vector2(2, 105), -0.72]]:
+	for crack_data in [[Vector2(1015, 29), Vector2(2, 310), 0.43], [Vector2(1055, 86), Vector2(2, 210), -0.72]]:
 		var crack := ColorRect.new()
 		crack.position = crack_data[0]
 		crack.size = crack_data[1]
@@ -340,6 +379,7 @@ func _update_camera() -> void:
 
 func _update_nearby_interactions() -> void:
 	nearest_patch = ""
+	near_cache = not cache_opened and _flat_distance(astronaut.global_position, emergency_cache.global_position) < 1.45
 	var closest := 1.75
 	for id in patches:
 		var patch: Dictionary = patches[id]
@@ -349,14 +389,21 @@ func _update_nearby_interactions() -> void:
 			nearest_patch = id
 
 	var panel_distance := _flat_distance(astronaut.global_position, shade_panel.global_position)
-	if not carrying_shade and not shade_placed and panel_distance < 1.55:
+	if near_cache:
+		prompt_label.text = "E  open blinking emergency cache"
+	elif not carrying_shade and not shade_placed and panel_distance < 1.55:
 		prompt_label.text = "E  pick up loose shade panel"
 	elif carrying_shade and nearest_patch == "crust":
 		prompt_label.text = "F  scan     SPACE  water     E  place shade panel"
 	elif nearest_patch != "":
-		prompt_label.text = "F  scan     SPACE  commit one water dose"
+		if scanner_recovered:
+			prompt_label.text = "F  scan     SPACE  commit one water dose"
+		else:
+			prompt_label.text = "The film is unusual, but bare eyes reveal little."
 	elif carrying_shade:
 		prompt_label.text = "Carry the panel to a place where shade might change conditions."
+	elif not scanner_recovered:
+		prompt_label.text = "The wreck's blinking cache may contain usable instruments."
 	else:
 		prompt_label.text = "Look for surfaces that seem almost—but not quite—alive."
 
@@ -365,6 +412,8 @@ func _update_exposure(delta: float) -> void:
 	var at_wreck := _flat_distance(astronaut.global_position, Vector3(-5.4, 0.0, -3.1)) < 2.55
 	if at_wreck:
 		exposure = max(0.0, exposure - delta * 2.4)
+	elif _near_thriving_moss():
+		exposure = min(100.0, exposure + delta * 0.14)
 	else:
 		exposure = min(100.0, exposure + delta * 0.42)
 
@@ -390,12 +439,17 @@ func _update_ecology(delta: float) -> void:
 		elif patch["shade"] and patch["state"] == "awakening" and patch["age"] >= 4.0:
 			patch["state"] = "thriving"
 			_set_patch_color(id, Color("62b56f"), Color("347841"))
+			_add_moisture_halo(id)
+			_add_discovery("Moss analogue — active; retains local moisture")
 			if nearest_patch == id:
-				_set_status("The moss holds a living sheen. Nearby ground is visibly darker and cooler. Something watches from the ridge.")
-		presence_root.visible = true
+				_set_status("The moss holds a living sheen. The scanner adds its first living record. Something watches from the ridge.")
+			presence_root.visible = true
 
 
 func _scan_nearby_patch() -> void:
+	if not scanner_recovered:
+		_set_status("The astronaut needs the scientific kit from the emergency cache before local conditions can be compared.")
+		return
 	if nearest_patch == "":
 		_set_status("The scanner finds no local biological trace. Move closer to an unusual surface.")
 		return
@@ -404,6 +458,7 @@ func _scan_nearby_patch() -> void:
 	patch["scanned"] = true
 	var state_text: String = patch["state"].to_upper()
 	if nearest_patch == "hollow":
+		_add_discovery("Dormant moss analogue — sheltered trace")
 		scanner_title.text = "FIELD SCANNER  /  SHELTERED FILM"
 		scanner_readout.text = (
 			"BIO TRACE     %s\n" % state_text
@@ -414,6 +469,7 @@ func _scan_nearby_patch() -> void:
 		)
 		_set_status("The cracked screen cannot name the organism, but the hollow retains moisture and stays cool.")
 	else:
+		_add_discovery("Dormant moss analogue — exposed trace")
 		scanner_title.text = "FIELD SCANNER  /  SUN-STRUCK FILM"
 		var heat_text := "46 C / direct heat" if not patch["shade"] else "24 C / falling under shade"
 		var toxicity_text := "high amber band" if patch["state"] == "failed" else "amber band / rises with heat"
@@ -425,14 +481,19 @@ func _scan_nearby_patch() -> void:
 			+ _scanner_consequence_text(patch)
 		)
 		if patch["state"] == "failed":
+			_add_discovery("Amber toxicity — increases with surface heat")
 			_set_status("The failed patch is evidence: water vanished as surface heat and the toxicity band rose together.")
 		elif patch["shade"]:
+			_add_discovery("Shade — lowers heat and slows moisture loss")
 			_set_status("The panel changed two readings at once: heat falls and moisture loss slows.")
 		else:
 			_set_status("This film resembles the sheltered trace, but heat, moisture, and toxicity differ sharply.")
 
 
 func _water_nearby_patch() -> void:
+	if not cache_opened:
+		_set_status("No usable water is on hand. The blinking emergency cache may still be intact.")
+		return
 	if nearest_patch == "":
 		_set_status("Water must be committed at a specific patch, not poured from a distance.")
 		return
@@ -453,6 +514,45 @@ func _water_nearby_patch() -> void:
 		_set_status("The film darkens with a dry crackle. Water remains pooled between its cells.")
 	else:
 		_set_status("The film darkens—but water beads, hisses, and starts flashing away in the heat.")
+
+
+func _interact() -> void:
+	if near_cache:
+		_open_emergency_cache()
+		return
+	_interact_with_shade()
+
+
+func _open_emergency_cache() -> void:
+	if cache_opened:
+		return
+	cache_opened = true
+	scanner_recovered = true
+	water_doses = 3
+	ration_packs = 2
+	emergency_cache.material_override = _material(Color("4e483e"), 0.92)
+	var beacon := get_node_or_null("CacheBeacon") as OmniLight3D
+	if beacon != null:
+		beacon.light_energy = 0.18
+	scanner_title.text = "CRACKED FIELD SCANNER  /  ONLINE"
+	scanner_readout.text = "NO LOCAL SAMPLE\n\nSensor status: moisture and temperature available; toxicity confidence degraded."
+	_update_discovery_readout()
+	_set_status("The cache holds a cracked Field Scanner, three water doses, and two ration packs. Water is both survival margin and ecological possibility.")
+
+
+func _use_water_for_survival() -> void:
+	if not cache_opened:
+		_set_status("The astronaut's personal water remains locked in the emergency cache.")
+		return
+	if water_doses <= 0:
+		_set_status("No water remains for the astronaut or the ecosystem.")
+		return
+	if exposure < 8.0:
+		_set_status("Suit reserves are still comfortable. Drinking now would spend ecological possibility for little gain.")
+		return
+	water_doses -= 1
+	exposure = max(0.0, exposure - 32.0)
+	_set_status("One shared water dose becomes personal survival margin. The ecosystem now has fewer possible interventions.")
 
 
 func _interact_with_shade() -> void:
@@ -477,13 +577,20 @@ func _interact_with_shade() -> void:
 
 
 func _update_interface() -> void:
-	water_label.text = "WATER  %d / 3 shared doses" % water_doses
+	if cache_opened:
+		water_label.text = "WATER  %d / 3 shared doses     RATIONS  %d" % [water_doses, ration_packs]
+	else:
+		water_label.text = "SUPPLIES  — emergency cache sealed"
 	var exposure_state := "grace period"
 	if exposure >= 22.0:
 		exposure_state = "noticeable"
 	if exposure >= 55.0:
 		exposure_state = "return to shelter soon"
+	if _near_thriving_moss():
+		exposure_state = "moss microclimate slows exposure"
 	exposure_label.text = "SUIT EXPOSURE  %02d%%  /  %s" % [roundi(exposure), exposure_state]
+	var field_seconds := int(field_time * 12.0)
+	time_label.text = "FIELD TIME  %02d:%02d  /  ecological response accelerated" % [field_seconds / 60, field_seconds % 60]
 
 
 func _scanner_consequence_text(patch: Dictionary) -> String:
@@ -524,7 +631,8 @@ func _create_patch(id: String, label_text: String, position: Vector3, color: Col
 		"age": 0.0,
 		"shade": shade,
 		"scanned": false,
-		"sprouts": false
+		"sprouts": false,
+		"halo": false
 	}
 
 
@@ -549,6 +657,57 @@ func _add_sprouts(id: String) -> void:
 		var radius := 0.18 + float(index % 4) * 0.18
 		sprout.position = Vector3(cos(angle) * radius, 0.09, sin(angle) * radius)
 		patch["node"].add_child(sprout)
+
+
+func _add_moisture_halo(id: String) -> void:
+	var patch: Dictionary = patches[id]
+	if patch["halo"]:
+		return
+	patch["halo"] = true
+	var halo := MeshInstance3D.new()
+	var mesh := CylinderMesh.new()
+	mesh.top_radius = 1.48
+	mesh.bottom_radius = 1.55
+	mesh.height = 0.025
+	mesh.radial_segments = 48
+	halo.mesh = mesh
+	var halo_material := StandardMaterial3D.new()
+	halo_material.albedo_color = Color(0.12, 0.34, 0.3, 0.48)
+	halo_material.roughness = 0.68
+	halo_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	halo.material_override = halo_material
+	halo.position.y = -0.012
+	patch["node"].add_child(halo)
+	patch["node"].move_child(halo, 0)
+
+
+func _add_discovery(entry: String) -> void:
+	if entry in discoveries:
+		return
+	discoveries.append(entry)
+	_update_discovery_readout()
+
+
+func _update_discovery_readout() -> void:
+	if discovery_readout == null:
+		return
+	if not scanner_recovered:
+		discovery_readout.text = "DISCOVERY RECORD\n— unavailable —"
+		return
+	if discoveries.is_empty():
+		discovery_readout.text = "DISCOVERY RECORD\n— no species or relationships catalogued —"
+		return
+	var lines: Array[String] = ["DISCOVERY RECORD"]
+	for entry in discoveries:
+		lines.append("• " + entry)
+	discovery_readout.text = "\n".join(lines)
+
+
+func _update_presence() -> void:
+	if not presence_root.visible:
+		return
+	var pulse := Time.get_ticks_msec() / 520.0
+	presence_root.position.y = 1.3 + sin(pulse) * 0.13
 
 
 func _create_box(position: Vector3, size: Vector3, color: Color, rotation := Vector3.ZERO) -> MeshInstance3D:
@@ -615,6 +774,14 @@ func _material(color: Color, roughness: float, emission := Color(0.0, 0.0, 0.0, 
 func _set_status(message: String) -> void:
 	if status_label != null:
 		status_label.text = message
+
+
+func _near_thriving_moss() -> bool:
+	for id in patches:
+		var patch: Dictionary = patches[id]
+		if patch["state"] == "thriving" and _flat_distance(astronaut.global_position, patch["node"].global_position) < 2.25:
+			return true
+	return false
 
 
 func _flat_distance(a: Vector3, b: Vector3) -> float:
