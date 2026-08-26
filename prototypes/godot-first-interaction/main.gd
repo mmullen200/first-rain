@@ -46,6 +46,9 @@ var presence_target := Vector3(0.8, 1.3, -5.45)
 
 var grazer_root: Node3D
 var grazer_body: MeshInstance3D
+var grazer_head: MeshInstance3D
+var grazer_label: Label3D
+var grazer_glow: OmniLight3D
 var grazer_awake := false
 var grazer_cell := Vector2i.ZERO
 var grazer_target_position := Vector3.ZERO
@@ -346,14 +349,33 @@ func _build_grazer() -> void:
 	grazer_body.material_override = _material(Color("65665f"), 0.94)
 	grazer_root.add_child(grazer_body)
 
-	var head := MeshInstance3D.new()
+	grazer_head = MeshInstance3D.new()
 	var head_mesh := SphereMesh.new()
-	head_mesh.radius = 0.13
-	head_mesh.height = 0.22
-	head.mesh = head_mesh
-	head.position = Vector3(0.0, 0.02, -0.27)
-	head.material_override = _material(Color("5b5c56"), 0.9)
-	grazer_root.add_child(head)
+	head_mesh.radius = 0.15
+	head_mesh.height = 0.25
+	grazer_head.mesh = head_mesh
+	grazer_head.position = Vector3(0.0, 0.02, -0.3)
+	grazer_head.material_override = _material(Color("5b5c56"), 0.9)
+	grazer_root.add_child(grazer_head)
+
+	grazer_label = Label3D.new()
+	grazer_label.text = "GRAZER"
+	grazer_label.position = Vector3(0.0, 0.68, 0.0)
+	grazer_label.font_size = 30
+	grazer_label.pixel_size = 0.0045
+	grazer_label.modulate = Color("9ee8d8")
+	grazer_label.outline_size = 8
+	grazer_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	grazer_label.visible = false
+	grazer_root.add_child(grazer_label)
+
+	grazer_glow = OmniLight3D.new()
+	grazer_glow.position.y = 0.35
+	grazer_glow.light_color = Color("65d6c0")
+	grazer_glow.light_energy = 0.8
+	grazer_glow.omni_range = 1.35
+	grazer_glow.visible = false
+	grazer_root.add_child(grazer_glow)
 
 
 func _build_disturbance() -> void:
@@ -646,7 +668,11 @@ func _update_grazer(delta: float) -> void:
 		var dormant_state: Dictionary = ecology.summary()
 		if dormant_state["moss_cells"] >= 7 and dormant_state["fungus_cells"] >= 3 and dormant_state["fruiting_cells"] >= 2:
 			grazer_awake = true
-			grazer_body.material_override = _material(Color("88a4a0"), 0.72, Color("263d3a"))
+			grazer_root.scale = Vector3.ONE * 1.35
+			grazer_body.material_override = _material(Color("76d2bd"), 0.58, Color("237563"))
+			grazer_head.material_override = _material(Color("f2c36d"), 0.48, Color("8f571c"))
+			grazer_label.visible = true
+			grazer_glow.visible = true
 			_add_discovery("Grazer — wakes above biomass threshold; eats moss and returns nutrients")
 			_set_status("A stone-like shell unfolds into a small grazer. It turns toward the strongest moss signal.")
 			disturbance_state = "warning"
@@ -672,17 +698,36 @@ func _update_grazer(delta: float) -> void:
 			best_cell = candidate
 
 	if best_score < 0.015:
-		grazer_failed_to_feed += 1
-		if grazer_failed_to_feed == 4:
-			_set_status("The grazer finds no viable moss. Its movement slows; this ecological trajectory cannot support it.")
-		return
+		var scent_cell := _strongest_grazer_food_cell()
+		if scent_cell != grazer_cell:
+			best_cell = grazer_cell + Vector2i(signi(scent_cell.x - grazer_cell.x), signi(scent_cell.y - grazer_cell.y))
+		else:
+			grazer_failed_to_feed += 1
+			if grazer_failed_to_feed == 4:
+				_set_status("The grazer finds no viable moss. Its movement slows; this ecological trajectory cannot support it.")
+			return
 
 	grazer_failed_to_feed = 0
 	grazer_cell = best_cell
 	var target_world: Vector2 = ecology.world_position(grazer_cell.x, grazer_cell.y)
 	grazer_target_position = Vector3(target_world.x, 0.28, target_world.y)
+	if grazer_root.position.distance_to(grazer_target_position) > 0.01:
+		grazer_root.look_at(grazer_target_position, Vector3.UP)
 	ecology.graze_cell(grazer_cell)
 	_refresh_ecology_visuals()
+
+
+func _strongest_grazer_food_cell() -> Vector2i:
+	var strongest_cell := grazer_cell
+	var strongest_score := 0.015
+	for y in range(EcologyGridModel.HEIGHT):
+		for x in range(EcologyGridModel.WIDTH):
+			var sample: Dictionary = ecology.cell_snapshot(x, y)
+			var score: float = sample["moss"] + sample["fruiting"] * 0.18 - sample["toxicity"] * 0.42
+			if score > strongest_score:
+				strongest_score = score
+				strongest_cell = Vector2i(x, y)
+	return strongest_cell
 
 
 func _update_disturbance(delta: float) -> void:
