@@ -68,6 +68,18 @@ _Avoid_: Victory garden, completed biome
 The movement of finite usable material through soil minerals, living organisms, detritus, decomposition, grazing, and manure so that growth can reuse it in new places.
 _Avoid_: Resource generator, fertility meter
 
+**Biological water retention**:
+The capacity of living matter such as moss to hold recently supplied water and keep its immediate habitat damp after exposed ground would have dried.
+_Avoid_: Permanent water source, infinite moisture
+
+**Reservoir**:
+A terrain-bound store of water that persists across ordinary dry periods and can supply nearby ecological cells without consuming the astronaut's wreck supplies.
+_Avoid_: Water pickup, moisture bonus, permanent watering spot
+
+**Ecosystem engineer**:
+An animal whose ordinary behavior physically reshapes habitat, such as impounding water with gathered material, and thereby changes conditions for many other species.
+_Avoid_: Builder unit, helper animal, scripted unlock
+
 **Detritus**:
 Dead organic material that retains nutrients and can be consumed by decomposers rather than disappearing from the ecosystem.
 _Avoid_: Waste, generic debris, dead mass
