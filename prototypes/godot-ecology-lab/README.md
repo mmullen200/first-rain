@@ -12,7 +12,14 @@ It intentionally replaces the first-interaction prototype's authored milestones 
 - a hungry grazer moves moss into its gut, roams while digesting, then deposits the same nutrients elsewhere as manure;
 - water and independent dry pulses change conditions but do not create or delete tracked nutrients.
 
-The right panel exposes every aggregate stock, the transfers during the latest tick, cumulative manure deposits, the most recent deposit, and unexplained nutrient drift. Gold rings remain on deposit cells long enough to inspect before fading; they are visual evidence, not an additional nutrient stock. A green zero-drift readout is the model's conservation check.
+The right panel exposes every aggregate stock, transfers accumulated across the last 50 ticks, cumulative manure deposits, the most recent deposit, and unexplained nutrient drift. Separate graphs show living biomass and the share of nutrients held in minerals versus detritus. Gold rings remain on deposit cells long enough to inspect before fading; they are visual evidence, not an additional nutrient stock. A green zero-drift readout is the model's conservation check.
+
+The two scenarios have different persistence targets:
+
+- **Dormant oasis:** one finite watering can wake a temporary ecology, but it eventually dries unless water returns.
+- **Established seep:** a durable subsurface water supply tests whether the biological nutrient cycle can persist and recover without consuming wreck supplies.
+
+Both scenario buttons start paused at `1×` in the combined view so their initial state can be inspected before time advances.
 
 ## Run
 
@@ -27,9 +34,9 @@ The right panel exposes every aggregate stock, the transfers during the latest t
 - `2`: local dry pulse
 - `Space`: pause/run
 - `-` / `+`: simulation speed
-- `O`: cycle combined, water, mineral, and detritus overlays
-- `R`: reset to the dormant start
-- `E`: load an established cycle for stress testing
+- `3`–`6`: directly select combined, water, mineral, or detritus view (`O` also cycles them)
+- `R`: reset to the temporary dormant oasis
+- `E`: load the established subsurface-seep cycle for stress testing
 
 ## Deliberate omissions
 

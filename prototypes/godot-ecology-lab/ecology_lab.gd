@@ -27,6 +27,7 @@ var manure_deposit_count := 0
 var total_manure_deposited := 0.0
 var last_manure_tick := -1
 var last_manure_cell := Vector2i(-1, -1)
+var stable_water_supply := false
 
 
 func _init() -> void:
@@ -47,6 +48,7 @@ func reset_dormant() -> void:
 	total_manure_deposited = 0.0
 	last_manure_tick = -1
 	last_manure_cell = Vector2i(-1, -1)
+	stable_water_supply = false
 	for y in range(HEIGHT):
 		for x in range(WIDTH):
 			var i := index(x, y)
@@ -64,6 +66,7 @@ func reset_dormant() -> void:
 
 func reset_established() -> void:
 	reset_dormant()
+	stable_water_supply = true
 	for y in range(HEIGHT):
 		for x in range(WIDTH):
 			var i := index(x, y)
@@ -105,6 +108,10 @@ func step() -> void:
 			var moss_neighbors := neighbor_average(moss, x, y)
 			var evaporation := (0.000001 + wet * 0.000002) * (1.0 - shade[i] * 0.55) * (1.0 - clampf(local_moss * 1.4, 0.0, 0.6))
 			next_moisture[i] = clampf(lerpf(wet, wet_neighbors, 0.004) - evaporation, 0.0, 1.0)
+			if stable_water_supply:
+				var seep_distance := Vector2(x, y).distance_to(Vector2(8.0, 7.0))
+				var seep_floor := maxf(0.0, 0.31 - seep_distance * 0.032)
+				next_moisture[i] = maxf(next_moisture[i], seep_floor)
 
 			var water_fit := smoothstep(0.16, 0.42, wet) * (1.0 - smoothstep(0.78, 0.96, wet))
 			var propagules := local_moss + moss_neighbors * 0.18 + (0.0006 if local_moss > 0.0 else 0.0)
