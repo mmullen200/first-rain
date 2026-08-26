@@ -15,6 +15,7 @@ var camera: Camera3D
 var ecology
 var ecology_cells: Array[MeshInstance3D] = []
 var ecology_step_accumulator := 0.0
+var ecology_started := false
 var moss_spread_announced := false
 var fungus_announced := false
 var fruiting_announced := false
@@ -617,6 +618,9 @@ func _update_ecology(delta: float) -> void:
 
 
 func _update_ecology_grid(delta: float) -> void:
+	if not ecology_started:
+		ecology_step_accumulator = 0.0
+		return
 	ecology_step_accumulator += delta
 	while ecology_step_accumulator >= ECOLOGY_STEP_SECONDS:
 		ecology_step_accumulator -= ECOLOGY_STEP_SECONDS
@@ -828,6 +832,7 @@ func _water_nearby_patch() -> void:
 			_set_status("No water remains to test the Presence's indicated refuge.")
 			return
 		water_doses -= 1
+		ecology_started = true
 		ecology.add_water(Vector2(refuge_position.x, refuge_position.z), 0.72, 1.4)
 		_set_status("Water sinks into the bare depression instead of flashing away. The Presence watches the cells, not the astronaut.")
 		return
@@ -844,6 +849,7 @@ func _water_nearby_patch() -> void:
 		return
 
 	water_doses -= 1
+	ecology_started = true
 	patch["state"] = "wet"
 	patch["age"] = 0.0
 	var patch_position: Vector3 = patch["node"].global_position

@@ -47,3 +47,15 @@ Cell color is the readable prototype overlay: blue-green indicates moisture, gre
 - During the warning, the Presence moves from the ridge to a bare depression and exposes a subsurface-moisture signal. This is a directional nudge, not an instruction: the player can scan, ignore, or spend water there.
 
 All thresholds, meters, timings, yields, and weather damage values are accelerated prototype fixtures rather than balance decisions.
+
+The ecological grid remains dormant until the astronaut commits the first water dose. Time spent inspecting the crash or leaving the prototype open therefore cannot silently dry the starting conditions before the first Field Experiment.
+
+## Regression check
+
+The captured idle-opening failure can be replayed headlessly:
+
+```sh
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/idle_then_water_test.gd
+```
+
+The check leaves the unopened scene idle for 480 would-be ecological ticks, then waters the sheltered film and requires the resulting ecosystem to awaken the grazer.
