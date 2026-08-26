@@ -64,9 +64,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_2:
 				selected_tool = "drought"
 			KEY_R:
-				_reset(false)
+				_reset("oasis")
 			KEY_E:
-				_reset(true)
+				_reset("seep")
+			KEY_C:
+				_reset("retention")
 			KEY_O:
 				_cycle_overlay()
 			KEY_3:
@@ -93,7 +95,8 @@ func _draw() -> void:
 
 func _draw_header() -> void:
 	draw_string(ThemeDB.fallback_font, Vector2(28, 35), "FIRST RAIN — ECOLOGY RULES LAB", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color("d9e6df"))
-	draw_string(ThemeDB.fallback_font, Vector2(28, 63), "Can a small nutrient cycle persist, move, and recover without scripted progression?", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("91aaa0"))
+	var question := "Can moss hold a finite watering longer than bare ground?" if scenario == "RETENTION TEST" else "Can a small nutrient cycle persist, move, and recover without scripted progression?"
+	draw_string(ThemeDB.fallback_font, Vector2(28, 63), question, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("91aaa0"))
 
 
 func _draw_grid() -> void:
@@ -130,10 +133,13 @@ func _draw_grid() -> void:
 	if _valid_cell(hovered_cell):
 		var hover_rect := Rect2(GRID_ORIGIN + Vector2(hovered_cell) * CELL, Vector2(CELL - 2, CELL - 2))
 		draw_rect(hover_rect, Color("f3e6b6"), false, 2.0)
+	if scenario == "RETENTION TEST":
+		_draw_patch_label(Lab.RETENTION_BARE_CENTER, "BARE SOIL")
+		_draw_patch_label(Lab.RETENTION_MOSS_CENTER, "LIVING MOSS")
 
 
 func _draw_grazer() -> void:
-	if lab.grazer_state == "dormant":
+	if not lab.grazer_enabled or lab.grazer_state == "dormant":
 		return
 	var p: Vector2 = GRID_ORIGIN + (lab.grazer_cell + Vector2(0.5, 0.5)) * CELL
 	draw_circle(p, 10.0, Color("62e0cb"))
@@ -150,7 +156,8 @@ func _draw_panel() -> void:
 	var drift: float = tracked - lab.initial_nutrients
 	var y := 52.0
 	_text("LIVE STATE", Vector2(PANEL_X + 24, y), 18, Color("d9e6df")); y += 30
-	_text("tick %d   %s   %dx   %s" % [lab.tick, "PAUSED" if paused else "RUNNING", speed, scenario], Vector2(PANEL_X + 24, y), 14, Color("91aaa0")); y += 23
+	_text("%s   %s   %dx" % [_world_time_label(), "PAUSED" if paused else "RUNNING", speed], Vector2(PANEL_X + 24, y), 14, Color("91aaa0")); y += 19
+	_text("tick %d   %s" % [lab.tick, scenario], Vector2(PANEL_X + 24, y), 12, Color("718b82")); y += 21
 	_text("moss %.3f   fungus %.3f" % [totals.moss, totals.fungus], Vector2(PANEL_X + 24, y)); y += 19
 	_text("minerals %.3f   detritus %.3f" % [totals.minerals, totals.detritus], Vector2(PANEL_X + 24, y)); y += 19
 	_text("gut %.3f   manure %d× / %.2f moved" % [lab.grazer_gut, lab.manure_deposit_count, lab.total_manure_deposited], Vector2(PANEL_X + 24, y)); y += 21
@@ -172,8 +179,12 @@ func _draw_panel() -> void:
 	if _valid_cell(hovered_cell):
 		var sample: Dictionary = lab.cell_sample(hovered_cell)
 		_text("CELL %d,%d — water %.2f  minerals %.2f  moss %.2f" % [hovered_cell.x, hovered_cell.y, sample.water, sample.minerals, sample.moss], Vector2(PANEL_X + 24, y), 12, Color("d9e6df")); y += 17
-		_text("fungus %.2f  detritus %.2f  manure trace %.2f" % [sample.fungus, sample.detritus, sample.manure_trace], Vector2(PANEL_X + 24, y), 12, Color("aab9b3")); y += 18
-	_text("TARGET: %s" % ("temporary oasis; rewatering required" if scenario == "TEMPORARY OASIS" else "persistent cycle supplied by a subsurface seep"), Vector2(PANEL_X + 24, 650), 13, Color("91aaa0"))
+		_text("fungus %.2f  detritus %.2f  retention %d%%" % [sample.fungus, sample.detritus, roundi(sample.retention * 100.0)], Vector2(PANEL_X + 24, y), 12, Color("aab9b3")); y += 18
+	if scenario == "RETENTION TEST":
+		var bare_water: float = lab.average_moisture(Lab.RETENTION_BARE_CENTER)
+		var moss_water: float = lab.average_moisture(Lab.RETENTION_MOSS_CENTER)
+		_text("EQUAL-WATER PATCHES: bare %.3f   moss %.3f" % [bare_water, moss_water], Vector2(PANEL_X + 24, 628), 13, Color("64cfe1"))
+	_text("TARGET: %s" % _target_text(), Vector2(PANEL_X + 24, 650), 13, Color("91aaa0"))
 	_text(status, Vector2(PANEL_X + 24, 674), 13, Color("d9c57a"))
 
 
@@ -207,14 +218,14 @@ func _draw_buttons() -> void:
 	_button(Rect2(456, 548, 66, 35), "%d×" % speed, false)
 	_button(Rect2(532, 548, 42, 35), "+", false)
 	_button(Rect2(584, 548, 129, 35), "R  RESET", false)
-	_button(Rect2(28, 592, 190, 35), "R  DORMANT OASIS", scenario == "TEMPORARY OASIS")
-	_button(Rect2(228, 592, 220, 35), "E  ESTABLISHED SEEP", scenario == "DURABLE SEEP")
-	_text("Scenarios start paused at 1×.", Vector2(470, 615), 13, Color("91aaa0"))
+	_button(Rect2(28, 592, 172, 35), "R  DORMANT OASIS", scenario == "TEMPORARY OASIS")
+	_button(Rect2(210, 592, 190, 35), "E  ESTABLISHED SEEP", scenario == "DURABLE SEEP")
+	_button(Rect2(410, 592, 303, 35), "C  EQUAL-WATER RETENTION TEST", scenario == "RETENTION TEST")
 	_button(Rect2(28, 636, 160, 35), "3  COMBINED", overlay == "combined")
 	_button(Rect2(198, 636, 160, 35), "4  WATER", overlay == "water")
 	_button(Rect2(368, 636, 160, 35), "5  MINERALS", overlay == "minerals")
 	_button(Rect2(538, 636, 175, 35), "6  DETRITUS", overlay == "detritus")
-	_text("Click basin to intervene. Gold rings mark manure. Water adds no nutrients; dry pulses turn killed moss into detritus.", Vector2(28, 703), 12, Color("aab9b3"))
+	_text("1 tick = 1 in-world minute. Scenarios start paused at 1×. Click basin to intervene.", Vector2(28, 703), 12, Color("aab9b3"))
 
 
 func _button(rect: Rect2, label: String, active: bool) -> void:
@@ -229,9 +240,10 @@ func _handle_button_click(position: Vector2) -> bool:
 	elif Rect2(284, 548, 110, 35).has_point(position): paused = not paused
 	elif Rect2(404, 548, 42, 35).has_point(position): speed = max(1, speed / 4)
 	elif Rect2(532, 548, 42, 35).has_point(position): speed = min(16, speed * 4)
-	elif Rect2(584, 548, 129, 35).has_point(position): _reset(false)
-	elif Rect2(28, 592, 190, 35).has_point(position): _reset(false)
-	elif Rect2(228, 592, 220, 35).has_point(position): _reset(true)
+	elif Rect2(584, 548, 129, 35).has_point(position): _reset("oasis")
+	elif Rect2(28, 592, 172, 35).has_point(position): _reset("oasis")
+	elif Rect2(210, 592, 190, 35).has_point(position): _reset("seep")
+	elif Rect2(410, 592, 303, 35).has_point(position): _reset("retention")
 	elif Rect2(28, 636, 160, 35).has_point(position): overlay = "combined"
 	elif Rect2(198, 636, 160, 35).has_point(position): overlay = "water"
 	elif Rect2(368, 636, 160, 35).has_point(position): overlay = "minerals"
@@ -245,16 +257,21 @@ func _cycle_overlay() -> void:
 	overlay = overlays[(overlays.find(overlay) + 1) % overlays.size()]
 
 
-func _reset(established: bool) -> void:
+func _reset(next_scenario: String) -> void:
 	paused = true
 	speed = 1
 	accumulator = 0.0
 	selected_tool = "water"
 	overlay = "combined"
-	if established:
+	if next_scenario == "seep":
 		lab.reset_established()
 		scenario = "DURABLE SEEP"
 		status = "Durable seep loaded. Run to test persistent cycling."
+	elif next_scenario == "retention":
+		lab.reset_retention_comparison()
+		scenario = "RETENTION TEST"
+		overlay = "water"
+		status = "Equal water applied. Run and compare bare soil with living moss."
 	else:
 		lab.reset_dormant()
 		scenario = "TEMPORARY OASIS"
@@ -268,6 +285,25 @@ func _reset(established: bool) -> void:
 		rolling_flows[key] = 0.0
 	last_history_tick = -1
 	_record_history()
+
+
+func _world_time_label() -> String:
+	var total_minutes: int = lab.tick * Lab.MINUTES_PER_TICK
+	var day: int = total_minutes / 1440 + 1
+	var minute_of_day: int = total_minutes % 1440
+	return "DAY %d  %02d:%02d" % [day, minute_of_day / 60, minute_of_day % 60]
+
+
+func _target_text() -> String:
+	match scenario:
+		"TEMPORARY OASIS": return "finite oasis; moss holds water, but rewatering is eventually required"
+		"DURABLE SEEP": return "persistent cycle supplied by a subsurface seep"
+		_: return "after one day, moss remains wetter than equally watered bare soil"
+
+
+func _draw_patch_label(cell: Vector2i, label: String) -> void:
+	var position := GRID_ORIGIN + Vector2(cell.x - 1.5, cell.y - 3.0) * CELL
+	draw_string(ThemeDB.fallback_font, position, label, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("f3e6b6"))
 
 
 func _record_history() -> void:

@@ -5,6 +5,10 @@ const WIDTH := 22
 const HEIGHT := 14
 const COUNT := WIDTH * HEIGHT
 const MANURE_TRACE_DECAY := 0.004
+const MINUTES_PER_TICK := 1
+const RETENTION_BARE_CENTER := Vector2i(6, 7)
+const RETENTION_MOSS_CENTER := Vector2i(15, 7)
+const RETENTION_SAMPLE_RADIUS := 2.5
 
 var moisture := PackedFloat32Array()
 var minerals := PackedFloat32Array()
@@ -28,6 +32,7 @@ var total_manure_deposited := 0.0
 var last_manure_tick := -1
 var last_manure_cell := Vector2i(-1, -1)
 var stable_water_supply := false
+var grazer_enabled := true
 
 
 func _init() -> void:
@@ -49,6 +54,7 @@ func reset_dormant() -> void:
 	last_manure_tick = -1
 	last_manure_cell = Vector2i(-1, -1)
 	stable_water_supply = false
+	grazer_enabled = true
 	for y in range(HEIGHT):
 		for x in range(WIDTH):
 			var i := index(x, y)
@@ -60,6 +66,29 @@ func reset_dormant() -> void:
 			fungus[i] = 0.001 if Vector2(x, y).distance_to(Vector2(7.0, 7.0)) < 3.2 else 0.0
 			shade[i] = clampf(basin * 0.3, 0.0, 1.0)
 			manure_trace[i] = 0.0
+	initial_nutrients = total_tracked_nutrients()
+	_clear_flows()
+
+
+func reset_retention_comparison() -> void:
+	reset_dormant()
+	grazer_enabled = false
+	grazer_state = "excluded from comparison"
+	for y in range(HEIGHT):
+		for x in range(WIDTH):
+			var i := index(x, y)
+			moisture[i] = 0.055
+			minerals[i] = 0.33
+			moss[i] = 0.0
+			detritus[i] = 0.02
+			fungus[i] = 0.0
+			shade[i] = 0.0
+			if Vector2(x, y).distance_to(Vector2(RETENTION_MOSS_CENTER)) <= RETENTION_SAMPLE_RADIUS:
+				var transfer := 0.19
+				minerals[i] -= transfer
+				moss[i] = transfer
+	add_water(RETENTION_BARE_CENTER, 0.68, RETENTION_SAMPLE_RADIUS)
+	add_water(RETENTION_MOSS_CENTER, 0.68, RETENTION_SAMPLE_RADIUS)
 	initial_nutrients = total_tracked_nutrients()
 	_clear_flows()
 
@@ -106,8 +135,10 @@ func step() -> void:
 
 			var wet_neighbors := neighbor_average(moisture, x, y)
 			var moss_neighbors := neighbor_average(moss, x, y)
-			var evaporation := (0.000001 + wet * 0.000002) * (1.0 - shade[i] * 0.55) * (1.0 - clampf(local_moss * 1.4, 0.0, 0.6))
-			next_moisture[i] = clampf(lerpf(wet, wet_neighbors, 0.004) - evaporation, 0.0, 1.0)
+			var retention := biological_water_retention(local_moss)
+			var moisture_exchange := lerpf(0.006, 0.0012, retention)
+			var evaporation := (0.000025 + wet * 0.000075) * (1.0 - shade[i] * 0.55) * lerpf(1.0, 0.18, retention)
+			next_moisture[i] = clampf(lerpf(wet, wet_neighbors, moisture_exchange) - evaporation, 0.0, 1.0)
 			if stable_water_supply:
 				var seep_distance := Vector2(x, y).distance_to(Vector2(8.0, 7.0))
 				var seep_floor := maxf(0.0, 0.31 - seep_distance * 0.032)
@@ -196,12 +227,30 @@ func cell_sample(cell: Vector2i) -> Dictionary:
 	var x := clampi(cell.x, 0, WIDTH - 1)
 	var y := clampi(cell.y, 0, HEIGHT - 1)
 	var i := index(x, y)
-	return {"water": moisture[i], "minerals": minerals[i], "moss": moss[i], "detritus": detritus[i], "fungus": fungus[i], "manure_trace": manure_trace[i]}
+	return {"water": moisture[i], "minerals": minerals[i], "moss": moss[i], "detritus": detritus[i], "fungus": fungus[i], "manure_trace": manure_trace[i], "retention": biological_water_retention(moss[i])}
+
+
+func biological_water_retention(local_moss: float) -> float:
+	return smoothstep(0.015, 0.18, local_moss)
+
+
+func average_moisture(center: Vector2i, radius := RETENTION_SAMPLE_RADIUS) -> float:
+	var total := 0.0
+	var count := 0
+	for y in range(HEIGHT):
+		for x in range(WIDTH):
+			if Vector2(x, y).distance_to(Vector2(center)) <= radius:
+				total += moisture[index(x, y)]
+				count += 1
+	return total / float(count) if count > 0 else 0.0
 
 
 func _step_grazer() -> Dictionary:
 	var grazed := 0.0
 	var manure := 0.0
+	if not grazer_enabled:
+		grazer_state = "excluded from comparison"
+		return {"grazed": grazed, "manure": manure}
 	var moss_total := 0.0
 	for value in moss:
 		moss_total += value
