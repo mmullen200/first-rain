@@ -105,6 +105,14 @@ func _draw_grid() -> void:
 					draw_circle(center + Vector2(5, 4), fungus_radius, Color("b17ad2"))
 				if lab.detritus[i] > 0.025:
 					draw_circle(center + Vector2(-7, 6), clampf(lab.detritus[i] * 18.0, 1.2, 4.5), Color("d58a4b"))
+			var trace: float = lab.manure_trace[i]
+			if trace > 0.01:
+				var center := rect.get_center()
+				var marker_color := Color(0.98, 0.78, 0.24, 0.32 + trace * 0.68)
+				draw_arc(center, 8.0 + trace * 4.0, 0.0, TAU, 20, marker_color, 2.2)
+				draw_circle(center + Vector2(-3, 1), 2.2, marker_color)
+				draw_circle(center + Vector2(3, 3), 1.8, marker_color)
+				draw_circle(center + Vector2(1, -3), 1.5, marker_color)
 	if _valid_cell(hovered_cell):
 		var hover_rect := Rect2(GRID_ORIGIN + Vector2(hovered_cell) * CELL, Vector2(CELL - 2, CELL - 2))
 		draw_rect(hover_rect, Color("f3e6b6"), false, 2.0)
@@ -133,7 +141,7 @@ func _draw_panel() -> void:
 	_text("fungus      %7.3f" % totals.fungus, Vector2(PANEL_X + 24, y)); y += 21
 	_text("detritus    %7.3f" % totals.detritus, Vector2(PANEL_X + 24, y)); y += 21
 	_text("minerals    %7.3f" % totals.minerals, Vector2(PANEL_X + 24, y)); y += 21
-	_text("grazer gut  %7.3f" % lab.grazer_gut, Vector2(PANEL_X + 24, y)); y += 26
+	_text("grazer gut %.3f   manure %d× / %.2f moved" % [lab.grazer_gut, lab.manure_deposit_count, lab.total_manure_deposited], Vector2(PANEL_X + 24, y)); y += 26
 	_text("tracked nutrients  %.4f" % tracked, Vector2(PANEL_X + 24, y), 15, Color("d9c57a")); y += 21
 	_text("unexplained drift %+0.6f" % drift, Vector2(PANEL_X + 24, y), 15, Color("70d69a") if absf(drift) < 0.001 else Color("ff6f65")); y += 34
 	_text("TRANSFERS THIS TICK", Vector2(PANEL_X + 24, y), 16, Color("d9e6df")); y += 25
@@ -144,13 +152,17 @@ func _draw_panel() -> void:
 	_text("gut → manure          %.4f" % lab.last_flows.manure, Vector2(PANEL_X + 24, y)); y += 29
 	_text("GRAZER", Vector2(PANEL_X + 24, y), 16, Color("d9e6df")); y += 23
 	_text("%s — hunger %d%%" % [lab.grazer_state, roundi(lab.grazer_hunger * 100.0)], Vector2(PANEL_X + 24, y), 15, Color("62e0cb")); y += 32
+	if lab.last_manure_tick >= 0:
+		_text("last manure: %d ticks ago at %d,%d" % [lab.tick - lab.last_manure_tick, lab.last_manure_cell.x, lab.last_manure_cell.y], Vector2(PANEL_X + 24, y), 14, Color("e8c35b")); y += 22
+	else:
+		_text("last manure: none yet", Vector2(PANEL_X + 24, y), 14, Color("91aaa0")); y += 22
 	_text("TREND — moss (green) / nutrients (gold)", Vector2(PANEL_X + 24, y), 14, Color("91aaa0")); y += 10
-	_draw_history(Rect2(PANEL_X + 24, y, 466, 76)); y += 95
+	_draw_history(Rect2(PANEL_X + 24, y, 466, 58)); y += 77
 	if _valid_cell(hovered_cell):
 		var sample: Dictionary = lab.cell_sample(hovered_cell)
 		_text("CELL %d,%d" % [hovered_cell.x, hovered_cell.y], Vector2(PANEL_X + 24, y), 15, Color("d9e6df")); y += 21
 		_text("water %.2f   minerals %.2f   moss %.2f" % [sample.water, sample.minerals, sample.moss], Vector2(PANEL_X + 24, y), 13, Color("aab9b3")); y += 18
-		_text("fungus %.2f   detritus %.2f" % [sample.fungus, sample.detritus], Vector2(PANEL_X + 24, y), 13, Color("aab9b3")); y += 23
+		_text("fungus %.2f   detritus %.2f   manure trace %.2f" % [sample.fungus, sample.detritus, sample.manure_trace], Vector2(PANEL_X + 24, y), 13, Color("aab9b3")); y += 23
 	_text(status, Vector2(PANEL_X + 24, 674), 13, Color("d9c57a"))
 
 
@@ -184,7 +196,7 @@ func _draw_buttons() -> void:
 	_button(Rect2(28, 598, 220, 35), "E  ESTABLISHED CYCLE", false)
 	_text("Click the basin to apply the selected intervention.", Vector2(28, 654), 14, Color("91aaa0"))
 	_text("Water adds no nutrients. A dry pulse turns killed moss into detritus.", Vector2(28, 678), 13, Color("91aaa0"))
-	_text("Green moss   Purple fungus   Orange detritus   Teal/amber grazer", Vector2(28, 703), 13, Color("aab9b3"))
+	_text("Green moss   Purple fungus   Orange detritus   Gold rings manure   Teal/amber grazer", Vector2(28, 703), 13, Color("aab9b3"))
 
 
 func _button(rect: Rect2, label: String, active: bool) -> void:

@@ -4,6 +4,7 @@ extends RefCounted
 const WIDTH := 22
 const HEIGHT := 14
 const COUNT := WIDTH * HEIGHT
+const MANURE_TRACE_DECAY := 0.004
 
 var moisture := PackedFloat32Array()
 var minerals := PackedFloat32Array()
@@ -11,6 +12,7 @@ var moss := PackedFloat32Array()
 var detritus := PackedFloat32Array()
 var fungus := PackedFloat32Array()
 var shade := PackedFloat32Array()
+var manure_trace := PackedFloat32Array()
 
 var tick := 0
 var grazer_cell := Vector2(16.0, 9.0)
@@ -21,10 +23,14 @@ var grazer_digest_ticks := 0
 var grazer_state := "roaming"
 var last_flows := {}
 var initial_nutrients := 0.0
+var manure_deposit_count := 0
+var total_manure_deposited := 0.0
+var last_manure_tick := -1
+var last_manure_cell := Vector2i(-1, -1)
 
 
 func _init() -> void:
-	for field in [moisture, minerals, moss, detritus, fungus, shade]:
+	for field in [moisture, minerals, moss, detritus, fungus, shade, manure_trace]:
 		field.resize(COUNT)
 	reset_dormant()
 
@@ -37,6 +43,10 @@ func reset_dormant() -> void:
 	grazer_gut = 0.0
 	grazer_digest_ticks = 0
 	grazer_state = "dormant"
+	manure_deposit_count = 0
+	total_manure_deposited = 0.0
+	last_manure_tick = -1
+	last_manure_cell = Vector2i(-1, -1)
 	for y in range(HEIGHT):
 		for x in range(WIDTH):
 			var i := index(x, y)
@@ -47,6 +57,7 @@ func reset_dormant() -> void:
 			detritus[i] = 0.018 + basin * 0.012
 			fungus[i] = 0.001 if Vector2(x, y).distance_to(Vector2(7.0, 7.0)) < 3.2 else 0.0
 			shade[i] = clampf(basin * 0.3, 0.0, 1.0)
+			manure_trace[i] = 0.0
 	initial_nutrients = total_tracked_nutrients()
 	_clear_flows()
 
@@ -70,6 +81,7 @@ func reset_established() -> void:
 
 
 func step() -> void:
+	_fade_manure_trace()
 	var next_moisture := moisture.duplicate()
 	var next_minerals := minerals.duplicate()
 	var next_moss := moss.duplicate()
@@ -177,7 +189,7 @@ func cell_sample(cell: Vector2i) -> Dictionary:
 	var x := clampi(cell.x, 0, WIDTH - 1)
 	var y := clampi(cell.y, 0, HEIGHT - 1)
 	var i := index(x, y)
-	return {"water": moisture[i], "minerals": minerals[i], "moss": moss[i], "detritus": detritus[i], "fungus": fungus[i]}
+	return {"water": moisture[i], "minerals": minerals[i], "moss": moss[i], "detritus": detritus[i], "fungus": fungus[i], "manure_trace": manure_trace[i]}
 
 
 func _step_grazer() -> Dictionary:
@@ -203,6 +215,11 @@ func _step_grazer() -> Dictionary:
 			manure = grazer_gut
 			detritus[i] += grazer_gut * 0.68
 			minerals[i] += grazer_gut * 0.32
+			manure_trace[i] = 1.0
+			manure_deposit_count += 1
+			total_manure_deposited += manure
+			last_manure_tick = tick + 1
+			last_manure_cell = Vector2i(clampi(cell.x, 0, WIDTH - 1), clampi(cell.y, 0, HEIGHT - 1))
 			grazer_gut = 0.0
 			grazer_state = "roaming"
 		return {"grazed": grazed, "manure": manure}
@@ -259,6 +276,11 @@ func neighbor_average(field: PackedFloat32Array, x: int, y: int) -> float:
 			total += field[index(nx, ny)]
 			count += 1
 	return total / float(count) if count > 0 else field[index(x, y)]
+
+
+func _fade_manure_trace() -> void:
+	for i in range(COUNT):
+		manure_trace[i] = maxf(0.0, manure_trace[i] - MANURE_TRACE_DECAY)
 
 
 func index(x: int, y: int) -> int:

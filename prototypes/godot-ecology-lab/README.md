@@ -12,7 +12,7 @@ It intentionally replaces the first-interaction prototype's authored milestones 
 - a hungry grazer moves moss into its gut, roams while digesting, then deposits the same nutrients elsewhere as manure;
 - water and independent dry pulses change conditions but do not create or delete tracked nutrients.
 
-The right panel exposes every aggregate stock, the transfers during the latest tick, and unexplained nutrient drift. A green zero-drift readout is the model's conservation check.
+The right panel exposes every aggregate stock, the transfers during the latest tick, cumulative manure deposits, the most recent deposit, and unexplained nutrient drift. Gold rings remain on deposit cells long enough to inspect before fading; they are visual evidence, not an additional nutrient stock. A green zero-drift readout is the model's conservation check.
 
 ## Run
 
