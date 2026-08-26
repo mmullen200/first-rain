@@ -177,9 +177,15 @@ func graze_cell(cell: Vector2i, amount := 0.13) -> float:
 	var index: int = _index(x, y)
 	var eaten: float = minf(moss[index], amount)
 	moss[index] -= eaten
-	dead_biomass[index] = clampf(dead_biomass[index] + eaten * 0.12, 0.0, 1.0)
-	nutrients[index] = clampf(nutrients[index] + eaten * 0.34, 0.0, 1.0)
 	return eaten
+
+
+func deposit_manure(cell: Vector2i, digested_moss: float) -> void:
+	var x: int = clampi(cell.x, 0, WIDTH - 1)
+	var y: int = clampi(cell.y, 0, HEIGHT - 1)
+	var index: int = _index(x, y)
+	dead_biomass[index] = clampf(dead_biomass[index] + digested_moss * 0.32, 0.0, 1.0)
+	nutrients[index] = clampf(nutrients[index] + digested_moss * 0.58, 0.0, 1.0)
 
 
 func apply_dust_front(column: int) -> void:

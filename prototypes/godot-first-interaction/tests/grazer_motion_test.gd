@@ -27,14 +27,22 @@ func _run() -> void:
 		return
 
 	var start: Vector3 = scene.grazer_root.position
+	var previous := start
+	var largest_step := 0.0
+	var moving_frames := 0
 	for ignored in range(80):
 		scene._update_ecology_grid(0.1)
 		scene._update_grazer(0.1)
+		var step_distance := Vector2(previous.x, previous.z).distance_to(Vector2(scene.grazer_root.position.x, scene.grazer_root.position.z))
+		largest_step = maxf(largest_step, step_distance)
+		if step_distance > 0.001:
+			moving_frames += 1
+		previous = scene.grazer_root.position
 	var finish: Vector3 = scene.grazer_root.position
 	var displacement := Vector2(start.x, start.z).distance_to(Vector2(finish.x, finish.z))
-	if displacement < 0.5:
-		printerr("FAIL: the awakened grazer did not visibly travel toward viable moss; displacement=", displacement)
+	if displacement < 0.5 or largest_step > 0.055 or moving_frames < 20:
+		printerr("FAIL: grazer motion was not slow, smooth, and visible; displacement=", displacement, " largest-step=", largest_step, " moving-frames=", moving_frames)
 		quit(1)
 		return
-	print("PASS: the awakened grazer visibly travels toward viable moss; displacement=", displacement)
+	print("PASS: the awakened grazer travels slowly and smoothly; displacement=", displacement, " largest-step=", largest_step, " moving-frames=", moving_frames)
 	quit(0)

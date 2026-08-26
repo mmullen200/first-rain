@@ -5,6 +5,11 @@ extends Node3D
 # movement, local comparison, scarce intervention, and ecological feedback.
 
 const WALK_SPEED := 4.3
+const GRAZER_MOVE_SPEED := 0.38
+const GRAZER_HUNGER_RATE := 0.055
+const GRAZER_SEEK_THRESHOLD := 0.72
+const GRAZER_DIGEST_SECONDS := 5.0
+const GRAZER_BITE_SIZE := 0.1
 const WORLD_X := 8.8
 const WORLD_Z := 6.2
 const ECOLOGY_STEP_SECONDS := 0.34
@@ -54,6 +59,13 @@ var grazer_cell := Vector2i.ZERO
 var grazer_target_position := Vector3.ZERO
 var grazer_step_timer := 0.0
 var grazer_failed_to_feed := 0
+var grazer_state := "dormant"
+var grazer_hunger := 1.0
+var grazer_meal := 0.0
+var grazer_digestion_timer := 0.0
+var grazer_last_feeding_cell := Vector2i(-1, -1)
+var grazer_wander_cursor := 0
+var grazer_manure_announced := false
 
 var disturbance_state := "quiet"
 var disturbance_timer := 0.0
@@ -668,6 +680,7 @@ func _update_grazer(delta: float) -> void:
 		var dormant_state: Dictionary = ecology.summary()
 		if dormant_state["moss_cells"] >= 7 and dormant_state["fungus_cells"] >= 3 and dormant_state["fruiting_cells"] >= 2:
 			grazer_awake = true
+			_set_grazer_state("seeking")
 			grazer_root.scale = Vector3.ONE * 1.35
 			grazer_body.material_override = _material(Color("76d2bd"), 0.58, Color("237563"))
 			grazer_head.material_override = _material(Color("f2c36d"), 0.48, Color("8f571c"))
@@ -679,51 +692,98 @@ func _update_grazer(delta: float) -> void:
 			disturbance_timer = 14.0
 		return
 
-	grazer_root.position = grazer_root.position.lerp(grazer_target_position, minf(delta * 4.2, 1.0))
+	grazer_hunger = minf(1.0, grazer_hunger + delta * GRAZER_HUNGER_RATE)
+	if grazer_meal > 0.0:
+		grazer_digestion_timer -= delta
+		if grazer_digestion_timer <= 0.0:
+			var manure_cell: Vector2i = ecology.world_to_cell(Vector2(grazer_root.position.x, grazer_root.position.z))
+			if manure_cell != grazer_last_feeding_cell:
+				ecology.deposit_manure(manure_cell, grazer_meal)
+				grazer_meal = 0.0
+				_set_grazer_state("roaming")
+				_refresh_ecology_visuals()
+				if not grazer_manure_announced:
+					grazer_manure_announced = true
+					_add_discovery("Grazer manure — moves nutrients from feeding sites into new ecological cells")
+					_set_status("The grazer deposits dark pellets away from the moss it ate. Local dead biomass and nutrient readings rise.")
+	elif grazer_hunger >= GRAZER_SEEK_THRESHOLD:
+		_set_grazer_state("seeking")
+
+	grazer_root.position = grazer_root.position.move_toward(grazer_target_position, GRAZER_MOVE_SPEED * delta)
 	grazer_step_timer -= delta
+	if grazer_root.position.distance_to(grazer_target_position) > 0.015:
+		return
 	if grazer_step_timer > 0.0:
 		return
-	grazer_step_timer = 1.05
+	grazer_step_timer = 0.18
 
-	var best_cell := grazer_cell
-	var best_score := -1.0
-	for offset in [Vector2i.ZERO, Vector2i(-1, 0), Vector2i(1, 0), Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, -1), Vector2i(1, -1), Vector2i(-1, 1), Vector2i(1, 1)]:
-		var candidate: Vector2i = grazer_cell + offset
-		if candidate.x < 0 or candidate.x >= EcologyGridModel.WIDTH or candidate.y < 0 or candidate.y >= EcologyGridModel.HEIGHT:
-			continue
-		var sample: Dictionary = ecology.cell_snapshot(candidate.x, candidate.y)
-		var score: float = sample["moss"] + sample["fruiting"] * 0.18 - sample["toxicity"] * 0.42
-		if score > best_score:
-			best_score = score
-			best_cell = candidate
-
-	if best_score < 0.015:
+	if grazer_state == "seeking":
+		var local_food: Dictionary = ecology.cell_snapshot(grazer_cell.x, grazer_cell.y)
+		if local_food["moss"] >= 0.025:
+			var eaten: float = ecology.graze_cell(grazer_cell, GRAZER_BITE_SIZE)
+			if eaten > 0.0:
+				grazer_hunger = 0.0
+				grazer_meal = eaten
+				grazer_digestion_timer = GRAZER_DIGEST_SECONDS
+				grazer_last_feeding_cell = grazer_cell
+				_set_grazer_state("digesting")
+				_set_status("The grazer takes one measured bite, then leaves the moss to recover while it digests.")
+				_refresh_ecology_visuals()
+				_set_grazer_target(_next_grazer_wander_cell())
+				return
 		var scent_cell := _strongest_grazer_food_cell()
 		if scent_cell != grazer_cell:
-			best_cell = grazer_cell + Vector2i(signi(scent_cell.x - grazer_cell.x), signi(scent_cell.y - grazer_cell.y))
+			grazer_failed_to_feed = 0
+			_set_grazer_target(grazer_cell + Vector2i(signi(scent_cell.x - grazer_cell.x), signi(scent_cell.y - grazer_cell.y)))
 		else:
 			grazer_failed_to_feed += 1
 			if grazer_failed_to_feed == 4:
 				_set_status("The grazer finds no viable moss. Its movement slows; this ecological trajectory cannot support it.")
-			return
+		return
 
-	grazer_failed_to_feed = 0
-	grazer_cell = best_cell
+	_set_grazer_target(_next_grazer_wander_cell())
+
+
+func _set_grazer_target(cell: Vector2i) -> void:
+	grazer_cell = Vector2i(clampi(cell.x, 0, EcologyGridModel.WIDTH - 1), clampi(cell.y, 0, EcologyGridModel.HEIGHT - 1))
 	var target_world: Vector2 = ecology.world_position(grazer_cell.x, grazer_cell.y)
 	grazer_target_position = Vector3(target_world.x, 0.28, target_world.y)
 	if grazer_root.position.distance_to(grazer_target_position) > 0.01:
 		grazer_root.look_at(grazer_target_position, Vector3.UP)
-	ecology.graze_cell(grazer_cell)
-	_refresh_ecology_visuals()
+
+
+func _set_grazer_state(next_state: String) -> void:
+	if grazer_state == next_state:
+		return
+	grazer_state = next_state
+	if grazer_label != null:
+		grazer_label.text = "GRAZER / " + next_state.to_upper()
+
+
+func _next_grazer_wander_cell() -> Vector2i:
+	var directions := [
+		Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(0, -1),
+		Vector2i(1, 1), Vector2i(-1, 1), Vector2i(-1, -1), Vector2i(1, -1)
+	]
+	for attempt in range(directions.size()):
+		var index: int = (grazer_wander_cursor + attempt) % directions.size()
+		var candidate: Vector2i = grazer_cell + directions[index]
+		if candidate.x < 0 or candidate.x >= EcologyGridModel.WIDTH or candidate.y < 0 or candidate.y >= EcologyGridModel.HEIGHT:
+			continue
+		if ecology.cell_snapshot(candidate.x, candidate.y)["toxicity"] >= 0.82:
+			continue
+		grazer_wander_cursor = (index + 1) % directions.size()
+		return candidate
+	return grazer_cell
 
 
 func _strongest_grazer_food_cell() -> Vector2i:
 	var strongest_cell := grazer_cell
-	var strongest_score := 0.015
+	var strongest_score := 0.025
 	for y in range(EcologyGridModel.HEIGHT):
 		for x in range(EcologyGridModel.WIDTH):
 			var sample: Dictionary = ecology.cell_snapshot(x, y)
-			var score: float = sample["moss"] + sample["fruiting"] * 0.18 - sample["toxicity"] * 0.42
+			var score: float = sample["moss"] - sample["toxicity"] * 0.25
 			if score > strongest_score:
 				strongest_score = score
 				strongest_cell = Vector2i(x, y)
@@ -1022,7 +1082,7 @@ func _update_interface() -> void:
 	time_label.text = "FIELD TIME  %02d:%02d  /  ecological response accelerated" % [field_seconds / 60, field_seconds % 60]
 	var ecosystem: Dictionary = ecology.summary()
 	ecosystem_label.text = "CELLS  moss %d  fungus %d  fruit %d  dead %d   GRAZER %s   tick %d" % [
-		ecosystem["moss_cells"], ecosystem["fungus_cells"], ecosystem["fruiting_cells"], ecosystem["dead_cells"], "awake" if grazer_awake else "dormant", ecosystem["tick"]
+		ecosystem["moss_cells"], ecosystem["fungus_cells"], ecosystem["fruiting_cells"], ecosystem["dead_cells"], grazer_state, ecosystem["tick"]
 	]
 	match disturbance_state:
 		"quiet":
