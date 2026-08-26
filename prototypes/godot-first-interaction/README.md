@@ -1,6 +1,6 @@
 # First Rain: opening vertical-slice prototype
 
-Throwaway Godot vertical slice for deciding whether the opening teaches movement, finite supplies, scientific observation, ecological intervention, recovery, cultivation, and the first sighting of the Presence through embodied play.
+Throwaway Godot vertical slice for deciding whether the opening teaches movement, finite supplies, scientific observation, ecological intervention, recovery, cultivation, and the first sighting of the Presence through embodied play. The current branch additionally asks whether layered world cues and a damaged local scanner communicate ecological causes without exposing the complete simulation.
 
 ## Run
 
@@ -16,6 +16,7 @@ Open `project.godot` in Godot 4.6 and press **F6/F5**, or run:
 - **E** — open the emergency cache, then pick up or place the loose shade panel
 - **E** — harvest when standing beside a mature fungal fruiting cell
 - **F** — scan a nearby moss patch
+- **V** — toggle the scanner's nearby moisture/toxicity analysis lens
 - **Space** — spend one water dose on a nearby moss patch
 - **Q** — spend one water dose on the astronaut when exposure is meaningful
 - **Z** — eat carried fresh food first, otherwise a finite ration
@@ -49,6 +50,10 @@ Cell color is the readable prototype overlay: blue-green indicates moisture, gre
 All thresholds, meters, timings, yields, and weather damage values are accelerated prototype fixtures rather than balance decisions.
 
 The ecological grid remains dormant until the astronaut commits the first water dose. Time spent inspecting the crash or leaving the prototype open therefore cannot silently dry the starting conditions before the first Field Experiment.
+
+## Ecological-feedback question
+
+The omniscient global cell count is hidden during ordinary play. The damaged Field Scanner instead provides coarse-but-honest local bands, visible confidence, a stored baseline for before/after rescanning, comparison with the previously scanned site, a short world-space scan pulse, and an optional nearby analysis lens. The discovery record continues to retain species and causal relationships. This tests whether players can explain why one watering succeeds and another fails without receiving exact rules or fabricated uncertainty.
 
 ## Regression check
 

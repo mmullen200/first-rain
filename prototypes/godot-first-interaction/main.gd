@@ -33,6 +33,12 @@ var field_time := 0.0
 var scanner_recovered := false
 var cache_opened := false
 var discoveries: Array[String] = []
+var scanner_samples: Dictionary = {}
+var last_scanned_site := ""
+var analysis_lens_enabled := false
+var lens_anchor_cell := Vector2i(-1, -1)
+var scan_pulse: MeshInstance3D
+var scan_pulse_timer := 0.0
 var patches: Dictionary = {}
 var nearest_patch := ""
 var near_cache := false
@@ -95,6 +101,7 @@ func _ready() -> void:
 	_build_refuge()
 	_build_grazer()
 	_build_disturbance()
+	_build_scan_pulse()
 	_build_interface()
 	_set_status("The crash has stopped. The ship is dead, but an emergency cache still blinks beneath the broken wing.")
 
@@ -111,6 +118,7 @@ func _physics_process(delta: float) -> void:
 	_update_grazer(delta)
 	_update_disturbance(delta)
 	_update_presence()
+	_update_scan_pulse(delta)
 	_update_interface()
 
 
@@ -121,6 +129,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	match event.keycode:
 		KEY_F:
 			_scan_nearby_patch()
+		KEY_V:
+			_toggle_analysis_lens()
 		KEY_SPACE:
 			_water_nearby_patch()
 		KEY_E:
@@ -401,13 +411,26 @@ func _build_disturbance() -> void:
 	dust_front.visible = false
 
 
+func _build_scan_pulse() -> void:
+	scan_pulse = MeshInstance3D.new()
+	scan_pulse.name = "LocalScannerPulse"
+	var mesh := CylinderMesh.new()
+	mesh.top_radius = 0.72
+	mesh.bottom_radius = 0.78
+	mesh.height = 0.025
+	mesh.radial_segments = 48
+	scan_pulse.mesh = mesh
+	scan_pulse.visible = false
+	add_child(scan_pulse)
+
+
 func _build_interface() -> void:
 	var canvas := CanvasLayer.new()
 	add_child(canvas)
 
 	var title := Label.new()
 	title.position = Vector2(24, 18)
-	title.text = "FIRST RAIN  /  THROWAWAY OPENING SLICE"
+	title.text = "FIRST RAIN  /  ECOLOGICAL FEEDBACK PROTOTYPE"
 	title.add_theme_font_size_override("font_size", 15)
 	title.add_theme_color_override("font_color", Color("e9b36e"))
 	canvas.add_child(title)
@@ -449,7 +472,7 @@ func _build_interface() -> void:
 
 	var controls := Label.new()
 	controls.position = Vector2(24, 606)
-	controls.text = "WASD / ARROWS move   E interact/harvest   F scan   SPACE water   Q drink   Z eat   R restart"
+	controls.text = "WASD / ARROWS move   E interact/harvest   F scan   V local lens   SPACE water   Q drink   Z eat   R restart"
 	controls.add_theme_font_size_override("font_size", 14)
 	controls.add_theme_color_override("font_color", Color("aeb7b4"))
 	canvas.add_child(controls)
@@ -470,7 +493,7 @@ func _build_interface() -> void:
 
 	scanner_card = PanelContainer.new()
 	scanner_card.position = Vector2(765, 24)
-	scanner_card.size = Vector2(360, 410)
+	scanner_card.size = Vector2(360, 535)
 	var card_style := StyleBoxFlat.new()
 	card_style.bg_color = Color(0.055, 0.09, 0.095, 0.94)
 	card_style.border_color = Color("6f8079")
@@ -545,6 +568,11 @@ func _move_astronaut(_delta: float) -> void:
 	astronaut.position.z = clamp(astronaut.position.z, -WORLD_Z, WORLD_Z)
 	if input.length() > 0.1:
 		astronaut.rotation.y = lerp_angle(astronaut.rotation.y, atan2(input.x, input.y), 0.24)
+	if analysis_lens_enabled:
+		var current_cell: Vector2i = ecology.world_to_cell(Vector2(astronaut.position.x, astronaut.position.z))
+		if current_cell != lens_anchor_cell:
+			lens_anchor_cell = current_cell
+			_refresh_ecology_visuals()
 
 	if carrying_shade:
 		shade_panel.visible = true
@@ -842,6 +870,14 @@ func _refresh_ecology_visuals() -> void:
 			color = color.lerp(Color("4fa45e"), clamp(sample["moss"] * 1.45, 0.0, 0.9))
 			color = color.lerp(Color("c064d3"), clamp(sample["fungus"] * 3.2, 0.0, 0.96))
 			color = color.lerp(Color("efb34f"), clamp(sample["fruiting"] * 4.0, 0.0, 0.98))
+			if analysis_lens_enabled and scanner_recovered:
+				var world: Vector2 = ecology.world_position(x, y)
+				var distance: float = world.distance_to(Vector2(astronaut.position.x, astronaut.position.z))
+				if distance <= 2.15:
+					color = Color("203033").lerp(Color("45b9cf"), clampf(sample["moisture"] * 0.85, 0.0, 0.72))
+					color = color.lerp(Color("e29b4f"), clampf(sample["toxicity"] * 0.82, 0.0, 0.7))
+				else:
+					color = color.darkened(0.38)
 			var material := StandardMaterial3D.new()
 			material.albedo_color = color
 			material.roughness = 0.9
@@ -867,13 +903,9 @@ func _scan_nearby_patch() -> void:
 	if near_refuge:
 		var refuge_cell: Dictionary = ecology.sample_world(Vector2(refuge_position.x, refuge_position.z))
 		scanner_title.text = "FIELD SCANNER  /  BARE DEPRESSION"
-		scanner_readout.text = (
-			"SUBSURFACE MOISTURE  %02d%%\n" % roundi(refuge_cell["moisture"] * 100.0)
-			+ "SURFACE             %d C\n" % roundi(-8.0 + refuge_cell["temperature"] * 66.0)
-			+ "TOXICITY            %02d%%\n" % roundi(refuge_cell["toxicity"] * 100.0)
-			+ "DORMANT BIO TRACE   %02d%%\n\n" % roundi(refuge_cell["dormant_moss"] * 100.0)
-			+ "The Presence indicated this place, not an action."
-		)
+		scanner_readout.text = _scanner_measurement_text("refuge", refuge_cell, 0.54, "The Presence indicated this place, not an action.")
+		_record_scan("refuge", refuge_cell)
+		_show_scan_pulse(refuge_position, refuge_cell["toxicity"])
 		_add_discovery("Subsurface refuge — moist, cooler, dormant trace present")
 		_set_status("The bare depression hides moisture below the scanner's normal surface range. The Presence waits without instructing.")
 		return
@@ -883,41 +915,19 @@ func _scan_nearby_patch() -> void:
 
 	var patch: Dictionary = patches[nearest_patch]
 	patch["scanned"] = true
-	var state_text: String = patch["state"].to_upper()
 	var patch_position: Vector3 = patch["node"].global_position
 	var cell: Dictionary = ecology.sample_world(Vector2(patch_position.x, patch_position.z))
-	var moisture_percent := roundi(cell["moisture"] * 100.0)
-	var surface_celsius := roundi(-8.0 + cell["temperature"] * 66.0)
-	var toxicity_percent := roundi(cell["toxicity"] * 100.0)
-	var cell_life := "MOSS %02d%%  DEAD %02d%%  FUNGUS %02d%%  FRUIT %02d%%" % [
-		roundi(cell["moss"] * 100.0),
-		roundi(cell["dead_biomass"] * 100.0),
-		roundi(cell["fungus"] * 100.0),
-		roundi(cell["fruiting"] * 100.0)
-	]
+	var interpretation := _scanner_consequence_text(patch)
 	if nearest_patch == "hollow":
 		_add_discovery("Dormant moss analogue — sheltered trace")
 		scanner_title.text = "FIELD SCANNER  /  SHELTERED FILM"
-		scanner_readout.text = (
-			"BIO TRACE     %s\n" % state_text
-			+ "MOISTURE      %02d%%\n" % moisture_percent
-			+ "SURFACE       %d C\n" % surface_celsius
-			+ "TOXICITY      %02d%% / confidence 62%%\n" % toxicity_percent
-			+ cell_life + "\n\n"
-			+ _scanner_consequence_text(patch)
-		)
+		scanner_readout.text = _scanner_measurement_text("hollow", cell, 0.62, interpretation)
 		_set_status("The cracked screen cannot name the organism, but the hollow retains moisture and stays cool.")
 	else:
 		_add_discovery("Dormant moss analogue — exposed trace")
 		scanner_title.text = "FIELD SCANNER  /  SUN-STRUCK FILM"
-		scanner_readout.text = (
-			"BIO TRACE     %s\n" % state_text
-			+ "MOISTURE      %02d%%\n" % moisture_percent
-			+ "SURFACE       %d C%s\n" % [surface_celsius, " / shaded" if patch["shade"] else " / direct heat"]
-			+ "TOXICITY      %02d%% / amber band\n" % toxicity_percent
-			+ cell_life + "\n\n"
-			+ _scanner_consequence_text(patch)
-		)
+		var heat_context := "%s; %s" % [interpretation, "panel shade detected" if patch["shade"] else "direct heat detected"]
+		scanner_readout.text = _scanner_measurement_text("crust", cell, 0.48 if not patch["shade"] else 0.66, heat_context)
 		if patch["state"] == "failed":
 			_add_discovery("Amber toxicity — increases with surface heat")
 			_set_status("The failed patch is evidence: water vanished as surface heat and the toxicity band rose together.")
@@ -926,6 +936,8 @@ func _scan_nearby_patch() -> void:
 			_set_status("The panel changed two readings at once: heat falls and moisture loss slows.")
 		else:
 			_set_status("This film resembles the sheltered trace, but heat, moisture, and toxicity differ sharply.")
+	_record_scan(nearest_patch, cell)
+	_show_scan_pulse(patch_position, cell["toxicity"])
 
 
 func _water_nearby_patch() -> void:
@@ -1080,10 +1092,10 @@ func _update_interface() -> void:
 	hunger_label.text = "HUNGER  %02d%%  /  %s" % [roundi(hunger), hunger_state]
 	var field_seconds := int(field_time * 12.0)
 	time_label.text = "FIELD TIME  %02d:%02d  /  ecological response accelerated" % [field_seconds / 60, field_seconds % 60]
-	var ecosystem: Dictionary = ecology.summary()
-	ecosystem_label.text = "CELLS  moss %d  fungus %d  fruit %d  dead %d   GRAZER %s   tick %d" % [
-		ecosystem["moss_cells"], ecosystem["fungus_cells"], ecosystem["fruiting_cells"], ecosystem["dead_cells"], grazer_state, ecosystem["tick"]
-	]
+	if analysis_lens_enabled:
+		ecosystem_label.text = "LOCAL LENS  cyan moisture / amber toxicity / nearby cells only"
+	else:
+		ecosystem_label.text = "LOCAL LENS OFF  /  V toggles scanner-assisted nearby conditions"
 	match disturbance_state:
 		"quiet":
 			weather_label.text = "WEATHER  still / no active disturbance"
@@ -1107,6 +1119,120 @@ func _scanner_consequence_text(patch: Dictionary) -> String:
 			return "CHANGE: water lost; amber residue increased"
 		_:
 			return "CHANGE: no active metabolism detected"
+
+
+func _scanner_measurement_text(site_id: String, sample: Dictionary, confidence: float, interpretation: String) -> String:
+	var moisture_percent := roundi(sample["moisture"] * 100.0)
+	var moisture_floor := maxi(0, int(round(float(moisture_percent) / 10.0) * 10.0) - 5)
+	var moisture_ceiling := mini(100, moisture_floor + 10)
+	var surface_celsius := roundi(-8.0 + sample["temperature"] * 66.0)
+	var toxicity_percent := roundi(sample["toxicity"] * 100.0)
+	var life_signal := _life_signal_text(sample)
+	var lines: Array[String] = [
+		"COARSE LOCAL SAMPLE  /  confidence %d%%" % roundi(confidence * 100.0),
+		"MOISTURE   %s  /  %02d–%02d%%" % [_moisture_band(sample["moisture"]), moisture_floor, moisture_ceiling],
+		"SURFACE    %s  /  ~%d C" % [_temperature_band(sample["temperature"]), surface_celsius],
+		"TOXICITY   %s  /  ~%02d%%" % [_toxicity_band(sample["toxicity"]), toxicity_percent],
+		"BIOLOGY    " + life_signal,
+		"",
+		_change_text(site_id, sample),
+		_comparison_text(site_id, sample),
+		"",
+		interpretation,
+		"Readings are coarse, not fabricated."
+	]
+	return "\n".join(lines)
+
+
+func _record_scan(site_id: String, sample: Dictionary) -> void:
+	scanner_samples[site_id] = sample.duplicate()
+	last_scanned_site = site_id
+
+
+func _change_text(site_id: String, sample: Dictionary) -> String:
+	if not scanner_samples.has(site_id):
+		return "CHANGE     baseline stored; rescan after intervention"
+	var previous: Dictionary = scanner_samples[site_id]
+	return "CHANGE     moisture %s / heat %s / toxicity %s" % [
+		_delta_word(sample["moisture"] - previous["moisture"]),
+		_delta_word(sample["temperature"] - previous["temperature"]),
+		_delta_word(sample["toxicity"] - previous["toxicity"])
+	]
+
+
+func _comparison_text(site_id: String, sample: Dictionary) -> String:
+	if last_scanned_site == "" or last_scanned_site == site_id or not scanner_samples.has(last_scanned_site):
+		return "COMPARE    scan another site to expose differences"
+	var other: Dictionary = scanner_samples[last_scanned_site]
+	return "COMPARE    %s: %s / %s / %s" % [
+		last_scanned_site.replace("_", " ").to_upper(),
+		"wetter" if sample["moisture"] > other["moisture"] + 0.035 else ("drier" if sample["moisture"] < other["moisture"] - 0.035 else "similar moisture"),
+		"hotter" if sample["temperature"] > other["temperature"] + 0.035 else ("cooler" if sample["temperature"] < other["temperature"] - 0.035 else "similar heat"),
+		"more toxic" if sample["toxicity"] > other["toxicity"] + 0.035 else ("less toxic" if sample["toxicity"] < other["toxicity"] - 0.035 else "similar toxicity")
+	]
+
+
+func _delta_word(delta: float) -> String:
+	if delta > 0.035: return "rose"
+	if delta < -0.035: return "fell"
+	return "steady"
+
+
+func _moisture_band(value: float) -> String:
+	if value < 0.1: return "DRY"
+	if value < 0.3: return "DAMP"
+	if value < 0.62: return "WET"
+	return "SATURATED"
+
+
+func _temperature_band(value: float) -> String:
+	if value < 0.28: return "COLD"
+	if value < 0.52: return "COOL"
+	if value < 0.72: return "WARM"
+	return "HOT"
+
+
+func _toxicity_band(value: float) -> String:
+	if value < 0.16: return "LOW"
+	if value < 0.38: return "ELEVATED"
+	if value < 0.66: return "HIGH"
+	return "SEVERE"
+
+
+func _life_signal_text(sample: Dictionary) -> String:
+	if sample["fruiting"] >= 0.055: return "fruiting tissue detected"
+	if sample["fungus"] >= 0.012: return "fungal metabolism detected"
+	if sample["moss"] >= 0.03: return "active moss analogue"
+	if sample["dormant_moss"] >= 0.08: return "dormant biological trace"
+	return "no resolved biological signal"
+
+
+func _toggle_analysis_lens() -> void:
+	if not scanner_recovered:
+		_set_status("The local analysis lens is part of the damaged scanner still sealed in the emergency cache.")
+		return
+	analysis_lens_enabled = not analysis_lens_enabled
+	lens_anchor_cell = Vector2i(-1, -1)
+	_refresh_ecology_visuals()
+	_set_status("Local lens enabled. It only emphasizes nearby moisture and toxicity." if analysis_lens_enabled else "Local lens disabled. World cues remain visible without instrument emphasis.")
+
+
+func _show_scan_pulse(position: Vector3, local_toxicity: float) -> void:
+	scan_pulse.position = Vector3(position.x, 0.12, position.z)
+	scan_pulse.scale = Vector3.ONE
+	scan_pulse.material_override = _material(Color("53c4d5").lerp(Color("e59a4c"), clampf(local_toxicity, 0.0, 1.0)), 0.45)
+	scan_pulse.visible = true
+	scan_pulse_timer = 1.15
+
+
+func _update_scan_pulse(delta: float) -> void:
+	if scan_pulse_timer <= 0.0:
+		if scan_pulse != null:
+			scan_pulse.visible = false
+		return
+	scan_pulse_timer -= delta
+	var progress := 1.0 - scan_pulse_timer / 1.15
+	scan_pulse.scale = Vector3.ONE * lerpf(0.35, 1.85, progress)
 
 
 func _create_patch(id: String, label_text: String, position: Vector3, color: Color, shade: bool) -> Dictionary:

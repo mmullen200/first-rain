@@ -32,10 +32,9 @@ func _run() -> void:
 	for ignored in range(600):
 		scene._update_ecology_grid(0.1)
 		scene._update_grazer(0.1)
-		scene._update_interface()
-		saw_seeking = saw_seeking or "GRAZER seeking" in scene.ecosystem_label.text
-		saw_digesting = saw_digesting or "GRAZER digesting" in scene.ecosystem_label.text
-		saw_roaming = saw_roaming or "GRAZER roaming" in scene.ecosystem_label.text
+		saw_seeking = saw_seeking or scene.grazer_state == "seeking"
+		saw_digesting = saw_digesting or scene.grazer_state == "digesting"
+		saw_roaming = saw_roaming or scene.grazer_state == "roaming"
 
 	var recorded_manure := false
 	for discovery in scene.discoveries:
