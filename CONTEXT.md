@@ -64,6 +64,14 @@ _Avoid_: Morality, approval, reputation
 A network of life and environmental processes that continues without consuming the astronaut's finite wreck supplies.
 _Avoid_: Victory garden, completed biome
 
+**Nutrient cycle**:
+The movement of finite usable material through soil minerals, living organisms, detritus, decomposition, grazing, and manure so that growth can reuse it in new places.
+_Avoid_: Resource generator, fertility meter
+
+**Detritus**:
+Dead organic material that retains nutrients and can be consumed by decomposers rather than disappearing from the ecosystem.
+_Avoid_: Waste, generic debris, dead mass
+
 **Emergent ecological episode**:
 A consequential chain of ecological events produced by reusable interacting rules rather than a sequence authored for that particular situation.
 _Avoid_: Random event, scripted event
