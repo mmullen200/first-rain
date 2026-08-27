@@ -13,6 +13,9 @@ const GRAZER_BITE_SIZE := 0.1
 const WORLD_X := 8.8
 const WORLD_Z := 6.2
 const ECOLOGY_STEP_SECONDS := 0.34
+const VOLUNTARY_RECOVERY_SECONDS := 2.0
+const FORCED_RECOVERY_SECONDS := 10.0
+const LAST_WATER_HOLD_SECONDS := 0.75
 const EcologyGridModel = preload("res://ecology_grid.gd")
 
 var astronaut: CharacterBody3D
@@ -30,6 +33,11 @@ var fresh_food := 0
 var hunger := 34.0
 var exposure := 0.0
 var field_time := 0.0
+var field_review_open := false
+var forced_recoveries := 0
+var last_water_hold_active := false
+var last_water_hold_timer := 0.0
+var last_water_hold_target := ""
 var scanner_recovered := false
 var cache_opened := false
 var discoveries: Array[String] = []
@@ -47,6 +55,7 @@ var near_refuge := false
 var refuge_position := Vector3(0.35, 0.03, 3.25)
 var refuge_marker: Node3D
 var refuge_revealed := false
+var refuge_watered := false
 var emergency_cache: MeshInstance3D
 var shade_panel: MeshInstance3D
 var shade_panel_home := Vector3(-5.4, 0.32, 2.7)
@@ -124,6 +133,9 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if field_review_open:
+		_update_interface()
+		return
 	field_time += delta
 	_move_astronaut(delta)
 	_update_camera()
@@ -137,10 +149,18 @@ func _physics_process(delta: float) -> void:
 	_update_presence()
 	_update_presence_signals(delta)
 	_update_scan_pulse(delta)
+	_update_last_water_hold(delta)
+	if exposure >= 100.0:
+		_force_recovery()
 	_update_interface()
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.keycode == KEY_SPACE and not event.pressed:
+		last_water_hold_active = false
+		last_water_hold_timer = 0.0
+		last_water_hold_target = ""
+		return
 	if not (event is InputEventKey and event.pressed and not event.echo):
 		return
 
@@ -152,7 +172,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		KEY_C:
 			_signal_to_presence()
 		KEY_SPACE:
-			_water_nearby_patch()
+			_request_water_intervention()
 		KEY_E:
 			_interact()
 		KEY_Q:
@@ -161,6 +181,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_eat_food()
 		KEY_R:
 			get_tree().reload_current_scene()
+		KEY_J:
+			_toggle_field_review()
 
 
 func _build_world() -> void:
@@ -495,7 +517,7 @@ func _build_interface() -> void:
 
 	var title := Label.new()
 	title.position = Vector2(24, 18)
-	title.text = "FIRST RAIN  /  PRESENCE COMMUNICATION PROTOTYPE"
+	title.text = "FIRST RAIN  /  SURVIVAL RHYTHM PROTOTYPE"
 	title.add_theme_font_size_override("font_size", 15)
 	title.add_theme_color_override("font_color", Color("e9b36e"))
 	canvas.add_child(title)
@@ -537,7 +559,7 @@ func _build_interface() -> void:
 
 	var controls := Label.new()
 	controls.position = Vector2(24, 606)
-	controls.text = "WASD move   E interact   F scan   C signal   V lens   SPACE water   Q drink   Z eat   R restart"
+	controls.text = "WASD move   E interact/recover   F scan   C signal   J records   V lens   SPACE water   Q drink   Z eat"
 	controls.add_theme_font_size_override("font_size", 14)
 	controls.add_theme_color_override("font_color", Color("aeb7b4"))
 	canvas.add_child(controls)
@@ -696,26 +718,133 @@ func _update_nearby_interactions() -> void:
 		prompt_label.text = "F  scan the bare depression     SPACE  commit water here"
 	elif carrying_shade:
 		prompt_label.text = "Carry the panel to a place where shade might change conditions."
+	elif cache_opened and _at_wreck() and exposure > 0.5:
+		prompt_label.text = "E  recover at the wreck while the ecosystem continues"
 	elif not scanner_recovered:
 		prompt_label.text = "The wreck's blinking cache may contain usable instruments."
 	else:
 		prompt_label.text = "Look for surfaces that seem almost—but not quite—alive."
 	if presence_root.visible:
 		prompt_label.text += "     C  signal toward nearby subject"
+	if last_water_hold_active:
+		prompt_label.text = "HOLD SPACE  final water dose  %d%%" % roundi(100.0 * last_water_hold_timer / LAST_WATER_HOLD_SECONDS)
 
 
 func _update_exposure(delta: float) -> void:
-	var at_wreck := _flat_distance(astronaut.global_position, Vector3(-5.4, 0.0, -3.1)) < 2.55
-	if at_wreck:
-		exposure = max(0.0, exposure - delta * 2.4)
-	elif _near_thriving_moss():
-		exposure = min(100.0, exposure + delta * 0.14)
-	else:
-		exposure = min(100.0, exposure + delta * 0.42)
+	if _at_wreck():
+		return
+	var hunger_multiplier := 1.0
+	if hunger >= 75.0:
+		hunger_multiplier = 1.6
+	elif hunger >= 45.0:
+		hunger_multiplier = 1.25
+	var exposure_rate := 0.14 if _near_thriving_moss() else 0.42
+	exposure = min(100.0, exposure + delta * exposure_rate * hunger_multiplier)
 
 
 func _update_hunger(delta: float) -> void:
+	if _at_wreck():
+		return
 	hunger = min(100.0, hunger + delta * 0.28)
+
+
+func _at_wreck() -> bool:
+	return _flat_distance(astronaut.global_position, Vector3(-5.4, 0.0, -3.1)) < 2.55
+
+
+func _toggle_field_review() -> void:
+	if not scanner_recovered:
+		_set_status("The detailed record remains sealed in the emergency cache.")
+		return
+	field_review_open = not field_review_open
+	last_water_hold_active = false
+	scanner_card.modulate = Color("d9fff2") if field_review_open else Color.WHITE
+	_set_status("The astronaut braces at the scanner and reconstructs the recorded evidence. Ecological time is paused." if field_review_open else "The scanner record closes. Field time resumes.")
+
+
+func _request_water_intervention() -> void:
+	if water_doses != 1 or (nearest_patch == "" and not near_refuge):
+		_water_nearby_patch()
+		return
+	if last_water_hold_active:
+		return
+	last_water_hold_active = true
+	last_water_hold_timer = 0.0
+	last_water_hold_target = "refuge" if near_refuge else nearest_patch
+	_set_status("This is the final carried water dose. Hold SPACE to commit it; release to keep it.")
+
+
+func _update_last_water_hold(delta: float) -> void:
+	if not last_water_hold_active:
+		return
+	var current_target := "refuge" if near_refuge else nearest_patch
+	if not Input.is_key_pressed(KEY_SPACE) or current_target != last_water_hold_target:
+		last_water_hold_active = false
+		last_water_hold_timer = 0.0
+		last_water_hold_target = ""
+		return
+	last_water_hold_timer += delta
+	if last_water_hold_timer < LAST_WATER_HOLD_SECONDS:
+		return
+	last_water_hold_active = false
+	last_water_hold_timer = 0.0
+	last_water_hold_target = ""
+	_water_nearby_patch()
+
+
+func _recover_at_wreck(forced: bool) -> void:
+	var before := _observed_recovery_state()
+	var elapsed := FORCED_RECOVERY_SECONDS if forced else VOLUNTARY_RECOVERY_SECONDS
+	if forced:
+		forced_recoveries += 1
+		astronaut.position = Vector3(-5.4, 0.05, -3.1)
+		astronaut.velocity = Vector3.ZERO
+	exposure = 0.0
+	_advance_ecology_during_recovery(elapsed)
+	var report := _recovery_report(before, _observed_recovery_state())
+	if forced:
+		_set_status("Suit emergency return: the astronaut wakes at the wreck after about two field minutes. " + report)
+	else:
+		_set_status("The astronaut deliberately recovers at the wreck while a few ecological moments pass. " + report)
+
+
+func _force_recovery() -> void:
+	last_water_hold_active = false
+	_recover_at_wreck(true)
+
+
+func _advance_ecology_during_recovery(seconds: float) -> void:
+	var remaining := seconds
+	while remaining > 0.0:
+		var step := minf(ECOLOGY_STEP_SECONDS, remaining)
+		field_time += step
+		_update_ecology(step)
+		_update_ecology_grid(step)
+		_update_grazer(step)
+		_update_disturbance(step)
+		_update_presence()
+		remaining -= step
+	_refresh_ecology_visuals()
+
+
+func _observed_recovery_state() -> Dictionary:
+	var observed := {"weather": disturbance_state}
+	for id in patches:
+		if patches[id]["scanned"]:
+			observed[id] = patches[id]["state"]
+	if grazer_awake:
+		observed["grazer"] = grazer_state
+	return observed
+
+
+func _recovery_report(before: Dictionary, after: Dictionary) -> String:
+	var changes: Array[String] = []
+	for key in after:
+		if before.has(key) and before[key] != after[key]:
+			changes.append("%s changed from %s to %s" % [String(key).replace("_", " "), before[key], after[key]])
+	if changes.is_empty():
+		return "Previously observed sites show no major state change."
+	return "Scanner reconstruction: " + "; ".join(changes) + "."
 
 
 func _update_ecology(delta: float) -> void:
@@ -1014,10 +1143,14 @@ func _water_nearby_patch() -> void:
 		_set_status("No usable water is on hand. The blinking emergency cache may still be intact.")
 		return
 	if near_refuge:
+		if refuge_watered:
+			_set_status("The depression already holds the last intervention. Observe its response before committing water elsewhere.")
+			return
 		if water_doses <= 0:
 			_set_status("No water remains to test the Presence's indicated refuge.")
 			return
 		water_doses -= 1
+		refuge_watered = true
 		ecology_started = true
 		ecology.add_water(Vector2(refuge_position.x, refuge_position.z), 0.72, 1.4)
 		if refuge_signal_acknowledged:
@@ -1059,6 +1192,9 @@ func _interact() -> void:
 	if nearest_harvest_cell.x >= 0:
 		_harvest_fruiting()
 		return
+	if cache_opened and _at_wreck() and exposure > 0.5:
+		_recover_at_wreck(false)
+		return
 	_interact_with_shade()
 
 
@@ -1097,12 +1233,15 @@ func _use_water_for_survival() -> void:
 	if water_doses <= 0:
 		_set_status("No water remains for the astronaut or the ecosystem.")
 		return
+	if _at_wreck():
+		_set_status("The wreck can recover the suit without spending water. Save carried water for field emergencies or ecological intervention.")
+		return
 	if exposure < 8.0:
 		_set_status("Suit reserves are still comfortable. Drinking now would spend ecological possibility for little gain.")
 		return
 	water_doses -= 1
-	exposure = max(0.0, exposure - 32.0)
-	_set_status("One shared water dose becomes personal survival margin. The ecosystem now has fewer possible interventions.")
+	exposure = max(0.0, exposure - 50.0)
+	_set_status("One shared water dose buys roughly half an excursion of survival margin. The ecosystem now has fewer possible interventions.")
 
 
 func _eat_food() -> void:
@@ -1163,10 +1302,12 @@ func _update_interface() -> void:
 		hunger_state = "meal needed soon"
 	if hunger >= 75.0:
 		hunger_state = "survival pressure"
-	hunger_label.text = "HUNGER  %02d%%  /  %s" % [roundi(hunger), hunger_state]
+	hunger_label.text = "HUNGER  /  %s" % hunger_state.to_upper()
 	var field_seconds := int(field_time * 12.0)
 	time_label.text = "FIELD TIME  %02d:%02d  /  ecological response accelerated" % [field_seconds / 60, field_seconds % 60]
-	if analysis_lens_enabled:
+	if field_review_open:
+		ecosystem_label.text = "FIELD REVIEW  /  survival and ecological time paused  /  J closes"
+	elif analysis_lens_enabled:
 		ecosystem_label.text = "LOCAL LENS  cyan moisture / amber toxicity / nearby cells only"
 	else:
 		ecosystem_label.text = "LOCAL LENS OFF  /  V toggles scanner-assisted nearby conditions"

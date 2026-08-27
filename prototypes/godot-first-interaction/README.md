@@ -1,6 +1,6 @@
 # First Rain: opening vertical-slice prototype
 
-Throwaway Godot vertical slice for deciding whether the opening teaches movement, finite supplies, scientific observation, ecological intervention, recovery, cultivation, and the first sighting of the Presence through embodied play. The current branch additionally asks whether a tiny embodied signal vocabulary makes the Presence feel like an alien co-investigator rather than a quest giver or commandable tool.
+Throwaway Godot vertical slice for deciding whether the opening teaches movement, finite supplies, scientific observation, ecological intervention, recovery, cultivation, and the first sighting of the Presence through embodied play. The current branch additionally asks whether survival creates an expedition rhythm without crowding out ecological observation or making recoverable mistakes end the run.
 
 ## Run
 
@@ -17,6 +17,7 @@ Open `project.godot` in Godot 4.6 and press **F6/F5**, or run:
 - **E** — harvest when standing beside a mature fungal fruiting cell
 - **F** — scan a nearby moss patch
 - **C** — send a suit-light signal toward a nearby ecological subject
+- **J** — open or close the detailed field record and pause simulation time
 - **V** — toggle the scanner's nearby moisture/toxicity analysis lens
 - **Space** — spend one water dose on a nearby moss patch
 - **Q** — spend one water dose on the astronaut when exposure is meaningful
@@ -68,6 +69,14 @@ The astronaut can press **C** beside a patch, grazer, or revealed refuge to dire
 - one closed grey pulse and continued distance refuse a signal with no shared subject.
 
 The status text describes observable behavior for this low-fidelity prototype, but never translates it into an objective. The playtest question is whether players begin anticipating the reused forms through embodied context, and whether they still feel free to inspect, disagree, or walk away.
+
+## Survival-rhythm question
+
+The wreck is a safe deliberation space: hunger and exposure stop advancing there. Press **E** at the opened wreck to recover exposure deliberately while two seconds of ecological time pass. If exposure reaches its limit in the field, the suit returns the astronaut to the wreck while ten seconds of ecological time pass; the scanner reports changes only to previously observed subjects. Press **J** to pause survival and ecology while reviewing the detailed record.
+
+Exposure remains an exact suit reading. Hunger is qualitative and accelerates exposure by 25% while hungry and 60% while starving, shortening excursions without trapping the astronaut or degrading controls. Drinking spends one shared water dose to recover half an excursion. The final carried dose requires a short hold, and an already-watered refuge rejects repeated spending.
+
+The balance values are deliberately provisional. The playtest asks whether players voluntarily structure their work into excursions, understand the cost of forced recovery, and still feel able to inspect and recover from an ecological mistake.
 
 ## Regression check
 
