@@ -72,6 +72,10 @@ _Avoid_: Biome room, stage
 The connected low ground through which water, nutrients, organisms, and some disturbances can move between Ecological Zones.
 _Avoid_: Water track, scripted route
 
+**Drainage Pulse**:
+The temporary downhill movement of excess water and mobile nutrients after a real water input exceeds local retention; the initially dry Drainage Spine does not generate continuous flow.
+_Avoid_: Permanent river, passive water source
+
 **Wreck Shelter**:
 The compact safe area beneath and immediately around the wreck where the Astronaut can deliberate and recover without extending safety into the living basin.
 _Avoid_: Base zone, safe level
