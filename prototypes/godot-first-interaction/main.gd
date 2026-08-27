@@ -54,6 +54,22 @@ var carrying_shade := false
 var shade_placed := false
 var presence_root: Node3D
 var presence_target := Vector3(0.8, 1.3, -5.45)
+var presence_signal_ring: MeshInstance3D
+var astronaut_signal_ring: MeshInstance3D
+var astronaut_signal_beam: MeshInstance3D
+var presence_signal_audio: AudioStreamPlayer
+var presence_signal_elapsed := 0.0
+var presence_signal_duration := 0.0
+var presence_signal_interval := 0.4
+var presence_signal_primary := Vector3.ZERO
+var presence_signal_secondary := Vector3.ZERO
+var presence_signal_has_secondary := false
+var astronaut_signal_timer := 0.0
+var presence_focus_id := ""
+var last_astronaut_signal_id := ""
+var last_astronaut_signal_position := Vector3.ZERO
+var last_astronaut_signal_timer := 0.0
+var refuge_signal_acknowledged := false
 
 var grazer_root: Node3D
 var grazer_body: MeshInstance3D
@@ -98,6 +114,7 @@ func _ready() -> void:
 	_build_astronaut()
 	_build_patches()
 	_build_presence()
+	_build_presence_signals()
 	_build_refuge()
 	_build_grazer()
 	_build_disturbance()
@@ -118,6 +135,7 @@ func _physics_process(delta: float) -> void:
 	_update_grazer(delta)
 	_update_disturbance(delta)
 	_update_presence()
+	_update_presence_signals(delta)
 	_update_scan_pulse(delta)
 	_update_interface()
 
@@ -131,6 +149,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_scan_nearby_patch()
 		KEY_V:
 			_toggle_analysis_lens()
+		KEY_C:
+			_signal_to_presence()
 		KEY_SPACE:
 			_water_nearby_patch()
 		KEY_E:
@@ -328,6 +348,51 @@ func _build_presence() -> void:
 	presence_root.add_child(glow)
 
 
+func _build_presence_signals() -> void:
+	presence_signal_ring = _create_signal_ring("PresenceSignalRing", Color("65d9cd"), 0.03)
+	astronaut_signal_ring = _create_signal_ring("AstronautSignalRing", Color("9fd5ee"), 0.045)
+
+	astronaut_signal_beam = MeshInstance3D.new()
+	astronaut_signal_beam.name = "AstronautSignalBeam"
+	var beam_mesh := BoxMesh.new()
+	beam_mesh.size = Vector3(0.035, 0.035, 1.0)
+	astronaut_signal_beam.mesh = beam_mesh
+	astronaut_signal_beam.material_override = _signal_material(Color("9fd5ee"), 0.68)
+	astronaut_signal_beam.visible = false
+	add_child(astronaut_signal_beam)
+
+	presence_signal_audio = AudioStreamPlayer.new()
+	presence_signal_audio.name = "PresenceSignalAudio"
+	presence_signal_audio.volume_db = -8.0
+	add_child(presence_signal_audio)
+
+
+func _create_signal_ring(node_name: String, color: Color, height: float) -> MeshInstance3D:
+	var ring := MeshInstance3D.new()
+	ring.name = node_name
+	var mesh := CylinderMesh.new()
+	mesh.top_radius = 0.72
+	mesh.bottom_radius = 0.78
+	mesh.height = height
+	mesh.radial_segments = 48
+	ring.mesh = mesh
+	ring.material_override = _signal_material(color, 0.52)
+	ring.visible = false
+	add_child(ring)
+	return ring
+
+
+func _signal_material(color: Color, alpha: float) -> StandardMaterial3D:
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color(color.r, color.g, color.b, alpha)
+	material.emission_enabled = true
+	material.emission = color
+	material.emission_energy_multiplier = 1.45
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	return material
+
+
 func _build_refuge() -> void:
 	refuge_marker = Node3D.new()
 	refuge_marker.name = "PresenceMoistureNudge"
@@ -430,7 +495,7 @@ func _build_interface() -> void:
 
 	var title := Label.new()
 	title.position = Vector2(24, 18)
-	title.text = "FIRST RAIN  /  ECOLOGICAL FEEDBACK PROTOTYPE"
+	title.text = "FIRST RAIN  /  PRESENCE COMMUNICATION PROTOTYPE"
 	title.add_theme_font_size_override("font_size", 15)
 	title.add_theme_color_override("font_color", Color("e9b36e"))
 	canvas.add_child(title)
@@ -472,7 +537,7 @@ func _build_interface() -> void:
 
 	var controls := Label.new()
 	controls.position = Vector2(24, 606)
-	controls.text = "WASD / ARROWS move   E interact/harvest   F scan   V local lens   SPACE water   Q drink   Z eat   R restart"
+	controls.text = "WASD move   E interact   F scan   C signal   V lens   SPACE water   Q drink   Z eat   R restart"
 	controls.add_theme_font_size_override("font_size", 14)
 	controls.add_theme_color_override("font_color", Color("aeb7b4"))
 	canvas.add_child(controls)
@@ -635,6 +700,8 @@ func _update_nearby_interactions() -> void:
 		prompt_label.text = "The wreck's blinking cache may contain usable instruments."
 	else:
 		prompt_label.text = "Look for surfaces that seem almost—but not quite—alive."
+	if presence_root.visible:
+		prompt_label.text += "     C  signal toward nearby subject"
 
 
 func _update_exposure(delta: float) -> void:
@@ -674,9 +741,9 @@ func _update_ecology(delta: float) -> void:
 			_set_patch_color(id, Color("62b56f"), Color("347841"))
 			_add_moisture_halo(id)
 			_add_discovery("Moss analogue — active; retains local moisture")
-			if nearest_patch == id:
-				_set_status("The moss holds a living sheen. The scanner adds its first living record. Something watches from the ridge.")
 			presence_root.visible = true
+			_presence_focus(id, patch["node"].global_position)
+			_set_status("The moss holds a living sheen. A flame leaves the ridge, settles beside it, and sends one narrow pulse through the green surface.")
 
 
 func _update_ecology_grid(delta: float) -> void:
@@ -715,7 +782,8 @@ func _update_grazer(delta: float) -> void:
 			grazer_label.visible = true
 			grazer_glow.visible = true
 			_add_discovery("Grazer — wakes above biomass threshold; eats moss and returns nutrients")
-			_set_status("A stone-like shell unfolds into a small grazer. It turns toward the strongest moss signal.")
+			_presence_focus("grazer", grazer_root.position)
+			_set_status("A stone-like shell unfolds into a small grazer. The flame moves beside it and repeats the same single pulse used at the moss.")
 			disturbance_state = "warning"
 			disturbance_timer = 14.0
 		return
@@ -831,7 +899,8 @@ func _update_disturbance(delta: float) -> void:
 			disturbance_column = 0
 			dust_front.visible = true
 			_add_discovery("Heat-and-dust front — dries cells and carries toxicity eastward")
-			_set_status("The heat-and-dust front enters the basin. Living cover slows moisture loss where bare cells cannot.")
+			_presence_warn_about(dust_front.position)
+			_set_status("The front enters the basin. The flame cuts across its path, recoils, and sounds three descending amber pulses.")
 		return
 
 	disturbance_timer += delta
@@ -854,8 +923,8 @@ func _reveal_presence_nudge() -> void:
 	refuge_marker.visible = true
 	ecology.reveal_subsurface_refuge(Vector2(refuge_position.x, refuge_position.z))
 	presence_root.visible = true
-	presence_target = refuge_position + Vector3(0.0, 1.15, 0.0)
-	_set_status("As the wind rises, the Presence leaves the ridge and hovers over an apparently bare depression. It offers no instruction.")
+	_presence_focus("refuge", refuge_position)
+	_set_status("As the wind rises, the flame travels to a bare depression and repeats its familiar single focus pulse. It offers no action.")
 
 
 func _refresh_ecology_visuals() -> void:
@@ -951,7 +1020,12 @@ func _water_nearby_patch() -> void:
 		water_doses -= 1
 		ecology_started = true
 		ecology.add_water(Vector2(refuge_position.x, refuge_position.z), 0.72, 1.4)
-		_set_status("Water sinks into the bare depression instead of flashing away. The Presence watches the cells, not the astronaut.")
+		if refuge_signal_acknowledged:
+			_begin_presence_signal("invitation", refuge_position, astronaut.position)
+			_set_status("Water sinks into the depression. The flame answers with a wider pulse around both participants, then turns back to the changing cells.")
+		else:
+			_begin_presence_signal("focus", refuge_position)
+			_set_status("Water sinks into the depression. The flame repeats its focus pulse at the changing cells; whether this answered its signal remains unclear.")
 		return
 	if nearest_patch == "":
 		_set_status("Water must be committed at a specific patch, not poured from a distance.")
@@ -1332,6 +1406,190 @@ func _update_discovery_readout() -> void:
 	for index in range(start, discoveries.size()):
 		lines.append("• " + discoveries[index])
 	discovery_readout.text = "\n".join(lines)
+
+
+func _signal_to_presence() -> void:
+	if not presence_root.visible:
+		_show_astronaut_signal(astronaut.position, {})
+		_set_status("The astronaut sends a short suit-light pulse into the basin. Nothing visibly answers.")
+		return
+
+	var target := _nearby_signal_target()
+	_show_astronaut_signal(astronaut.position, target)
+	if target.is_empty():
+		_begin_presence_signal("refusal", presence_root.position)
+		_set_status("The astronaut calls without sharing a subject. The flame closes to one flat pulse and remains distant.")
+		return
+
+	var target_id: String = target["id"]
+	var target_position: Vector3 = target["position"]
+	if target_id == presence_focus_id:
+		_begin_presence_signal("echo", target_position)
+		last_astronaut_signal_id = target_id
+		last_astronaut_signal_position = target_position
+		last_astronaut_signal_timer = 7.0
+		if target_id == "refuge":
+			refuge_signal_acknowledged = true
+		_set_status("The astronaut points to the same place. The flame answers at the suit light's tempo, then returns its attention there.")
+		return
+
+	if last_astronaut_signal_timer > 0.0 and last_astronaut_signal_id != "" and last_astronaut_signal_id != target_id:
+		_begin_presence_signal("question", last_astronaut_signal_position, target_position)
+		presence_target = (last_astronaut_signal_position + target_position) * 0.5 + Vector3(0.0, 1.15, 0.0)
+		presence_focus_id = ""
+		last_astronaut_signal_id = target_id
+		last_astronaut_signal_position = target_position
+		last_astronaut_signal_timer = 7.0
+		_set_status("The flame retraces the astronaut's two subjects. Its paired tone rises without resolving, then it waits between them.")
+		return
+
+	last_astronaut_signal_id = target_id
+	last_astronaut_signal_position = target_position
+	last_astronaut_signal_timer = 7.0
+	if target_id == "crust" and (patches["crust"]["state"] == "failed" or disturbance_state == "active"):
+		_presence_warn_about(target_position)
+		_set_status("The flame cuts across the astronaut's line, recoils from the damaged film, and repeats three tight amber pulses.")
+	else:
+		presence_focus_id = target_id
+		presence_target = target_position + Vector3(0.0, 1.15, 0.0)
+		_begin_presence_signal("focus", target_position)
+		_set_status("The astronaut points. The flame approaches the subject and answers with one narrow pulse, without acting on it.")
+
+
+func _nearby_signal_target() -> Dictionary:
+	if near_refuge:
+		return {"id": "refuge", "position": refuge_position}
+	if nearest_patch != "":
+		return {"id": nearest_patch, "position": patches[nearest_patch]["node"].global_position}
+	if grazer_awake and _flat_distance(astronaut.position, grazer_root.position) < 1.8:
+		return {"id": "grazer", "position": grazer_root.position}
+	return {}
+
+
+func _show_astronaut_signal(origin: Vector3, target: Dictionary) -> void:
+	astronaut_signal_timer = 0.72
+	astronaut_signal_ring.position = Vector3(origin.x, 0.12, origin.z)
+	astronaut_signal_ring.scale = Vector3.ONE * 0.3
+	astronaut_signal_ring.visible = true
+	if target.is_empty():
+		astronaut_signal_beam.visible = false
+		return
+	var beam_start := origin + Vector3(0.0, 0.9, 0.0)
+	var beam_end: Vector3 = target["position"] + Vector3(0.0, 0.9, 0.0)
+	var distance := beam_start.distance_to(beam_end)
+	astronaut_signal_beam.position = (beam_start + beam_end) * 0.5
+	astronaut_signal_beam.scale = Vector3(1.0, 1.0, distance)
+	astronaut_signal_beam.look_at(beam_end, Vector3.UP)
+	astronaut_signal_beam.visible = true
+
+
+func _presence_focus(target_id: String, target_position: Vector3) -> void:
+	presence_focus_id = target_id
+	presence_target = target_position + Vector3(0.0, 1.15, 0.0)
+	_begin_presence_signal("focus", target_position)
+
+
+func _presence_warn_about(target_position: Vector3) -> void:
+	var away := astronaut.position - target_position
+	away.y = 0.0
+	if away.length() < 0.1:
+		away = Vector3(-1.0, 0.0, 0.0)
+	presence_target = target_position + away.normalized() * 1.15 + Vector3(0.0, 1.1, 0.0)
+	presence_focus_id = ""
+	_begin_presence_signal("warning", target_position)
+
+
+func _begin_presence_signal(mode: String, primary: Vector3, secondary := Vector3.ZERO) -> void:
+	var color := Color("65d9cd")
+	var pulses := 1
+	presence_signal_interval = 0.62
+	var tones := PackedFloat32Array([220.0])
+	match mode:
+		"echo":
+			color = Color("9fe6dc")
+			pulses = 2
+			presence_signal_interval = 0.34
+			tones = PackedFloat32Array([285.0, 285.0])
+		"question":
+			color = Color("bb91dc")
+			pulses = 2
+			presence_signal_interval = 0.48
+			tones = PackedFloat32Array([220.0, 330.0])
+		"warning":
+			color = Color("eda24f")
+			pulses = 3
+			presence_signal_interval = 0.23
+			tones = PackedFloat32Array([190.0, 145.0, 105.0])
+		"invitation":
+			color = Color("79d7b2")
+			pulses = 2
+			presence_signal_interval = 0.56
+			tones = PackedFloat32Array([260.0, 390.0])
+		"refusal":
+			color = Color("9aa39e")
+			pulses = 1
+			presence_signal_interval = 0.78
+			tones = PackedFloat32Array([125.0])
+	presence_signal_primary = Vector3(primary.x, 0.1, primary.z)
+	presence_signal_secondary = Vector3(secondary.x, 0.1, secondary.z)
+	presence_signal_has_secondary = mode == "question" or mode == "invitation"
+	presence_signal_elapsed = 0.0
+	presence_signal_duration = presence_signal_interval * float(pulses)
+	presence_signal_ring.position = presence_signal_primary
+	presence_signal_ring.scale = Vector3.ONE * 0.3
+	presence_signal_ring.material_override = _signal_material(color, 0.52)
+	presence_signal_ring.visible = true
+	_play_presence_tones(tones)
+
+
+func _play_presence_tones(frequencies: PackedFloat32Array) -> void:
+	if DisplayServer.get_name() == "headless":
+		return
+	var mix_rate := 22050
+	var tone_seconds := 0.12
+	var gap_seconds := 0.055
+	var segment_seconds := tone_seconds + gap_seconds
+	var total_samples := int(float(mix_rate) * segment_seconds * float(frequencies.size()))
+	var data := PackedByteArray()
+	data.resize(total_samples * 2)
+	for sample_index in range(total_samples):
+		var time := float(sample_index) / float(mix_rate)
+		var tone_index := mini(int(time / segment_seconds), frequencies.size() - 1)
+		var local_time := fmod(time, segment_seconds)
+		var value := 0.0
+		if local_time < tone_seconds:
+			var envelope := sin(PI * local_time / tone_seconds)
+			value = sin(TAU * frequencies[tone_index] * local_time) * envelope * 0.22
+		data.encode_s16(sample_index * 2, int(value * 32767.0))
+	var stream := AudioStreamWAV.new()
+	stream.format = AudioStreamWAV.FORMAT_16_BITS
+	stream.mix_rate = mix_rate
+	stream.stereo = false
+	stream.data = data
+	presence_signal_audio.stream = stream
+	presence_signal_audio.play()
+
+
+func _update_presence_signals(delta: float) -> void:
+	last_astronaut_signal_timer = maxf(0.0, last_astronaut_signal_timer - delta)
+	if astronaut_signal_timer > 0.0:
+		astronaut_signal_timer -= delta
+		var astronaut_progress := 1.0 - maxf(0.0, astronaut_signal_timer) / 0.72
+		astronaut_signal_ring.scale = Vector3.ONE * lerpf(0.3, 1.45, astronaut_progress)
+		if astronaut_signal_timer <= 0.0:
+			astronaut_signal_ring.visible = false
+			astronaut_signal_beam.visible = false
+	if presence_signal_elapsed >= presence_signal_duration:
+		presence_signal_ring.visible = false
+		return
+	presence_signal_elapsed += delta
+	var pulse_index := int(presence_signal_elapsed / presence_signal_interval)
+	var pulse_progress := fmod(presence_signal_elapsed, presence_signal_interval) / presence_signal_interval
+	if presence_signal_has_secondary and pulse_index % 2 == 1:
+		presence_signal_ring.position = presence_signal_secondary
+	else:
+		presence_signal_ring.position = presence_signal_primary
+	presence_signal_ring.scale = Vector3.ONE * lerpf(0.3, 1.85, pulse_progress)
 
 
 func _update_presence() -> void:

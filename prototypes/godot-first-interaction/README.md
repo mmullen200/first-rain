@@ -1,6 +1,6 @@
 # First Rain: opening vertical-slice prototype
 
-Throwaway Godot vertical slice for deciding whether the opening teaches movement, finite supplies, scientific observation, ecological intervention, recovery, cultivation, and the first sighting of the Presence through embodied play. The current branch additionally asks whether layered world cues and a damaged local scanner communicate ecological causes without exposing the complete simulation.
+Throwaway Godot vertical slice for deciding whether the opening teaches movement, finite supplies, scientific observation, ecological intervention, recovery, cultivation, and the first sighting of the Presence through embodied play. The current branch additionally asks whether a tiny embodied signal vocabulary makes the Presence feel like an alien co-investigator rather than a quest giver or commandable tool.
 
 ## Run
 
@@ -16,6 +16,7 @@ Open `project.godot` in Godot 4.6 and press **F6/F5**, or run:
 - **E** — open the emergency cache, then pick up or place the loose shade panel
 - **E** — harvest when standing beside a mature fungal fruiting cell
 - **F** — scan a nearby moss patch
+- **C** — send a suit-light signal toward a nearby ecological subject
 - **V** — toggle the scanner's nearby moisture/toxicity analysis lens
 - **Space** — spend one water dose on a nearby moss patch
 - **Q** — spend one water dose on the astronaut when exposure is meaningful
@@ -54,6 +55,19 @@ The ecological grid remains dormant until the astronaut commits the first water 
 ## Ecological-feedback question
 
 The omniscient global cell count is hidden during ordinary play. The damaged Field Scanner instead provides coarse-but-honest local bands, visible confidence, a stored baseline for before/after rescanning, comparison with the previously scanned site, a short world-space scan pulse, and an optional nearby analysis lens. The discovery record continues to retain species and causal relationships. This tests whether players can explain why one watering succeeds and another fails without receiving exact rules or fabricated uncertainty.
+
+## Presence-communication question
+
+The astronaut can press **C** beside a patch, grazer, or revealed refuge to direct a short suit-light signal toward that subject. The Presence communicates only after appearing in the ecological progression. It reuses a small grammar across contexts:
+
+- one cyan pulse and direct movement proposes shared focus;
+- a matched two-pulse response acknowledges the astronaut;
+- alternating violet pulses between two recently signaled subjects ask whether they are related;
+- three tight descending amber pulses plus recoil warn of danger;
+- a wide two-part pulse around the refuge and astronaut marks reciprocal participation;
+- one closed grey pulse and continued distance refuse a signal with no shared subject.
+
+The status text describes observable behavior for this low-fidelity prototype, but never translates it into an objective. The playtest question is whether players begin anticipating the reused forms through embodied context, and whether they still feel free to inspect, disagree, or walk away.
 
 ## Regression check
 
