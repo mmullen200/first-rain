@@ -64,6 +64,14 @@ _Avoid_: Level, test arena, collection of rooms
 A recognizable part of the Crash Basin shaped by local terrain and environmental conditions, with gradients rather than hard biome borders.
 _Avoid_: Biome room, stage
 
+**Drainage Spine**:
+The connected low ground through which water, nutrients, organisms, and some disturbances can move between Ecological Zones.
+_Avoid_: Water track, scripted route
+
+**Wreck Shelter**:
+The compact safe area beneath and immediately around the wreck where the Astronaut can deliberate and recover without extending safety into the living basin.
+_Avoid_: Base zone, safe level
+
 **Animal Stewardship**:
 The species-specific ways the Astronaut develops more predictable relationships with animals through habitat care, habituation, individual trust, husbandry, and—where generational inheritance is simulated—Domestication.
 _Avoid_: Unit control, universal pet system
