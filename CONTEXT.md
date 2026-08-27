@@ -24,6 +24,10 @@ _Avoid_: Spell, command
 The astronaut's damaged scientific device, used to measure a limited set of local environmental properties, record discovered species and substances, and build an ecological map. Its readings may be incomplete, coarse, or visibly uncertain, but it does not secretly provide false information.
 _Avoid_: Journal, codex, omniscient scanner
 
+**Basin Survey**:
+The Field Scanner's coarse, pause-only spatial record of visited Ecological Zones, last observed conditions, placed equipment, and explicit uncertainty about stale evidence.
+_Avoid_: Minimap, route planner, objective map
+
 **Field Experiment**:
 A repeatable passage from noticing an ecological opportunity or problem through local inspection, hypothesis, situated intervention, observation, interpretation, and adaptation. It concludes with a meaningful change in ecological understanding or capability rather than a declared quest result.
 _Avoid_: Quest, recipe, minigame
