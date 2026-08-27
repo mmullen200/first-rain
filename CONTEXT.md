@@ -56,6 +56,14 @@ _Avoid_: Unlock ladder, biome level
 The coexistence of pioneer, established, disturbed, and recovering habitats in different parts of the same region as local Succession follows different trajectories.
 _Avoid_: Global biome stage, region level
 
+**Crash Basin**:
+The single connected landform surrounding the wreck in which the prototype's Ecological Mosaic, survival expeditions, and First Rain unfold.
+_Avoid_: Level, test arena, collection of rooms
+
+**Ecological Zone**:
+A recognizable part of the Crash Basin shaped by local terrain and environmental conditions, with gradients rather than hard biome borders.
+_Avoid_: Biome room, stage
+
 **Animal Stewardship**:
 The species-specific ways the Astronaut develops more predictable relationships with animals through habitat care, habituation, individual trust, husbandry, and—where generational inheritance is simulated—Domestication.
 _Avoid_: Unit control, universal pet system
