@@ -264,6 +264,25 @@ func cell_snapshot(x: int, y: int) -> Dictionary:
 	}
 
 
+func full_snapshot() -> Dictionary:
+	return {
+		"version": 1,
+		"tick": tick,
+		"width": WIDTH,
+		"height": HEIGHT,
+		"moisture": moisture.duplicate(),
+		"temperature": temperature.duplicate(),
+		"toxicity": toxicity.duplicate(),
+		"nutrients": nutrients.duplicate(),
+		"dormant_moss": dormant_moss.duplicate(),
+		"moss": moss.duplicate(),
+		"dead_biomass": dead_biomass.duplicate(),
+		"fungus": fungus.duplicate(),
+		"fruiting": fruiting.duplicate(),
+		"shade": shade.duplicate()
+	}
+
+
 func world_position(x: int, y: int) -> Vector2:
 	return ORIGIN + Vector2(float(x) * CELL_SIZE, float(y) * CELL_SIZE)
 

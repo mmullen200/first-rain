@@ -23,6 +23,7 @@ Open `project.godot` in Godot 4.6 and press **F6/F5**, or run:
 - **Q** — spend one water dose on the astronaut when exposure is meaningful
 - **Z** — eat carried fresh food first, otherwise a finite ration
 - **R** — restart the experiment
+- **F9** — open or close the observer-only evidence debugger; **[ / ]** selects an earlier or later causal event
 
 ## Question under test
 
@@ -78,6 +79,18 @@ Exposure remains an exact suit reading. Hunger is qualitative and accelerates ex
 
 The balance values are deliberately provisional. The playtest asks whether players voluntarily structure their work into excursions, understand the cost of forced recovery, and still feel able to inspect and recover from an ecological mistake.
 
+## Evidence and replay contract
+
+Issue #10 is represented by an in-memory recorder behind one Godot interface. It is deliberately independent of status text, scanner prose, meshes, and labels. Press **F9** to pause the simulation and inspect the evidence stream; **[ / ]** walks events and displays each selected event's causal chain.
+
+The contract separates three records:
+
+- **Commands** are accepted, state-affecting player intent addressed to stable subjects, timestamped with the integer ecology tick and field time. Movement and observer-only UI actions are excluded; action position is captured as context.
+- **Events** use a namespaced taxonomy (`intervention.*`, `ecology.*`, `organism.*`, `environment.*`, and `survival.*`). Every event has a stable sequence ID, subject ID, tick, factual payload, and zero or more cause IDs. A playtest explanation can therefore be compared with an actual causal episode without parsing presentation text.
+- **Checkpoints** are versioned full simulation snapshots captured at run start, player interventions, recovery boundaries, and major episode boundaries. Replay begins from a checkpoint, reapplies subsequent commands in sequence, and compares later checkpoints to detect divergence. Checkpoints are not taken for every visual or scanner update.
+
+This prototype keeps the records in memory and exposes a textual observer adapter. Production persistence, file formats, compression, telemetry consent, and a full rewind player remain outside this decision.
+
 ## Regression check
 
 The captured idle-opening failure can be replayed headlessly:
@@ -87,6 +100,7 @@ The captured idle-opening failure can be replayed headlessly:
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/grazer_motion_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/grazer_metabolism_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/ecological_feedback_test.gd
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/evidence_recorder_test.gd
 ```
 
-The checks verify that an idle opening cannot pre-age the dormant ecology, that the grazer moves visibly without frame-sized jumps, that it exposes a complete seek–digest–roam–manure cycle, and that the scanner preserves bounded baseline, comparison, rescan, pulse, and local-lens feedback.
+The checks verify that an idle opening cannot pre-age the dormant ecology, that the grazer moves visibly without frame-sized jumps, that it exposes a complete seek–digest–roam–manure cycle, that the scanner preserves bounded baseline, comparison, rescan, pulse, and local-lens feedback, and that the evidence recorder reconstructs an ordered causal episode from command through outcome.

@@ -17,10 +17,20 @@ const VOLUNTARY_RECOVERY_SECONDS := 2.0
 const FORCED_RECOVERY_SECONDS := 10.0
 const LAST_WATER_HOLD_SECONDS := 0.75
 const EcologyGridModel = preload("res://ecology_grid.gd")
+const EvidenceRecorder = preload("res://evidence_recorder.gd")
 
 var astronaut: CharacterBody3D
 var camera: Camera3D
 var ecology
+var evidence
+var evidence_debug_open := false
+var evidence_debug_selection := 0
+var evidence_panel: PanelContainer
+var evidence_readout: Label
+var last_intervention_event_id := ""
+var grazer_wake_event_id := ""
+var grazer_bite_event_id := ""
+var disturbance_event_id := ""
 var ecology_cells: Array[MeshInstance3D] = []
 var ecology_step_accumulator := 0.0
 var ecology_started := false
@@ -129,12 +139,16 @@ func _ready() -> void:
 	_build_disturbance()
 	_build_scan_pulse()
 	_build_interface()
+	_build_evidence_debugger()
+	evidence = EvidenceRecorder.new()
+	evidence.begin_run(1, _evidence_snapshot())
 	_set_status("The crash has stopped. The ship is dead, but an emergency cache still blinks beneath the broken wing.")
 
 
 func _physics_process(delta: float) -> void:
-	if field_review_open:
+	if field_review_open or evidence_debug_open:
 		_update_interface()
+		_update_evidence_debugger()
 		return
 	field_time += delta
 	_move_astronaut(delta)
@@ -183,6 +197,12 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_tree().reload_current_scene()
 		KEY_J:
 			_toggle_field_review()
+		KEY_F9:
+			_toggle_evidence_debugger()
+		KEY_BRACKETLEFT:
+			_select_earlier_evidence()
+		KEY_BRACKETRIGHT:
+			_select_later_evidence()
 
 
 func _build_world() -> void:
@@ -517,7 +537,7 @@ func _build_interface() -> void:
 
 	var title := Label.new()
 	title.position = Vector2(24, 18)
-	title.text = "FIRST RAIN  /  SURVIVAL RHYTHM PROTOTYPE"
+	title.text = "FIRST RAIN  /  EVIDENCE + REPLAY PROTOTYPE"
 	title.add_theme_font_size_override("font_size", 15)
 	title.add_theme_color_override("font_color", Color("e9b36e"))
 	canvas.add_child(title)
@@ -559,7 +579,7 @@ func _build_interface() -> void:
 
 	var controls := Label.new()
 	controls.position = Vector2(24, 606)
-	controls.text = "WASD move   E interact/recover   F scan   C signal   J records   V lens   SPACE water   Q drink   Z eat"
+	controls.text = "WASD move   E interact/recover   F scan   C signal   J records   V lens   SPACE water   Q drink   Z eat   F9 evidence"
 	controls.add_theme_font_size_override("font_size", 14)
 	controls.add_theme_color_override("font_color", Color("aeb7b4"))
 	canvas.add_child(controls)
@@ -635,6 +655,83 @@ func _build_interface() -> void:
 		crack.color = Color(0.68, 0.78, 0.74, 0.2)
 		crack.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		canvas.add_child(crack)
+
+
+func _build_evidence_debugger() -> void:
+	var canvas := CanvasLayer.new()
+	canvas.layer = 20
+	add_child(canvas)
+	evidence_panel = PanelContainer.new()
+	evidence_panel.position = Vector2(120, 70)
+	evidence_panel.size = Vector2(910, 535)
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.025, 0.045, 0.055, 0.97)
+	style.border_color = Color("5eb6a4")
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(8)
+	evidence_panel.add_theme_stylebox_override("panel", style)
+	canvas.add_child(evidence_panel)
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 22)
+	margin.add_theme_constant_override("margin_right", 22)
+	margin.add_theme_constant_override("margin_top", 18)
+	margin.add_theme_constant_override("margin_bottom", 18)
+	evidence_panel.add_child(margin)
+	evidence_readout = Label.new()
+	evidence_readout.add_theme_font_size_override("font_size", 15)
+	evidence_readout.add_theme_color_override("font_color", Color("c7e5dc"))
+	evidence_readout.text = "EVIDENCE RECORDER STARTING"
+	margin.add_child(evidence_readout)
+	evidence_panel.visible = false
+
+
+func _toggle_evidence_debugger() -> void:
+	evidence_debug_open = not evidence_debug_open
+	evidence_debug_selection = 0
+	evidence_panel.visible = evidence_debug_open
+	_update_evidence_debugger()
+
+
+func _select_earlier_evidence() -> void:
+	if not evidence_debug_open or evidence == null:
+		return
+	evidence_debug_selection = mini(evidence_debug_selection + 1, maxi(0, evidence.events.size() - 1))
+	_update_evidence_debugger()
+
+
+func _select_later_evidence() -> void:
+	if not evidence_debug_open:
+		return
+	evidence_debug_selection = maxi(0, evidence_debug_selection - 1)
+	_update_evidence_debugger()
+
+
+func _update_evidence_debugger() -> void:
+	if not evidence_debug_open or evidence == null:
+		return
+	evidence_readout.text = "\n".join(evidence.debug_view(evidence_debug_selection)) + "\n\n[ / ] select event     F9 close (simulation paused)"
+
+
+func _evidence_snapshot() -> Dictionary:
+	return {
+		"field_time": field_time,
+		"ecology": ecology.full_snapshot(),
+		"supplies": {"water": water_doses, "rations": ration_packs, "fresh_food": fresh_food},
+		"astronaut": {"position": astronaut.position, "hunger": hunger, "exposure": exposure},
+		"patches": {
+			"hollow": {"state": patches["hollow"]["state"], "shade": patches["hollow"]["shade"]},
+			"crust": {"state": patches["crust"]["state"], "shade": patches["crust"]["shade"]}
+		},
+		"grazer": {"awake": grazer_awake, "state": grazer_state, "cell": grazer_cell},
+		"disturbance": disturbance_state
+	}
+
+
+func _record_command(verb: String, target: String, facts := {}) -> String:
+	var command_facts: Dictionary = facts.duplicate(true)
+	command_facts["field_time"] = field_time
+	command_facts["astronaut_position"] = astronaut.position
+	return evidence.record_command(ecology.tick, verb, target, command_facts)
 
 
 func _move_astronaut(_delta: float) -> void:
@@ -795,6 +892,9 @@ func _update_last_water_hold(delta: float) -> void:
 func _recover_at_wreck(forced: bool) -> void:
 	var before := _observed_recovery_state()
 	var elapsed := FORCED_RECOVERY_SECONDS if forced else VOLUNTARY_RECOVERY_SECONDS
+	var command_id := ""
+	if not forced:
+		command_id = _record_command("recover", "wreck", {"elapsed": elapsed})
 	if forced:
 		forced_recoveries += 1
 		astronaut.position = Vector3(-5.4, 0.05, -3.1)
@@ -802,6 +902,9 @@ func _recover_at_wreck(forced: bool) -> void:
 	exposure = 0.0
 	_advance_ecology_during_recovery(elapsed)
 	var report := _recovery_report(before, _observed_recovery_state())
+	var causes: Array[String] = [] if command_id == "" else [command_id]
+	evidence.record_event(ecology.tick, "survival.forced_recovery" if forced else "survival.voluntary_recovery", "astronaut", causes, {"elapsed": elapsed, "observed_before": before, "observed_after": _observed_recovery_state()})
+	evidence.checkpoint(ecology.tick, "recovery_boundary", _evidence_snapshot())
 	if forced:
 		_set_status("Suit emergency return: the astronaut wakes at the wreck after about two field minutes. " + report)
 	else:
@@ -887,14 +990,18 @@ func _update_ecology_grid(delta: float) -> void:
 		var state: Dictionary = ecology.summary()
 		if not moss_spread_announced and state["moss_cells"] >= 5:
 			moss_spread_announced = true
+			var moss_causes := [] if last_intervention_event_id == "" else [last_intervention_event_id]
+			evidence.record_event(ecology.tick, "ecology.moss_spread", "basin", moss_causes, state)
 			_add_discovery("Moss spread — follows connected cool, moist cells")
 			_set_status("Living green crosses the square cell boundaries. The moss is spreading beyond the watered point.")
 		if not fungus_announced and state["fungus_cells"] >= 2:
 			fungus_announced = true
+			evidence.record_event(ecology.tick, "ecology.fungus_awakened", "basin", [], state)
 			_add_discovery("Fungus — awakens in wet dead biomass; releases nutrients")
 			_set_status("Pale violet threads appear beneath older moss. Dead material falls as nearby nutrient readings rise.")
 		if not fruiting_announced and state["fruiting_cells"] >= 2:
 			fruiting_announced = true
+			evidence.record_event(ecology.tick, "ecology.fruiting_bodies", "basin", [], state)
 			_add_discovery("Fungal fruiting body — edible; depends on wet nutrient-rich mycelium")
 			_set_status("Amber fruiting bodies rise from the violet network. The scanner marks their tissue as edible.")
 
@@ -904,6 +1011,7 @@ func _update_grazer(delta: float) -> void:
 		var dormant_state: Dictionary = ecology.summary()
 		if dormant_state["moss_cells"] >= 7 and dormant_state["fungus_cells"] >= 3 and dormant_state["fruiting_cells"] >= 2:
 			grazer_awake = true
+			grazer_wake_event_id = evidence.record_event(ecology.tick, "organism.grazer_awakened", "grazer:1", [], dormant_state)
 			_set_grazer_state("seeking")
 			grazer_root.scale = Vector3.ONE * 1.35
 			grazer_body.material_override = _material(Color("76d2bd"), 0.58, Color("237563"))
@@ -915,6 +1023,8 @@ func _update_grazer(delta: float) -> void:
 			_set_status("A stone-like shell unfolds into a small grazer. The flame moves beside it and repeats the same single pulse used at the moss.")
 			disturbance_state = "warning"
 			disturbance_timer = 14.0
+			disturbance_event_id = evidence.record_event(ecology.tick, "environment.disturbance_warning", "heat_dust_front:1", [grazer_wake_event_id])
+			evidence.checkpoint(ecology.tick, "episode_boundary", _evidence_snapshot())
 		return
 
 	grazer_hunger = minf(1.0, grazer_hunger + delta * GRAZER_HUNGER_RATE)
@@ -924,6 +1034,8 @@ func _update_grazer(delta: float) -> void:
 			var manure_cell: Vector2i = ecology.world_to_cell(Vector2(grazer_root.position.x, grazer_root.position.z))
 			if manure_cell != grazer_last_feeding_cell:
 				ecology.deposit_manure(manure_cell, grazer_meal)
+				var manure_causes := [] if grazer_bite_event_id == "" else [grazer_bite_event_id]
+				evidence.record_event(ecology.tick, "organism.manure_deposited", "cell:%d,%d" % [manure_cell.x, manure_cell.y], manure_causes, {"amount": grazer_meal})
 				grazer_meal = 0.0
 				_set_grazer_state("roaming")
 				_refresh_ecology_visuals()
@@ -947,6 +1059,7 @@ func _update_grazer(delta: float) -> void:
 		if local_food["moss"] >= 0.025:
 			var eaten: float = ecology.graze_cell(grazer_cell, GRAZER_BITE_SIZE)
 			if eaten > 0.0:
+				grazer_bite_event_id = evidence.record_event(ecology.tick, "organism.moss_grazed", "cell:%d,%d" % [grazer_cell.x, grazer_cell.y], [grazer_wake_event_id], {"amount": eaten})
 				grazer_hunger = 0.0
 				grazer_meal = eaten
 				grazer_digestion_timer = GRAZER_DIGEST_SECONDS
@@ -1024,6 +1137,7 @@ func _update_disturbance(delta: float) -> void:
 			_reveal_presence_nudge()
 		if disturbance_timer <= 0.0:
 			disturbance_state = "active"
+			disturbance_event_id = evidence.record_event(ecology.tick, "environment.disturbance_started", "heat_dust_front:1", [disturbance_event_id])
 			disturbance_timer = 0.0
 			disturbance_column = 0
 			dust_front.visible = true
@@ -1044,6 +1158,8 @@ func _update_disturbance(delta: float) -> void:
 	else:
 		dust_front.visible = false
 		disturbance_state = "passed"
+		evidence.record_event(ecology.tick, "environment.disturbance_passed", "heat_dust_front:1", [disturbance_event_id], ecology.summary())
+		evidence.checkpoint(ecology.tick, "episode_boundary", _evidence_snapshot())
 		_set_status("The front passes. Some bare cells are hot and toxic; connected moss and fungus begin recovering from retained moisture and nutrients.")
 
 
@@ -1149,10 +1265,14 @@ func _water_nearby_patch() -> void:
 		if water_doses <= 0:
 			_set_status("No water remains to test the Presence's indicated refuge.")
 			return
+		var command_id := _record_command("water", "refuge", {"doses": 1})
 		water_doses -= 1
 		refuge_watered = true
 		ecology_started = true
 		ecology.add_water(Vector2(refuge_position.x, refuge_position.z), 0.72, 1.4)
+		var refuge_cell: Vector2i = ecology.world_to_cell(Vector2(refuge_position.x, refuge_position.z))
+		last_intervention_event_id = evidence.record_event(ecology.tick, "intervention.water_added", "cell:%d,%d" % [refuge_cell.x, refuge_cell.y], [command_id], {"amount": 0.72, "remaining_doses": water_doses})
+		evidence.checkpoint(ecology.tick, "player_intervention", _evidence_snapshot())
 		if refuge_signal_acknowledged:
 			_begin_presence_signal("invitation", refuge_position, astronaut.position)
 			_set_status("Water sinks into the depression. The flame answers with a wider pulse around both participants, then turns back to the changing cells.")
@@ -1172,12 +1292,16 @@ func _water_nearby_patch() -> void:
 		_set_status("This patch is already responding. Watch it or compare the other site.")
 		return
 
+	var command_id := _record_command("water", nearest_patch, {"doses": 1})
 	water_doses -= 1
 	ecology_started = true
 	patch["state"] = "wet"
 	patch["age"] = 0.0
 	var patch_position: Vector3 = patch["node"].global_position
 	ecology.add_water(Vector2(patch_position.x, patch_position.z))
+	var watered_cell: Vector2i = ecology.world_to_cell(Vector2(patch_position.x, patch_position.z))
+	last_intervention_event_id = evidence.record_event(ecology.tick, "intervention.water_added", "cell:%d,%d" % [watered_cell.x, watered_cell.y], [command_id], {"site": nearest_patch, "remaining_doses": water_doses})
+	evidence.checkpoint(ecology.tick, "player_intervention", _evidence_snapshot())
 	_set_patch_color(nearest_patch, Color("3e6653"), Color("18372d"))
 	if patch["shade"]:
 		_set_status("The film darkens with a dry crackle. Water remains pooled between its cells.")
@@ -1204,7 +1328,10 @@ func _harvest_fruiting() -> void:
 	if harvested <= 0:
 		_set_status("The fruiting body is not mature enough to harvest.")
 		return
+	var command_id := _record_command("harvest", "cell:%d,%d" % [nearest_harvest_cell.x, nearest_harvest_cell.y])
 	fresh_food += harvested
+	evidence.record_event(ecology.tick, "intervention.fungus_harvested", "cell:%d,%d" % [nearest_harvest_cell.x, nearest_harvest_cell.y], [command_id], {"yield": harvested})
+	evidence.checkpoint(ecology.tick, "player_intervention", _evidence_snapshot())
 	_refresh_ecology_visuals()
 	_set_status("The astronaut harvests one fresh fungal fruit. The cell loses some fungus and nutrients; repeated harvests could break the cycle.")
 
@@ -1212,10 +1339,12 @@ func _harvest_fruiting() -> void:
 func _open_emergency_cache() -> void:
 	if cache_opened:
 		return
+	var command_id := _record_command("open", "emergency_cache")
 	cache_opened = true
 	scanner_recovered = true
 	water_doses = 3
 	ration_packs = 2
+	evidence.record_event(ecology.tick, "survival.supplies_recovered", "emergency_cache", [command_id], {"water": water_doses, "rations": ration_packs, "scanner": true})
 	emergency_cache.material_override = _material(Color("4e483e"), 0.92)
 	var beacon := get_node_or_null("CacheBeacon") as OmniLight3D
 	if beacon != null:
@@ -1239,8 +1368,10 @@ func _use_water_for_survival() -> void:
 	if exposure < 8.0:
 		_set_status("Suit reserves are still comfortable. Drinking now would spend ecological possibility for little gain.")
 		return
+	var command_id := _record_command("drink", "astronaut", {"doses": 1})
 	water_doses -= 1
 	exposure = max(0.0, exposure - 50.0)
+	evidence.record_event(ecology.tick, "survival.water_consumed", "astronaut", [command_id], {"remaining_doses": water_doses, "exposure": exposure})
 	_set_status("One shared water dose buys roughly half an excursion of survival margin. The ecosystem now has fewer possible interventions.")
 
 
@@ -1249,13 +1380,17 @@ func _eat_food() -> void:
 		_set_status("The astronaut is not hungry enough to justify consuming food.")
 		return
 	if fresh_food > 0:
+		var command_id := _record_command("eat", "fresh_food")
 		fresh_food -= 1
 		hunger = max(0.0, hunger - 34.0)
+		evidence.record_event(ecology.tick, "survival.food_consumed", "astronaut", [command_id], {"source": "ecosystem", "hunger": hunger})
 		_set_status("The first renewable food replaces a finite ration. Its ecological source must remain healthy to feed the astronaut again.")
 		return
 	if ration_packs > 0:
+		var command_id := _record_command("eat", "ration")
 		ration_packs -= 1
 		hunger = max(0.0, hunger - 42.0)
+		evidence.record_event(ecology.tick, "survival.food_consumed", "astronaut", [command_id], {"source": "wreck", "hunger": hunger})
 		_set_status("A finite ration buys time but creates no living replacement.")
 		return
 	_set_status("No carried food remains. The ecosystem is now the only path to another meal.")
@@ -1263,6 +1398,7 @@ func _eat_food() -> void:
 
 func _interact_with_shade() -> void:
 	if carrying_shade and nearest_patch == "crust":
+		var command_id := _record_command("place", "shade_panel", {"site": "crust"})
 		carrying_shade = false
 		shade_placed = true
 		shade_panel.global_position = patches["crust"]["node"].global_position + Vector3(0.0, 1.15, 0.0)
@@ -1270,10 +1406,13 @@ func _interact_with_shade() -> void:
 		patches["crust"]["shade"] = true
 		var crust_position: Vector3 = patches["crust"]["node"].global_position
 		ecology.add_shade(Vector2(crust_position.x, crust_position.z))
+		last_intervention_event_id = evidence.record_event(ecology.tick, "intervention.shade_added", "crust", [command_id])
+		evidence.checkpoint(ecology.tick, "player_intervention", _evidence_snapshot())
 		_set_status("The panel cuts the direct sun. The surface begins cooling, but lost water does not return.")
 		return
 
 	if not carrying_shade and not shade_placed and _flat_distance(astronaut.global_position, shade_panel.global_position) < 1.55:
+		_record_command("pickup", "shade_panel")
 		carrying_shade = true
 		_set_status("The astronaut lifts the loose panel. It is awkward but light enough to reposition.")
 		return
