@@ -52,6 +52,18 @@ _Avoid_: Unit class, species tier
 The overlapping and reversible change in organisms and habitat conditions as life creates opportunities and constraints for other life.
 _Avoid_: Unlock ladder, biome level
 
+**Ecological Mosaic**:
+The coexistence of pioneer, established, disturbed, and recovering habitats in different parts of the same region as local Succession follows different trajectories.
+_Avoid_: Global biome stage, region level
+
+**Animal Stewardship**:
+The species-specific ways the Astronaut develops more predictable relationships with animals through habitat care, habituation, individual trust, husbandry, and—where generational inheritance is simulated—Domestication.
+_Avoid_: Unit control, universal pet system
+
+**Domestication**:
+Multigenerational change in an animal population produced through husbandry and inherited traits, rather than an individual animal merely becoming tolerant or tame.
+_Avoid_: Taming, obedience unlock
+
 **Presence**:
 The planet's localized, non-corporeal manifestation, provisionally perceived as a floating flame, which becomes the astronaut's alien co-investigator.
 _Avoid_: Spirit, guide, companion
