@@ -28,6 +28,22 @@ _Avoid_: Journal, codex, omniscient scanner
 A repeatable passage from noticing an ecological opportunity or problem through local inspection, hypothesis, situated intervention, observation, interpretation, and adaptation. It concludes with a meaningful change in ecological understanding or capability rather than a declared quest result.
 _Avoid_: Quest, recipe, minigame
 
+**Embodied Toolkit**:
+The physical capabilities the Astronaut uses to inspect, carry, place, recover, and repeat Field Experiments. The prototype begins with a deliberately small, mechanically stable subset; later toolkit progression remains possible.
+_Avoid_: Hotbar, crafting arsenal
+
+**Bootstrap Supply**:
+A finite resource recovered from the wreck that enables early survival or Field Experiments but cannot sustain the Astronaut or Ecosystem indefinitely.
+_Avoid_: Starter loot, renewable resource
+
+**Wreck Life-Support Reclaimer**:
+The damaged wreck module that enables rapid suit servicing at shelter and contains one finite emergency water reserve that can be recovered only by permanently disabling that service.
+_Avoid_: Recycler, water generator
+
+**Ecological Infrastructure**:
+A reusable, physically situated object or habitat alteration that changes local ecological conditions without generating matter from nothing.
+_Avoid_: Upgrade, building, resource generator
+
 **Presence**:
 The planet's localized, non-corporeal manifestation, provisionally perceived as a floating flame, which becomes the astronaut's alien co-investigator.
 _Avoid_: Spirit, guide, companion
