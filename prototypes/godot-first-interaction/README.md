@@ -37,7 +37,7 @@ The visible square cells now carry provisional moisture, temperature, toxicity, 
 - Moss stress and ordinary turnover create dead biomass.
 - Fungus awakens where dead biomass remains wet, spreads locally, decomposes it into nutrients, and slightly reduces toxicity.
 
-Cell color is the readable prototype overlay: blue-green indicates moisture, green living moss, brown dead biomass, violet fungus, and gold edible fruiting bodies. The Field Scanner exposes the precise local values while the top-left summary shows the system-wide cell counts.
+Cell color is the first readable world cue: blue-green indicates moisture, green living moss, brown dead biomass, violet fungus, and gold edible fruiting bodies. The damaged Field Scanner supplements those cues with coarse local bands and explicit confidence; ordinary play does not show system-wide cell counts.
 
 ## Expanded ecological arc
 
@@ -63,6 +63,7 @@ The captured idle-opening failure can be replayed headlessly:
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/idle_then_water_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/grazer_motion_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/grazer_metabolism_test.gd
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/ecological_feedback_test.gd
 ```
 
-The checks verify that an idle opening cannot pre-age the dormant ecology, that the grazer moves visibly without frame-sized jumps, and that it exposes a complete seek–digest–roam–manure cycle.
+The checks verify that an idle opening cannot pre-age the dormant ecology, that the grazer moves visibly without frame-sized jumps, that it exposes a complete seek–digest–roam–manure cycle, and that the scanner preserves bounded baseline, comparison, rescan, pulse, and local-lens feedback.
