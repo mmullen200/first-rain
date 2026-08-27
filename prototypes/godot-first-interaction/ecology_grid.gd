@@ -20,6 +20,9 @@ var dead_biomass := PackedFloat32Array()
 var fungus := PackedFloat32Array()
 var fruiting := PackedFloat32Array()
 var shade := PackedFloat32Array()
+var habitat_shade := PackedFloat32Array()
+var equipment_shade_world := Vector2.ZERO
+var equipment_shade_active := false
 var tick := 0
 
 
@@ -28,6 +31,7 @@ func _init() -> void:
 	for field in [moisture, temperature, toxicity, nutrients, dormant_moss, moss, dead_biomass, fungus, fruiting, shade]:
 		field.resize(count)
 	_seed_barren_basin()
+	habitat_shade = shade.duplicate()
 
 
 func _seed_barren_basin() -> void:
@@ -146,7 +150,33 @@ func add_shade(world: Vector2, amount := 0.95, radius := 1.45) -> void:
 				continue
 			var strength: float = 1.0 - distance / radius
 			var index: int = _index(x, y)
-			shade[index] = clamp(shade[index] + amount * strength, 0.0, 1.0)
+			habitat_shade[index] = clamp(habitat_shade[index] + amount * strength, 0.0, 1.0)
+	_rebuild_shade()
+
+
+func place_equipment_shade(world: Vector2) -> void:
+	equipment_shade_world = world
+	equipment_shade_active = true
+	_rebuild_shade()
+
+
+func remove_equipment_shade() -> void:
+	equipment_shade_active = false
+	_rebuild_shade()
+
+
+func _rebuild_shade() -> void:
+	shade = habitat_shade.duplicate()
+	if not equipment_shade_active:
+		return
+	for y in range(HEIGHT):
+		for x in range(WIDTH):
+			var distance: float = world_position(x, y).distance_to(equipment_shade_world)
+			if distance > 1.45:
+				continue
+			var strength: float = 1.0 - distance / 1.45
+			var index: int = _index(x, y)
+			shade[index] = clampf(shade[index] + 0.95 * strength, 0.0, 1.0)
 
 
 func reveal_subsurface_refuge(world: Vector2) -> void:

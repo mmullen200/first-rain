@@ -68,9 +68,15 @@ var refuge_revealed := false
 var refuge_watered := false
 var emergency_cache: MeshInstance3D
 var shade_panel: MeshInstance3D
+var shade_preview: MeshInstance3D
 var shade_panel_home := Vector3(-5.4, 0.32, 2.7)
 var carrying_shade := false
 var shade_placed := false
+var shade_placed_cell := Vector2i(-1, -1)
+var reservoir_established := false
+var reclaimer_intact := true
+var reclaimer_hold_active := false
+var reclaimer_hold_timer := 0.0
 var presence_root: Node3D
 var presence_target := Vector3(0.8, 1.3, -5.45)
 var presence_signal_ring: MeshInstance3D
@@ -164,12 +170,17 @@ func _physics_process(delta: float) -> void:
 	_update_presence_signals(delta)
 	_update_scan_pulse(delta)
 	_update_last_water_hold(delta)
+	_update_reclaimer_hold(delta)
 	if exposure >= 100.0:
 		_force_recovery()
 	_update_interface()
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.keycode == KEY_E and not event.pressed:
+		reclaimer_hold_active = false
+		reclaimer_hold_timer = 0.0
+		return
 	if event is InputEventKey and event.keycode == KEY_SPACE and not event.pressed:
 		last_water_hold_active = false
 		last_water_hold_timer = 0.0
@@ -278,6 +289,9 @@ func _build_world() -> void:
 
 	shade_panel = _create_box(shade_panel_home, Vector3(1.45, 0.09, 0.85), Color("839199"), Vector3(0.0, 0.22, -0.08))
 	shade_panel.name = "LooseShadePanel"
+	shade_preview = _create_cylinder(shade_panel_home, 1.45, 0.025, Color(0.25, 0.75, 0.72, 0.28))
+	shade_preview.name = "ShadeFootprintPreview"
+	shade_preview.visible = false
 	_create_world_label("LOOSE WRECK PANEL", shade_panel_home + Vector3(0.0, 0.45, 0.0), Color("e4e8e4"), 0.0055)
 
 
@@ -537,7 +551,7 @@ func _build_interface() -> void:
 
 	var title := Label.new()
 	title.position = Vector2(24, 18)
-	title.text = "FIRST RAIN  /  EVIDENCE + REPLAY PROTOTYPE"
+	title.text = "FIRST RAIN  /  EMBODIED TOOLKIT PROTOTYPE"
 	title.add_theme_font_size_override("font_size", 15)
 	title.add_theme_color_override("font_color", Color("e9b36e"))
 	canvas.add_child(title)
@@ -762,6 +776,12 @@ func _move_astronaut(_delta: float) -> void:
 		shade_panel.visible = true
 		shade_panel.global_position = astronaut.global_position + Vector3(0.0, 1.45, 0.0)
 		shade_panel.rotation = astronaut.rotation + Vector3(0.0, 0.0, -0.08)
+		var preview_cell: Vector2i = ecology.world_to_cell(Vector2(astronaut.position.x, astronaut.position.z))
+		var preview_world: Vector2 = ecology.world_position(preview_cell.x, preview_cell.y)
+		shade_preview.position = Vector3(preview_world.x, 0.035, preview_world.y)
+		shade_preview.visible = true
+	elif shade_preview != null:
+		shade_preview.visible = false
 
 
 func _update_camera() -> void:
@@ -802,19 +822,19 @@ func _update_nearby_interactions() -> void:
 		prompt_label.text = "E  open blinking emergency cache"
 	elif nearest_harvest_cell.x >= 0:
 		prompt_label.text = "E  harvest fungal fruiting body     Z  eat carried food"
-	elif not carrying_shade and not shade_placed and panel_distance < 1.55:
-		prompt_label.text = "E  pick up loose shade panel"
-	elif carrying_shade and nearest_patch == "crust":
-		prompt_label.text = "F  scan     SPACE  water     E  place shade panel"
+	elif not carrying_shade and panel_distance < 1.55:
+		prompt_label.text = "E  retrieve movable shade panel"
+	elif carrying_shade:
+		prompt_label.text = "E  place shade on this ecological cell  /  footprint shown"
 	elif nearest_patch != "":
 		if scanner_recovered:
 			prompt_label.text = "F  scan     SPACE  commit one water dose"
 		else:
 			prompt_label.text = "The film is unusual, but bare eyes reveal little."
 	elif near_refuge:
-		prompt_label.text = "F  scan the bare depression     SPACE  commit water here"
-	elif carrying_shade:
-		prompt_label.text = "Carry the panel to a place where shade might change conditions."
+		prompt_label.text = "E  refill one canister     F  scan reservoir" if reservoir_established else "F  scan the bare depression     SPACE  commit water here"
+	elif cache_opened and _at_wreck() and water_doses == 0 and not reservoir_established and reclaimer_intact:
+		prompt_label.text = "HOLD E  reclaim one emergency water / permanently slow recovery"
 	elif cache_opened and _at_wreck() and exposure > 0.5:
 		prompt_label.text = "E  recover at the wreck while the ecosystem continues"
 	elif not scanner_recovered:
@@ -825,6 +845,8 @@ func _update_nearby_interactions() -> void:
 		prompt_label.text += "     C  signal toward nearby subject"
 	if last_water_hold_active:
 		prompt_label.text = "HOLD SPACE  final water dose  %d%%" % roundi(100.0 * last_water_hold_timer / LAST_WATER_HOLD_SECONDS)
+	if reclaimer_hold_active:
+		prompt_label.text = "HOLD E  dismantle life-support reclaimer  %d%%" % roundi(100.0 * reclaimer_hold_timer / LAST_WATER_HOLD_SECONDS)
 
 
 func _update_exposure(delta: float) -> void:
@@ -891,18 +913,25 @@ func _update_last_water_hold(delta: float) -> void:
 
 func _recover_at_wreck(forced: bool) -> void:
 	var before := _observed_recovery_state()
-	var elapsed := FORCED_RECOVERY_SECONDS if forced else VOLUNTARY_RECOVERY_SECONDS
+	var elapsed := FORCED_RECOVERY_SECONDS if forced or not reclaimer_intact else VOLUNTARY_RECOVERY_SECONDS
 	var command_id := ""
 	if not forced:
 		command_id = _record_command("recover", "wreck", {"elapsed": elapsed})
 	if forced:
 		forced_recoveries += 1
+		if carrying_shade:
+			shade_placed_cell = ecology.world_to_cell(Vector2(astronaut.position.x, astronaut.position.z))
+			var dropped_world: Vector2 = ecology.world_position(shade_placed_cell.x, shade_placed_cell.y)
+			carrying_shade = false
+			shade_placed = true
+			shade_panel.position = Vector3(dropped_world.x, 0.18, dropped_world.y)
+			ecology.place_equipment_shade(dropped_world)
 		astronaut.position = Vector3(-5.4, 0.05, -3.1)
 		astronaut.velocity = Vector3.ZERO
 	exposure = 0.0
 	_advance_ecology_during_recovery(elapsed)
 	var report := _recovery_report(before, _observed_recovery_state())
-	var causes: Array[String] = [] if command_id == "" else [command_id]
+	var causes := [] if command_id == "" else [command_id]
 	evidence.record_event(ecology.tick, "survival.forced_recovery" if forced else "survival.voluntary_recovery", "astronaut", causes, {"elapsed": elapsed, "observed_before": before, "observed_after": _observed_recovery_state()})
 	evidence.checkpoint(ecology.tick, "recovery_boundary", _evidence_snapshot())
 	if forced:
@@ -1268,6 +1297,7 @@ func _water_nearby_patch() -> void:
 		var command_id := _record_command("water", "refuge", {"doses": 1})
 		water_doses -= 1
 		refuge_watered = true
+		reservoir_established = true
 		ecology_started = true
 		ecology.add_water(Vector2(refuge_position.x, refuge_position.z), 0.72, 1.4)
 		var refuge_cell: Vector2i = ecology.world_to_cell(Vector2(refuge_position.x, refuge_position.z))
@@ -1275,10 +1305,10 @@ func _water_nearby_patch() -> void:
 		evidence.checkpoint(ecology.tick, "player_intervention", _evidence_snapshot())
 		if refuge_signal_acknowledged:
 			_begin_presence_signal("invitation", refuge_position, astronaut.position)
-			_set_status("Water sinks into the depression. The flame answers with a wider pulse around both participants, then turns back to the changing cells.")
+			_set_status("Water sinks into the depression and collects above the sealed substrate as a provisional reservoir. The flame answers around both participants.")
 		else:
 			_begin_presence_signal("focus", refuge_position)
-			_set_status("Water sinks into the depression. The flame repeats its focus pulse at the changing cells; whether this answered its signal remains unclear.")
+			_set_status("Water collects in the terrain-bound depression as a provisional reservoir. The flame repeats its focus pulse at the changing cells.")
 		return
 	if nearest_patch == "":
 		_set_status("Water must be committed at a specific patch, not poured from a distance.")
@@ -1315,6 +1345,15 @@ func _interact() -> void:
 		return
 	if nearest_harvest_cell.x >= 0:
 		_harvest_fruiting()
+		return
+	if near_refuge and reservoir_established and water_doses < 3:
+		var command_id := _record_command("refill", "reservoir", {"canisters": 1})
+		water_doses += 1
+		evidence.record_event(ecology.tick, "survival.canister_refilled", "reservoir:refuge", [command_id], {"water": water_doses})
+		_set_status("The astronaut refills one empty canister from the terrain-bound reservoir. More water remains here, not in the suit.")
+		return
+	if cache_opened and _at_wreck() and water_doses == 0 and not reservoir_established and reclaimer_intact:
+		_request_reclaimer_dismantle()
 		return
 	if cache_opened and _at_wreck() and exposure > 0.5:
 		_recover_at_wreck(false)
@@ -1397,30 +1436,69 @@ func _eat_food() -> void:
 
 
 func _interact_with_shade() -> void:
-	if carrying_shade and nearest_patch == "crust":
+	if carrying_shade:
 		var command_id := _record_command("place", "shade_panel", {"site": "crust"})
 		carrying_shade = false
 		shade_placed = true
-		shade_panel.global_position = patches["crust"]["node"].global_position + Vector3(0.0, 1.15, 0.0)
+		shade_placed_cell = ecology.world_to_cell(Vector2(astronaut.position.x, astronaut.position.z))
+		var placed_world: Vector2 = ecology.world_position(shade_placed_cell.x, shade_placed_cell.y)
+		shade_panel.global_position = Vector3(placed_world.x, 1.15, placed_world.y)
 		shade_panel.rotation = Vector3(0.0, 0.18, -0.04)
-		patches["crust"]["shade"] = true
-		var crust_position: Vector3 = patches["crust"]["node"].global_position
-		ecology.add_shade(Vector2(crust_position.x, crust_position.z))
-		last_intervention_event_id = evidence.record_event(ecology.tick, "intervention.shade_added", "crust", [command_id])
+		ecology.place_equipment_shade(placed_world)
+		patches["crust"]["shade"] = placed_world.distance_to(Vector2(patches["crust"]["node"].position.x, patches["crust"]["node"].position.z)) <= 1.45
+		last_intervention_event_id = evidence.record_event(ecology.tick, "intervention.shade_added", "cell:%d,%d" % [shade_placed_cell.x, shade_placed_cell.y], [command_id])
 		evidence.checkpoint(ecology.tick, "player_intervention", _evidence_snapshot())
-		_set_status("The panel cuts the direct sun. The surface begins cooling, but lost water does not return.")
+		_refresh_ecology_visuals()
+		_set_status("The panel shades the visible footprint. Conditions change immediately, but biological success remains unknown.")
 		return
 
-	if not carrying_shade and not shade_placed and _flat_distance(astronaut.global_position, shade_panel.global_position) < 1.55:
+	if not carrying_shade and _flat_distance(astronaut.global_position, shade_panel.global_position) < 1.55:
+		if shade_placed:
+			ecology.remove_equipment_shade()
+			patches["crust"]["shade"] = false
+			shade_placed = false
+			shade_placed_cell = Vector2i(-1, -1)
+			_refresh_ecology_visuals()
 		_record_command("pickup", "shade_panel")
 		carrying_shade = true
-		_set_status("The astronaut lifts the loose panel. It is awkward but light enough to reposition.")
+		_set_status("The astronaut lifts the panel. Its previous footprint loses protection immediately.")
 		return
 
 	if carrying_shade:
 		_set_status("The panel needs a deliberate site. The sun-struck film is the clearest candidate.")
 	else:
 		_set_status("There is nothing here to handle.")
+
+
+func _request_reclaimer_dismantle() -> void:
+	if reclaimer_hold_active:
+		return
+	reclaimer_hold_active = true
+	reclaimer_hold_timer = 0.0
+	_set_status("Hold E to dismantle the life-support reclaimer: gain one water dose, but all future voluntary recovery advances the longer interval.")
+
+
+func _update_reclaimer_hold(delta: float) -> void:
+	if not reclaimer_hold_active:
+		return
+	if not Input.is_key_pressed(KEY_E) or not _at_wreck():
+		reclaimer_hold_active = false
+		reclaimer_hold_timer = 0.0
+		return
+	reclaimer_hold_timer += delta
+	if reclaimer_hold_timer < LAST_WATER_HOLD_SECONDS:
+		return
+	reclaimer_hold_active = false
+	reclaimer_hold_timer = 0.0
+	_dismantle_reclaimer()
+
+
+func _dismantle_reclaimer() -> void:
+	var command_id := _record_command("dismantle", "wreck_life_support_reclaimer")
+	reclaimer_intact = false
+	water_doses = 1
+	evidence.record_event(ecology.tick, "survival.reclaimer_dismantled", "wreck_life_support_reclaimer", [command_id], {"water": 1, "voluntary_recovery_seconds": FORCED_RECOVERY_SECONDS})
+	_set_status("One sealed reserve becomes usable water. The wreck remains safe, but rapid suit servicing is permanently gone.")
 
 
 func _update_interface() -> void:
