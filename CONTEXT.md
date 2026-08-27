@@ -44,6 +44,14 @@ _Avoid_: Recycler, water generator
 A reusable, physically situated object or habitat alteration that changes local ecological conditions without generating matter from nothing.
 _Avoid_: Upgrade, building, resource generator
 
+**Ecological Role**:
+An observable function through which an organism moves resources, changes habitat, regulates other life, or supports ecological recovery. A species may perform more than one role.
+_Avoid_: Unit class, species tier
+
+**Succession**:
+The overlapping and reversible change in organisms and habitat conditions as life creates opportunities and constraints for other life.
+_Avoid_: Unlock ladder, biome level
+
 **Presence**:
 The planet's localized, non-corporeal manifestation, provisionally perceived as a floating flame, which becomes the astronaut's alien co-investigator.
 _Avoid_: Spirit, guide, companion
