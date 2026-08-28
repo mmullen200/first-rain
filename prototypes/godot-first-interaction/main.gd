@@ -21,6 +21,7 @@ const LAST_WATER_HOLD_SECONDS := 0.75
 const FIELD_TIME_SCALE := 12.0
 const EXPOSED_EXPOSURE_RATE := 0.105
 const MOSS_EXPOSURE_RATE := 0.035
+const REWATER_MOISTURE_THRESHOLD := 0.16
 # Forty-five hunger points marks a meal. At 12× displayed field time this
 # takes eight in-world hours, supporting roughly three meals per field day.
 const HUNGER_RATE := 0.01875
@@ -584,7 +585,7 @@ func _build_interface() -> void:
 
 	var title := Label.new()
 	title.position = Vector2(24, 18)
-	title.text = "FIRST RAIN  /  GRAZER FORAGING PROTOTYPE"
+	title.text = "FIRST RAIN  /  HABITAT RECOVERY PROTOTYPE"
 	title.add_theme_font_size_override("font_size", 15)
 	title.add_theme_color_override("font_color", Color("e9b36e"))
 	canvas.add_child(title)
@@ -868,7 +869,16 @@ func _update_nearby_interactions() -> void:
 		prompt_label.text = "E  place shade on this ecological cell  /  footprint shown"
 	elif nearest_patch != "":
 		if scanner_recovered:
-			prompt_label.text = "F  scan     SPACE  commit one water dose"
+			var nearby_patch: Dictionary = patches[nearest_patch]
+			var nearby_position: Vector3 = nearby_patch["node"].global_position
+			var nearby_sample: Dictionary = ecology.sample_world(Vector2(nearby_position.x, nearby_position.z))
+			var established: bool = nearby_patch["state"] == "wet" or nearby_patch["state"] == "awakening" or nearby_patch["state"] == "thriving"
+			if established and nearby_sample["moisture"] <= REWATER_MOISTURE_THRESHOLD:
+				prompt_label.text = "F  scan     SPACE  rewater dry habitat"
+			elif established:
+				prompt_label.text = "F  scan     habitat moisture sufficient"
+			else:
+				prompt_label.text = "F  scan     SPACE  commit one water dose"
 		else:
 			prompt_label.text = "The film is unusual, but bare eyes reveal little."
 	elif near_refuge:
@@ -1412,24 +1422,30 @@ func _water_nearby_patch() -> void:
 		return
 
 	var patch: Dictionary = patches[nearest_patch]
-	if patch["state"] == "wet" or patch["state"] == "awakening" or patch["state"] == "thriving":
-		_set_status("This patch is already responding. Watch it or compare the other site.")
+	var patch_position: Vector3 = patch["node"].global_position
+	var local_sample: Dictionary = ecology.sample_world(Vector2(patch_position.x, patch_position.z))
+	var established: bool = patch["state"] == "wet" or patch["state"] == "awakening" or patch["state"] == "thriving"
+	if established and local_sample["moisture"] > REWATER_MOISTURE_THRESHOLD:
+		_set_status("This habitat still holds sufficient moisture. Observe its response before spending more water.")
 		return
 
-	var command_id := _record_command("water", nearest_patch, {"doses": 1})
+	var command_id := _record_command("water", nearest_patch, {"doses": 1, "recovery": established})
 	water_doses -= 1
 	ecology_started = true
-	patch["state"] = "wet"
-	patch["age"] = 0.0
-	var patch_position: Vector3 = patch["node"].global_position
+	if not established:
+		patch["state"] = "wet"
+		patch["age"] = 0.0
 	ecology.add_water(Vector2(patch_position.x, patch_position.z))
 	var watered_cell: Vector2i = ecology.world_to_cell(Vector2(patch_position.x, patch_position.z))
-	last_intervention_event_id = evidence.record_event(ecology.tick, "intervention.water_added", "cell:%d,%d" % [watered_cell.x, watered_cell.y], [command_id], {"site": nearest_patch, "remaining_doses": water_doses})
+	last_intervention_event_id = evidence.record_event(ecology.tick, "intervention.water_added", "cell:%d,%d" % [watered_cell.x, watered_cell.y], [command_id], {"site": nearest_patch, "remaining_doses": water_doses, "recovery": established})
 	evidence.checkpoint(ecology.tick, "player_intervention", _evidence_snapshot())
-	_set_patch_color(nearest_patch, Color("3e6653"), Color("18372d"))
-	if patch["shade"]:
-		_set_status("The film darkens with a dry crackle. Water remains pooled between its cells.")
+	if established:
+		_set_status("Water darkens the storm-dried habitat. Its recovery now depends on the life, shelter, and nutrients that survived.")
 	else:
+		_set_patch_color(nearest_patch, Color("3e6653"), Color("18372d"))
+	if not established and patch["shade"]:
+		_set_status("The film darkens with a dry crackle. Water remains pooled between its cells.")
+	elif not established:
 		_set_status("The film darkens—but water beads, hisses, and starts flashing away in the heat.")
 
 
