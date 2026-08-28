@@ -113,8 +113,12 @@ The established pattern in which the astronaut and Presence notice, answer, and 
 _Avoid_: Obedience, favor, exchange
 
 **First Rain**:
-The first deliberate cooperation in which the astronaut prepares a resilient ecosystem to receive water and the Presence concentrates dormant planetary processes into rainfall.
-_Avoid_: Victory cutscene, summoned storm
+The first natural precipitation to emerge when a recovering ecosystem's water cycling and biological atmospheric contributions coincide with favorable weather conditions.
+_Avoid_: Victory cutscene, summoned storm, Presence-triggered weather
+
+**Atmospheric ecological feedback**:
+The conditional influence of living water cycling, volatile emissions, and airborne biological material on clouds and precipitation within a naturally changing atmosphere.
+_Avoid_: Rain progress, ecology-completion switch, life creating water
 
 **Awakening**:
 The planet's increasing capacity to perceive, respond, and act as the restored ecosystem becomes more diverse and resilient.
