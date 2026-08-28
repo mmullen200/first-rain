@@ -17,7 +17,7 @@ Open `project.godot` in Godot 4.6 and press **F6/F5**, or run:
 - **E** — harvest when standing beside a mature fungal fruiting cell
 - **F** — scan a nearby moss patch
 - **C** — send a suit-light signal toward a nearby ecological subject
-- **J** — open or close the detailed field record and pause simulation time
+- **J** — open or close the pause-only Basin Survey and detailed field record
 - **V** — toggle the scanner's nearby moisture/toxicity analysis lens
 - **Space** — spend one water dose on a nearby moss patch
 - **Q** — spend one water dose on the astronaut when exposure is meaningful
@@ -97,6 +97,14 @@ The loose shade panel can be carried as the astronaut's one bulky object and pla
 
 The revealed depression is a provisional terrain-bound Reservoir: after it is established, **E** refills one empty canister at a time. If water reaches zero before that Reservoir exists, holding **E** at the wreck dismantles the Wreck Life-Support Reclaimer for one final dose. The wreck stays safe, but voluntary recovery thereafter advances the same longer ecological interval as forced recovery. These fixtures test the accepted toolkit and material-economy boundaries; they do not settle later toolkit progression or the final Reservoir-forming ecology.
 
+## Crash-basin spatial question
+
+The greybox is now one connected, enlarged Crash Basin with five gradient-based Ecological Zones: the northwest Wreck Shelter, nearby sheltered hollow, central dry Drainage Spine, exposed toxic shelf, and downstream recovery pocket. Walking from the wreck to the far pocket takes roughly 26 seconds. Major landmarks are visible at a distance while the fixed orthographic camera keeps local conditions undisclosed until the astronaut travels there.
+
+The Drainage Spine is initially dry. A real water input can produce a temporary deterministic Drainage Pulse: only moisture above local retention moves downhill, carrying a small amount of mobile nutrients. Shade and living cover retain more locally. Press **J** after recovering the scanner to inspect a coarse Basin Survey of visited zones and last-observed equipment; it pauses time, explicitly marks stale evidence, and supplies no route or objective.
+
+All landform blocks, labels, colors, route spacing, and transport rates are throwaway fixtures. The playtest asks whether landmark navigation, paired-site comparison, route choice, cross-zone equipment movement, and ecological transfer make the basin feel like one causal place.
+
 ## Regression check
 
 The captured idle-opening failure can be replayed headlessly:
@@ -108,6 +116,7 @@ The captured idle-opening failure can be replayed headlessly:
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/ecological_feedback_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/evidence_recorder_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/toolkit_economy_test.gd
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/crash_basin_spatial_test.gd
 ```
 
-The checks verify that an idle opening cannot pre-age the dormant ecology, that the grazer moves visibly without frame-sized jumps, that it exposes a complete seek–digest–roam–manure cycle, that the scanner preserves bounded baseline, comparison, rescan, pulse, and local-lens feedback, that the evidence recorder reconstructs an ordered causal episode from command through outcome, and that the toolkit preserves free placement, persistent bulky objects, Reservoir refill, and the irreversible reclaimer trade-off.
+The checks verify that an idle opening cannot pre-age the dormant ecology, that the grazer moves visibly without frame-sized jumps, that it exposes a complete seek–digest–roam–manure cycle, that the scanner preserves bounded baseline, comparison, rescan, pulse, and local-lens feedback, that the evidence recorder reconstructs an ordered causal episode from command through outcome, that the toolkit preserves free placement, persistent bulky objects, Reservoir refill, and the irreversible reclaimer trade-off, and that the enlarged basin preserves the accepted traversal scale, five zones, unguided Basin Survey, and episodic downhill drainage.

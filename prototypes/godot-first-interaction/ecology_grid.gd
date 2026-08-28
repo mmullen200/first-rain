@@ -5,10 +5,10 @@ extends RefCounted
 # Every update reads one generation and writes the next so traversal order
 # cannot change the result.
 
-const WIDTH := 16
-const HEIGHT := 11
-const CELL_SIZE := 0.72
-const ORIGIN := Vector2(-5.4, -3.5)
+const WIDTH := 24
+const HEIGHT := 16
+const CELL_SIZE := 2.0
+const ORIGIN := Vector2(-7.0, -5.0)
 
 var moisture := PackedFloat32Array()
 var temperature := PackedFloat32Array()
@@ -36,16 +36,16 @@ func _init() -> void:
 
 func _seed_barren_basin() -> void:
 	var hollow := Vector2(-2.7, -1.55)
-	var crust := Vector2(4.15, 1.75)
-	var vent := Vector2(5.0, 1.65)
+	var crust := Vector2(16.0, 3.0)
+	var vent := Vector2(17.0, 3.0)
 	for y in range(HEIGHT):
 		for x in range(WIDTH):
 			var index: int = _index(x, y)
 			var world: Vector2 = world_position(x, y)
-			var shelter: float = 1.0 - clampf(world.distance_to(hollow) / 2.6, 0.0, 1.0)
-			var vent_influence: float = 1.0 - clampf(world.distance_to(vent) / 2.35, 0.0, 1.0)
-			var hollow_seed: float = 1.0 - clampf(world.distance_to(hollow) / 1.25, 0.0, 1.0)
-			var crust_seed: float = 1.0 - clampf(world.distance_to(crust) / 1.2, 0.0, 1.0)
+			var shelter: float = 1.0 - clampf(world.distance_to(hollow) / 5.2, 0.0, 1.0)
+			var vent_influence: float = 1.0 - clampf(world.distance_to(vent) / 4.7, 0.0, 1.0)
+			var hollow_seed: float = 1.0 - clampf(world.distance_to(hollow) / 4.8, 0.0, 1.0)
+			var crust_seed: float = 1.0 - clampf(world.distance_to(crust) / 4.6, 0.0, 1.0)
 
 			moisture[index] = 0.035 + shelter * 0.15
 			temperature[index] = clamp(0.48 + vent_influence * 0.34 - shelter * 0.2, 0.0, 1.0)
@@ -119,10 +119,31 @@ func step() -> void:
 			var fruiting_decay: float = local_fruiting * (0.004 + maxf(0.0, 0.16 - local_moisture) * 0.08)
 			next_fruiting[index] = clamp(local_fruiting + fruiting_growth - fruiting_decay, 0.0, 1.0)
 
-	moisture = next_moisture
+	# Apply terrain-directed transport after every cell has completed its local
+	# update, preserving the double-buffered traversal-order guarantee.
+	var drained_moisture := next_moisture.duplicate()
+	var drained_nutrients := next_nutrients.duplicate()
+	for y in range(HEIGHT):
+		for x in range(WIDTH):
+			var index: int = _index(x, y)
+			var retention: float = 0.22 + next_moss[index] * 0.34 + shade[index] * 0.12
+			var runoff: float = maxf(0.0, next_moisture[index] - retention) * 0.025
+			if runoff <= 0.0001 or (x >= WIDTH - 1 and y >= HEIGHT - 1):
+				continue
+			var downhill := Vector2i(mini(x + 1, WIDTH - 1), y)
+			if y < HEIGHT - 1 and (x >= WIDTH - 1 or (x + y) % 2 == 0):
+				downhill = Vector2i(x, y + 1)
+			var downhill_index: int = _index(downhill.x, downhill.y)
+			drained_moisture[index] = maxf(0.0, drained_moisture[index] - runoff)
+			drained_moisture[downhill_index] = clampf(drained_moisture[downhill_index] + runoff * 0.9, 0.0, 1.0)
+			var mobile_nutrients: float = minf(next_nutrients[index], runoff * 0.035)
+			drained_nutrients[index] = maxf(0.0, drained_nutrients[index] - mobile_nutrients)
+			drained_nutrients[downhill_index] = clampf(drained_nutrients[downhill_index] + mobile_nutrients * 0.9, 0.0, 1.0)
+
+	moisture = drained_moisture
 	temperature = next_temperature
 	toxicity = next_toxicity
-	nutrients = next_nutrients
+	nutrients = drained_nutrients
 	dormant_moss = next_dormant
 	moss = next_moss
 	dead_biomass = next_dead
@@ -131,7 +152,7 @@ func step() -> void:
 	tick += 1
 
 
-func add_water(world: Vector2, amount := 0.9, radius := 1.35) -> void:
+func add_water(world: Vector2, amount := 0.9, radius := 4.0) -> void:
 	for y in range(HEIGHT):
 		for x in range(WIDTH):
 			var distance: float = world_position(x, y).distance_to(world)
@@ -142,7 +163,7 @@ func add_water(world: Vector2, amount := 0.9, radius := 1.35) -> void:
 			moisture[index] = clamp(moisture[index] + amount * strength, 0.0, 1.0)
 
 
-func add_shade(world: Vector2, amount := 0.95, radius := 1.45) -> void:
+func add_shade(world: Vector2, amount := 0.95, radius := 4.0) -> void:
 	for y in range(HEIGHT):
 		for x in range(WIDTH):
 			var distance: float = world_position(x, y).distance_to(world)
@@ -172,16 +193,16 @@ func _rebuild_shade() -> void:
 	for y in range(HEIGHT):
 		for x in range(WIDTH):
 			var distance: float = world_position(x, y).distance_to(equipment_shade_world)
-			if distance > 1.45:
+			if distance > 4.0:
 				continue
-			var strength: float = 1.0 - distance / 1.45
+			var strength: float = 1.0 - distance / 4.0
 			var index: int = _index(x, y)
 			shade[index] = clampf(shade[index] + 0.95 * strength, 0.0, 1.0)
 
 
 func reveal_subsurface_refuge(world: Vector2) -> void:
-	add_water(world, 0.62, 1.45)
-	add_shade(world, 0.28, 1.55)
+	add_water(world, 0.62, 4.2)
+	add_shade(world, 0.28, 4.4)
 	var cell: Vector2i = world_to_cell(world)
 	var index: int = _index(cell.x, cell.y)
 	dormant_moss[index] = maxf(dormant_moss[index], 0.42)

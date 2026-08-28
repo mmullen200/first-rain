@@ -4,14 +4,16 @@ extends Node3D
 # This scene tests whether a first Field Experiment teaches itself through
 # movement, local comparison, scarce intervention, and ecological feedback.
 
-const WALK_SPEED := 4.3
+const WALK_SPEED := 1.9
 const GRAZER_MOVE_SPEED := 0.38
 const GRAZER_HUNGER_RATE := 0.055
 const GRAZER_SEEK_THRESHOLD := 0.72
 const GRAZER_DIGEST_SECONDS := 5.0
 const GRAZER_BITE_SIZE := 0.1
-const WORLD_X := 8.8
-const WORLD_Z := 6.2
+const WORLD_MIN_X := -9.0
+const WORLD_MAX_X := 41.0
+const WORLD_MIN_Z := -7.0
+const WORLD_MAX_Z := 27.0
 const ECOLOGY_STEP_SECONDS := 0.34
 const VOLUNTARY_RECOVERY_SECONDS := 2.0
 const FORCED_RECOVERY_SECONDS := 10.0
@@ -62,7 +64,7 @@ var nearest_patch := ""
 var near_cache := false
 var nearest_harvest_cell := Vector2i(-1, -1)
 var near_refuge := false
-var refuge_position := Vector3(0.35, 0.03, 3.25)
+var refuge_position := Vector3(37.0, 0.03, 23.0)
 var refuge_marker: Node3D
 var refuge_revealed := false
 var refuge_watered := false
@@ -78,7 +80,7 @@ var reclaimer_intact := true
 var reclaimer_hold_active := false
 var reclaimer_hold_timer := 0.0
 var presence_root: Node3D
-var presence_target := Vector3(0.8, 1.3, -5.45)
+var presence_target := Vector3(24.0, 1.3, -3.5)
 var presence_signal_ring: MeshInstance3D
 var astronaut_signal_ring: MeshInstance3D
 var astronaut_signal_beam: MeshInstance3D
@@ -131,10 +133,14 @@ var scanner_readout: Label
 var discovery_readout: Label
 var time_label: Label
 var ecosystem_label: Label
+var zone_label: Label
+var visited_zones: Dictionary = {}
+var scanner_before_survey := ""
 
 
 func _ready() -> void:
 	_build_world()
+	_build_spatial_landmarks()
 	_build_ecology_grid()
 	_build_astronaut()
 	_build_patches()
@@ -236,18 +242,19 @@ func _build_world() -> void:
 
 	var ground_body := StaticBody3D.new()
 	ground_body.name = "BasinGround"
+	ground_body.position = Vector3(16.0, 0.0, 10.0)
 	add_child(ground_body)
 
 	var ground_mesh := MeshInstance3D.new()
 	var plane := PlaneMesh.new()
-	plane.size = Vector2(20.0, 14.5)
+	plane.size = Vector2(52.0, 36.0)
 	ground_mesh.mesh = plane
 	ground_mesh.material_override = _material(Color("3e4241"), 0.92)
 	ground_body.add_child(ground_mesh)
 
 	var ground_collision := CollisionShape3D.new()
 	var ground_shape := BoxShape3D.new()
-	ground_shape.size = Vector3(20.0, 0.2, 14.5)
+	ground_shape.size = Vector3(52.0, 0.2, 36.0)
 	ground_collision.shape = ground_shape
 	ground_collision.position.y = -0.12
 	ground_body.add_child(ground_collision)
@@ -276,12 +283,12 @@ func _build_world() -> void:
 		_create_rock(position, 0.55)
 
 	# The exposed crust reads through pale stones and a hot toxic vent.
-	for position in [Vector3(3.4, 0.18, 2.6), Vector3(4.9, 0.24, 1.0), Vector3(5.2, 0.18, 2.5)]:
+	for position in [Vector3(14.4, 0.18, 5.1), Vector3(17.8, 0.24, 0.6), Vector3(18.4, 0.18, 5.0)]:
 		_create_rock(position, 0.42, Color("8d8068"))
-	var vent := _create_cylinder(Vector3(5.0, 0.34, 1.65), 0.24, 0.66, Color("765b45"))
+	var vent := _create_cylinder(Vector3(17.0, 0.34, 3.0), 0.42, 0.9, Color("765b45"))
 	vent.name = "ToxicVent"
 	var vent_light := OmniLight3D.new()
-	vent_light.position = Vector3(5.0, 0.7, 1.65)
+	vent_light.position = Vector3(17.0, 0.9, 3.0)
 	vent_light.light_color = Color("e5a557")
 	vent_light.light_energy = 0.9
 	vent_light.omni_range = 2.4
@@ -289,7 +296,7 @@ func _build_world() -> void:
 
 	shade_panel = _create_box(shade_panel_home, Vector3(1.45, 0.09, 0.85), Color("839199"), Vector3(0.0, 0.22, -0.08))
 	shade_panel.name = "LooseShadePanel"
-	shade_preview = _create_cylinder(shade_panel_home, 1.45, 0.025, Color(0.25, 0.75, 0.72, 0.28))
+	shade_preview = _create_cylinder(shade_panel_home, 4.0, 0.025, Color(0.25, 0.75, 0.72, 0.28))
 	shade_preview.name = "ShadeFootprintPreview"
 	shade_preview.visible = false
 	_create_world_label("LOOSE WRECK PANEL", shade_panel_home + Vector3(0.0, 0.45, 0.0), Color("e4e8e4"), 0.0055)
@@ -312,6 +319,24 @@ func _build_ecology_grid() -> void:
 			root.add_child(cell)
 			ecology_cells.append(cell)
 	_refresh_ecology_visuals()
+
+
+func _build_spatial_landmarks() -> void:
+	# Greybox geography: colored landforms and labels communicate gradients and
+	# route structure without pretending to be production environment art.
+	_create_world_label("WRECK SHELTER / NORTHWEST RIM", Vector3(-5.4, 1.65, -4.8), Color("d9c49a"), 0.006)
+	_create_world_label("SHELTERED HOLLOW", Vector3(-2.7, 0.75, -1.55), Color("9fc6a5"), 0.006)
+	_create_world_label("EXPOSED TOXIC SHELF", Vector3(16.0, 0.8, 3.0), Color("e1ac70"), 0.006)
+	_create_world_label("DRY DRAINAGE SPINE", Vector3(12.0, 0.55, 11.0), Color("81aeb5"), 0.006)
+	_create_world_label("DOWNSTREAM RECOVERY POCKET", Vector3(37.0, 0.7, 23.0), Color("78c7b4"), 0.006)
+	for point in [Vector3(2.0, 0.025, 1.0), Vector3(7.0, 0.025, 5.0), Vector3(12.0, 0.025, 9.0), Vector3(17.0, 0.025, 12.0), Vector3(22.0, 0.025, 15.0), Vector3(27.0, 0.025, 18.0), Vector3(32.0, 0.025, 21.0)]:
+		_create_box(point, Vector3(4.8, 0.035, 2.2), Color("4d6263"), Vector3(0.0, -0.62, 0.0))
+	# Outer-loop landmarks remain visible from the wreck while local conditions
+	# stay hidden behind shelves and stone clusters.
+	for point in [Vector3(1.0, 0.45, -4.5), Vector3(9.0, 0.55, -4.0), Vector3(22.0, 0.65, -1.0), Vector3(31.0, 0.55, 7.0), Vector3(38.0, 0.5, 15.0)]:
+		_create_rock(point, 0.85, Color("78807a"))
+	_create_box(Vector3(16.0, 0.16, 3.0), Vector3(8.0, 0.28, 7.0), Color("706653"), Vector3(0.0, 0.08, 0.0))
+	_create_box(Vector3(37.0, 0.08, 23.0), Vector3(7.0, 0.12, 6.0), Color("3e5650"), Vector3.ZERO)
 
 
 func _build_astronaut() -> void:
@@ -366,7 +391,7 @@ func _build_patches() -> void:
 	patches["crust"] = _create_patch(
 		"crust",
 		"SUN-STRUCK FILM",
-		Vector3(4.15, 0.04, 1.75),
+		Vector3(16.0, 0.34, 3.0),
 		Color("8c826c"),
 		false
 	)
@@ -375,7 +400,7 @@ func _build_patches() -> void:
 func _build_presence() -> void:
 	presence_root = Node3D.new()
 	presence_root.name = "DistantPresence"
-	presence_root.position = Vector3(0.8, 1.3, -5.45)
+	presence_root.position = Vector3(24.0, 1.3, -3.5)
 	presence_root.visible = false
 	add_child(presence_root)
 
@@ -475,7 +500,7 @@ func _build_refuge() -> void:
 
 
 func _build_grazer() -> void:
-	grazer_cell = ecology.world_to_cell(Vector2(-1.25, 0.15))
+	grazer_cell = ecology.world_to_cell(Vector2(6.0, 6.0))
 	var world: Vector2 = ecology.world_position(grazer_cell.x, grazer_cell.y)
 	grazer_root = Node3D.new()
 	grazer_root.name = "PrototypeGrazer"
@@ -522,7 +547,7 @@ func _build_grazer() -> void:
 
 
 func _build_disturbance() -> void:
-	dust_front = _create_box(Vector3(-6.0, 1.15, 0.0), Vector3(0.34, 2.3, 8.2), Color("b97845"))
+	dust_front = _create_box(Vector3(-7.0, 1.15, 10.0), Vector3(0.5, 2.3, 34.0), Color("b97845"))
 	dust_front.name = "HeatDustFront"
 	var dust_material := StandardMaterial3D.new()
 	dust_material.albedo_color = Color(0.78, 0.39, 0.16, 0.34)
@@ -551,7 +576,7 @@ func _build_interface() -> void:
 
 	var title := Label.new()
 	title.position = Vector2(24, 18)
-	title.text = "FIRST RAIN  /  EMBODIED TOOLKIT PROTOTYPE"
+	title.text = "FIRST RAIN  /  CRASH BASIN SPATIAL PROTOTYPE"
 	title.add_theme_font_size_override("font_size", 15)
 	title.add_theme_color_override("font_color", Color("e9b36e"))
 	canvas.add_child(title)
@@ -590,6 +615,12 @@ func _build_interface() -> void:
 	weather_label.add_theme_font_size_override("font_size", 14)
 	weather_label.add_theme_color_override("font_color", Color("d89662"))
 	canvas.add_child(weather_label)
+
+	zone_label = Label.new()
+	zone_label.position = Vector2(24, 198)
+	zone_label.add_theme_font_size_override("font_size", 14)
+	zone_label.add_theme_color_override("font_color", Color("8ab8c0"))
+	canvas.add_child(zone_label)
 
 	var controls := Label.new()
 	controls.position = Vector2(24, 606)
@@ -762,8 +793,9 @@ func _move_astronaut(_delta: float) -> void:
 	input = input.normalized()
 	astronaut.velocity = Vector3(input.x * WALK_SPEED, 0.0, input.y * WALK_SPEED)
 	astronaut.move_and_slide()
-	astronaut.position.x = clamp(astronaut.position.x, -WORLD_X, WORLD_X)
-	astronaut.position.z = clamp(astronaut.position.z, -WORLD_Z, WORLD_Z)
+	astronaut.position.x = clamp(astronaut.position.x, WORLD_MIN_X, WORLD_MAX_X)
+	astronaut.position.z = clamp(astronaut.position.z, WORLD_MIN_Z, WORLD_MAX_Z)
+	visited_zones[_current_zone()] = true
 	if input.length() > 0.1:
 		astronaut.rotation.y = lerp_angle(astronaut.rotation.y, atan2(input.x, input.y), 0.24)
 	if analysis_lens_enabled:
@@ -877,8 +909,46 @@ func _toggle_field_review() -> void:
 		return
 	field_review_open = not field_review_open
 	last_water_hold_active = false
+	if field_review_open:
+		scanner_before_survey = scanner_readout.text
+		scanner_title.text = "FIELD SCANNER  /  BASIN SURVEY"
+		scanner_readout.text = _basin_survey_text()
+	else:
+		scanner_title.text = "CRACKED FIELD SCANNER  /  ONLINE"
+		scanner_readout.text = scanner_before_survey
 	scanner_card.modulate = Color("d9fff2") if field_review_open else Color.WHITE
 	_set_status("The astronaut braces at the scanner and reconstructs the recorded evidence. Ecological time is paused." if field_review_open else "The scanner record closes. Field time resumes.")
+
+
+func _current_zone() -> String:
+	if _at_wreck():
+		return "WRECK SHELTER"
+	var position := Vector2(astronaut.position.x, astronaut.position.z)
+	var zones := {
+		"SHELTERED HOLLOW": Vector2(-2.7, -1.55),
+		"EXPOSED TOXIC SHELF": Vector2(16.0, 3.0),
+		"DOWNSTREAM RECOVERY POCKET": Vector2(37.0, 23.0),
+		"DRY DRAINAGE SPINE": Vector2(18.0, 12.0)
+	}
+	var nearest := "DRY DRAINAGE SPINE"
+	var nearest_distance := INF
+	for zone in zones:
+		var distance: float = position.distance_to(zones[zone])
+		if distance < nearest_distance:
+			nearest_distance = distance
+			nearest = zone
+	return nearest
+
+
+func _basin_survey_text() -> String:
+	var lines: Array[String] = ["VISITED ECOLOGICAL ZONES  /  last observed, not live"]
+	for zone in ["WRECK SHELTER", "SHELTERED HOLLOW", "DRY DRAINAGE SPINE", "EXPOSED TOXIC SHELF", "DOWNSTREAM RECOVERY POCKET"]:
+		lines.append(("• " + zone) if visited_zones.has(zone) else "• ?????  /  unvisited")
+	lines.append("")
+	lines.append("SHADE PANEL  " + ("last observed at cell %d,%d" % [shade_placed_cell.x, shade_placed_cell.y] if shade_placed else ("carried" if carrying_shade else "last observed near wreck")))
+	lines.append("Conditions may have changed since observation.")
+	lines.append("No route or objective is inferred.")
+	return "\n".join(lines)
 
 
 func _request_water_intervention() -> void:
@@ -1299,7 +1369,7 @@ func _water_nearby_patch() -> void:
 		refuge_watered = true
 		reservoir_established = true
 		ecology_started = true
-		ecology.add_water(Vector2(refuge_position.x, refuge_position.z), 0.72, 1.4)
+		ecology.add_water(Vector2(refuge_position.x, refuge_position.z), 0.72, 4.0)
 		var refuge_cell: Vector2i = ecology.world_to_cell(Vector2(refuge_position.x, refuge_position.z))
 		last_intervention_event_id = evidence.record_event(ecology.tick, "intervention.water_added", "cell:%d,%d" % [refuge_cell.x, refuge_cell.y], [command_id], {"amount": 0.72, "remaining_doses": water_doses})
 		evidence.checkpoint(ecology.tick, "player_intervention", _evidence_snapshot())
@@ -1445,7 +1515,7 @@ func _interact_with_shade() -> void:
 		shade_panel.global_position = Vector3(placed_world.x, 1.15, placed_world.y)
 		shade_panel.rotation = Vector3(0.0, 0.18, -0.04)
 		ecology.place_equipment_shade(placed_world)
-		patches["crust"]["shade"] = placed_world.distance_to(Vector2(patches["crust"]["node"].position.x, patches["crust"]["node"].position.z)) <= 1.45
+		patches["crust"]["shade"] = placed_world.distance_to(Vector2(patches["crust"]["node"].position.x, patches["crust"]["node"].position.z)) <= 4.0
 		last_intervention_event_id = evidence.record_event(ecology.tick, "intervention.shade_added", "cell:%d,%d" % [shade_placed_cell.x, shade_placed_cell.y], [command_id])
 		evidence.checkpoint(ecology.tick, "player_intervention", _evidence_snapshot())
 		_refresh_ecology_visuals()
@@ -1502,6 +1572,9 @@ func _dismantle_reclaimer() -> void:
 
 
 func _update_interface() -> void:
+	var current_zone := _current_zone()
+	visited_zones[current_zone] = true
+	zone_label.text = "ZONE  %s  /  %d of 5 surveyed" % [current_zone, visited_zones.size()]
 	if cache_opened:
 		water_label.text = "WATER %d     RATIONS %d     FRESH FOOD %d" % [water_doses, ration_packs, fresh_food]
 	else:
