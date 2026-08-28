@@ -79,6 +79,8 @@ Exposure remains an exact suit reading. Hunger is qualitative and accelerates ex
 
 The balance values are deliberately provisional. The playtest asks whether players voluntarily structure their work into excursions, understand the cost of forced recovery, and still feel able to inspect and recover from an ecological mistake.
 
+For the enlarged Crash Basin, exposed accumulation is one quarter of the earlier small-map rate. Hunger reaches one meal threshold over roughly eight displayed field hours, approximating three meals per field day instead of demanding food every short expedition.
+
 ## Evidence and replay contract
 
 Issue #10 is represented by an in-memory recorder behind one Godot interface. It is deliberately independent of status text, scanner prose, meshes, and labels. Press **F9** to pause the simulation and inspect the evidence stream; **[ / ]** walks events and displays each selected event's causal chain.
@@ -117,6 +119,7 @@ The captured idle-opening failure can be replayed headlessly:
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/evidence_recorder_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/toolkit_economy_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/crash_basin_spatial_test.gd
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/survival_pacing_test.gd
 ```
 
-The checks verify that an idle opening cannot pre-age the dormant ecology, that the grazer moves visibly without frame-sized jumps, that it exposes a complete seek–digest–roam–manure cycle, that the scanner preserves bounded baseline, comparison, rescan, pulse, and local-lens feedback, that the evidence recorder reconstructs an ordered causal episode from command through outcome, that the toolkit preserves free placement, persistent bulky objects, Reservoir refill, and the irreversible reclaimer trade-off, and that the enlarged basin preserves the accepted traversal scale, five zones, unguided Basin Survey, and episodic downhill drainage.
+The checks verify that an idle opening cannot pre-age the dormant ecology, that the grazer moves visibly without frame-sized jumps, that it exposes a complete seek–digest–roam–manure cycle, that the scanner preserves bounded baseline, comparison, rescan, pulse, and local-lens feedback, that the evidence recorder reconstructs an ordered causal episode from command through outcome, that the toolkit preserves free placement, persistent bulky objects, Reservoir refill, and the irreversible reclaimer trade-off, that the enlarged basin preserves the accepted traversal scale, five zones, unguided Basin Survey, and episodic downhill drainage, and that survival pacing preserves four-times-longer exposure plus an eight-field-hour meal cadence.

@@ -18,6 +18,12 @@ const ECOLOGY_STEP_SECONDS := 0.34
 const VOLUNTARY_RECOVERY_SECONDS := 2.0
 const FORCED_RECOVERY_SECONDS := 10.0
 const LAST_WATER_HOLD_SECONDS := 0.75
+const FIELD_TIME_SCALE := 12.0
+const EXPOSED_EXPOSURE_RATE := 0.105
+const MOSS_EXPOSURE_RATE := 0.035
+# Forty-five hunger points marks a meal. At 12× displayed field time this
+# takes eight in-world hours, supporting roughly three meals per field day.
+const HUNGER_RATE := 0.01875
 const EcologyGridModel = preload("res://ecology_grid.gd")
 const EvidenceRecorder = preload("res://evidence_recorder.gd")
 
@@ -889,14 +895,14 @@ func _update_exposure(delta: float) -> void:
 		hunger_multiplier = 1.6
 	elif hunger >= 45.0:
 		hunger_multiplier = 1.25
-	var exposure_rate := 0.14 if _near_thriving_moss() else 0.42
+	var exposure_rate := MOSS_EXPOSURE_RATE if _near_thriving_moss() else EXPOSED_EXPOSURE_RATE
 	exposure = min(100.0, exposure + delta * exposure_rate * hunger_multiplier)
 
 
 func _update_hunger(delta: float) -> void:
 	if _at_wreck():
 		return
-	hunger = min(100.0, hunger + delta * 0.28)
+	hunger = min(100.0, hunger + delta * HUNGER_RATE)
 
 
 func _at_wreck() -> bool:
@@ -1593,7 +1599,7 @@ func _update_interface() -> void:
 	if hunger >= 75.0:
 		hunger_state = "survival pressure"
 	hunger_label.text = "HUNGER  /  %s" % hunger_state.to_upper()
-	var field_seconds := int(field_time * 12.0)
+	var field_seconds := int(field_time * FIELD_TIME_SCALE)
 	time_label.text = "FIELD TIME  %02d:%02d  /  ecological response accelerated" % [field_seconds / 60, field_seconds % 60]
 	if field_review_open:
 		ecosystem_label.text = "FIELD REVIEW  /  survival and ecological time paused  /  J closes"
