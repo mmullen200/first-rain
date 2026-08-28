@@ -120,6 +120,8 @@ var grazer_meal := 0.0
 var grazer_digestion_timer := 0.0
 var grazer_last_feeding_cell := Vector2i(-1, -1)
 var grazer_wander_cursor := 0
+var grazer_wander_heading := Vector2i(1, 0)
+var grazer_heading_steps_remaining := 5
 var grazer_manure_announced := false
 
 var disturbance_state := "quiet"
@@ -582,7 +584,7 @@ func _build_interface() -> void:
 
 	var title := Label.new()
 	title.position = Vector2(24, 18)
-	title.text = "FIRST RAIN  /  CRASH BASIN SPATIAL PROTOTYPE"
+	title.text = "FIRST RAIN  /  GRAZER FORAGING PROTOTYPE"
 	title.add_theme_font_size_override("font_size", 15)
 	title.add_theme_color_override("font_color", Color("e9b36e"))
 	canvas.add_child(title)
@@ -1205,19 +1207,35 @@ func _set_grazer_state(next_state: String) -> void:
 
 func _next_grazer_wander_cell() -> Vector2i:
 	var directions := [
-		Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(0, -1),
-		Vector2i(1, 1), Vector2i(-1, 1), Vector2i(-1, -1), Vector2i(1, -1)
+		Vector2i(1, 0), Vector2i(1, 1), Vector2i(0, 1), Vector2i(-1, 1),
+		Vector2i(-1, 0), Vector2i(-1, -1), Vector2i(0, -1), Vector2i(1, -1)
 	]
-	for attempt in range(directions.size()):
-		var index: int = (grazer_wander_cursor + attempt) % directions.size()
-		var candidate: Vector2i = grazer_cell + directions[index]
-		if candidate.x < 0 or candidate.x >= EcologyGridModel.WIDTH or candidate.y < 0 or candidate.y >= EcologyGridModel.HEIGHT:
+	var forward := grazer_cell + grazer_wander_heading
+	if grazer_heading_steps_remaining > 0 and _grazer_roam_cell_is_viable(forward):
+		grazer_heading_steps_remaining -= 1
+		return forward
+
+	var heading_index := directions.find(grazer_wander_heading)
+	if heading_index < 0:
+		heading_index = 0
+	var turn_pattern := [1, -1, 0, 1, -2, 0, 2, -1]
+	for attempt in range(turn_pattern.size()):
+		var pattern_index: int = (grazer_wander_cursor + attempt) % turn_pattern.size()
+		var direction_index: int = posmod(heading_index + turn_pattern[pattern_index], directions.size())
+		var candidate: Vector2i = grazer_cell + directions[direction_index]
+		if not _grazer_roam_cell_is_viable(candidate):
 			continue
-		if ecology.cell_snapshot(candidate.x, candidate.y)["toxicity"] >= 0.82:
-			continue
-		grazer_wander_cursor = (index + 1) % directions.size()
+		grazer_wander_heading = directions[direction_index]
+		grazer_wander_cursor = (pattern_index + 1) % turn_pattern.size()
+		grazer_heading_steps_remaining = 3 + (grazer_wander_cursor % 4)
 		return candidate
 	return grazer_cell
+
+
+func _grazer_roam_cell_is_viable(cell: Vector2i) -> bool:
+	if cell.x < 0 or cell.x >= EcologyGridModel.WIDTH or cell.y < 0 or cell.y >= EcologyGridModel.HEIGHT:
+		return false
+	return ecology.cell_snapshot(cell.x, cell.y)["toxicity"] < 0.82
 
 
 func _strongest_grazer_food_cell() -> Vector2i:

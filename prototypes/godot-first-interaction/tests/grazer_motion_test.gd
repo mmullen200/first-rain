@@ -26,6 +26,34 @@ func _run() -> void:
 		quit(2)
 		return
 
+	# A roaming grazer should hold a heading across several cell choices instead of
+	# cycling around the neighboring cells and returning to its origin.
+	var roam_origin := Vector2i(10, 8)
+	scene.grazer_cell = roam_origin
+	scene.grazer_wander_cursor = 0
+	var previous_cell := roam_origin
+	var previous_heading := Vector2i.ZERO
+	var straight_run := 0
+	var longest_straight_run := 0
+	for ignored in range(4):
+		var next_cell: Vector2i = scene._next_grazer_wander_cell()
+		var heading := next_cell - previous_cell
+		if heading == previous_heading:
+			straight_run += 1
+		else:
+			straight_run = 1
+			previous_heading = heading
+		longest_straight_run = maxi(longest_straight_run, straight_run)
+		scene.grazer_cell = next_cell
+		previous_cell = next_cell
+	var directional_displacement := Vector2(roam_origin).distance_to(Vector2(previous_cell))
+	if longest_straight_run < 3 or directional_displacement < 3.0:
+		printerr("FAIL: grazer roam targets curl locally instead of holding a direction; longest-run=", longest_straight_run, " displacement-cells=", directional_displacement)
+		quit(1)
+		return
+	scene.grazer_cell = scene.ecology.world_to_cell(Vector2(scene.grazer_root.position.x, scene.grazer_root.position.z))
+	scene.grazer_target_position = scene.grazer_root.position
+
 	var start: Vector3 = scene.grazer_root.position
 	var previous := start
 	var largest_step := 0.0
@@ -44,5 +72,5 @@ func _run() -> void:
 		printerr("FAIL: grazer motion was not slow, smooth, and visible; displacement=", displacement, " largest-step=", largest_step, " moving-frames=", moving_frames)
 		quit(1)
 		return
-	print("PASS: the awakened grazer travels slowly and smoothly; displacement=", displacement, " largest-step=", largest_step, " moving-frames=", moving_frames)
+	print("PASS: the awakened grazer holds a roaming direction and travels smoothly; longest-run=", longest_straight_run, " displacement=", displacement, " largest-step=", largest_step, " moving-frames=", moving_frames)
 	quit(0)
