@@ -124,6 +124,14 @@ _Avoid_: Morality, approval, reputation
 A network of life and environmental processes that continues without consuming the astronaut's finite wreck supplies.
 _Avoid_: Victory garden, completed biome
 
+**Disturbance**:
+A consequential environmental or ecological event that damages, redistributes, or creates habitat and thereby changes an Ecological trajectory.
+_Avoid_: Disaster, punishment event
+
+**Disturbance Regime**:
+The characteristic pattern of cyclical environmental pressure, irregular external events, and ecology-triggered feedback that repeatedly reshapes an Ecosystem.
+_Avoid_: Disaster schedule, random-event table
+
 **Emergent ecological episode**:
 A consequential chain of ecological events produced by reusable interacting rules rather than a sequence authored for that particular situation.
 _Avoid_: Random event, scripted event
