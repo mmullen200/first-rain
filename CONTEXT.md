@@ -96,6 +96,18 @@ _Avoid_: Water pickup, moisture bonus, permanent watering spot
 An animal whose ordinary behavior physically reshapes habitat, such as impounding water with gathered material, and thereby changes conditions for many other species.
 _Avoid_: Builder unit, helper animal, scripted unlock
 
+**Habituation**:
+An individual animal's learned tolerance of the Astronaut's presence, allowing closer observation or care without implying obedience or inherited change.
+_Avoid_: Taming, befriending, unit conversion
+
+**Husbandry**:
+The Astronaut's deliberate care and ecological management of animals through habitat, feeding, movement, protection, and reproduction while the animals retain autonomous behavior.
+_Avoid_: Unit control, livestock automation, animal crafting
+
+**Domestication**:
+Heritable change in an animal population across generations under sustained human selection, distinct from an individual animal becoming habituated.
+_Avoid_: Taming, recruitment, instant domestication
+
 **Detritus**:
 Dead organic material that retains nutrients and can be consumed by decomposers rather than disappearing from the ecosystem.
 _Avoid_: Waste, generic debris, dead mass
