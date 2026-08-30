@@ -62,7 +62,8 @@ func register_agent(species: String, stable_id: String, initial_state := {}) -> 
 		"generation": int(initial_state.get("generation", 0)),
 		"parents": initial_state.get("parents", []).duplicate(),
 		"brood": float(initial_state.get("brood", 0.0)),
-		"pollen_load": float(initial_state.get("pollen_load", 0.0))
+		"pollen_load": float(initial_state.get("pollen_load", 0.0)),
+		"spore_load": float(initial_state.get("spore_load", 0.0))
 	}
 	agents[stable_id] = agent
 	_emit("organism.registered", stable_id, {"species": species, "cell": agent["cell"]})
@@ -270,15 +271,28 @@ func _choose_vector_intention(agent: Dictionary) -> Dictionary:
 		agents[agent_id] = agent
 		return {"type": "wait", "agent_id": agent_id}
 	if float(agent["pollen_load"]) > 0.02:
-		if ecology.resource_amount(agent["cell"], "rhizome") + ecology.resource_amount(agent["cell"], "canopy") > 0.04:
+		if ecology.resource_amount(agent["cell"], "ground_bloom") + ecology.resource_amount(agent["cell"], "canopy_bloom") > 0.02:
 			return {"type": "pollinate", "agent_id": agent_id, "amount": minf(0.08, float(agent["pollen_load"]))}
-		return {"type": "move", "agent_id": agent_id, "cell": _step_toward(agent["cell"], _strongest_resource_cell("canopy"))}
-	var nectar_signal: float = ecology.resource_amount(agent["cell"], "fruiting") + ecology.resource_amount(agent["cell"], "rhizome")
-	if nectar_signal > 0.05:
+		var ground_target: Vector2i = _strongest_resource_cell("ground_bloom")
+		var canopy_target: Vector2i = _strongest_resource_cell("canopy_bloom")
+		var pollen_target: Vector2i = canopy_target if ecology.resource_amount(canopy_target, "canopy_bloom") >= ecology.resource_amount(ground_target, "ground_bloom") else ground_target
+		return {"type": "move", "agent_id": agent_id, "cell": _step_toward(agent["cell"], pollen_target)}
+	if float(agent["spore_load"]) > 0.02:
+		var local_refuge: float = ecology.resource_amount(agent["cell"], "dead_biomass") * ecology.resource_amount(agent["cell"], "moisture")
+		if local_refuge > 0.015:
+			return {"type": "disperse_spores", "agent_id": agent_id, "amount": minf(0.08, float(agent["spore_load"]))}
+		return {"type": "move", "agent_id": agent_id, "cell": _step_toward(agent["cell"], _strongest_resource_cell("dead_biomass"))}
+	var flower_signal: float = ecology.resource_amount(agent["cell"], "ground_bloom") + ecology.resource_amount(agent["cell"], "canopy_bloom")
+	if flower_signal > 0.02:
+		var nectar_signal := flower_signal
 		return {"type": "collect_pollen", "agent_id": agent_id, "amount": minf(0.08, nectar_signal * 0.25)}
-	var fruit_cell: Vector2i = _strongest_resource_cell("fruiting")
-	var rooted_cell: Vector2i = _strongest_resource_cell("rhizome")
-	var target: Vector2i = fruit_cell if ecology.resource_amount(fruit_cell, "fruiting") >= ecology.resource_amount(rooted_cell, "rhizome") else rooted_cell
+	if ecology.resource_amount(agent["cell"], "fruiting") > 0.05:
+		return {"type": "collect_spores", "agent_id": agent_id, "amount": minf(0.08, ecology.resource_amount(agent["cell"], "fruiting") * 0.18)}
+	var ground_cell: Vector2i = _strongest_resource_cell("ground_bloom")
+	var canopy_cell: Vector2i = _strongest_resource_cell("canopy_bloom")
+	var target: Vector2i = ground_cell if ecology.resource_amount(ground_cell, "ground_bloom") >= ecology.resource_amount(canopy_cell, "canopy_bloom") else canopy_cell
+	if ecology.resource_amount(target, "ground_bloom") + ecology.resource_amount(target, "canopy_bloom") <= 0.0:
+		target = _strongest_resource_cell("fruiting")
 	return {"type": "move", "agent_id": agent_id, "cell": _step_toward(agent["cell"], target)}
 
 
@@ -326,6 +340,10 @@ func _resolve_intention(intention: Dictionary) -> void:
 			_collect_pollen(agent_id, float(intention["amount"]))
 		"pollinate":
 			_pollinate(agent_id, float(intention["amount"]))
+		"collect_spores":
+			_collect_spores(agent_id, float(intention["amount"]))
+		"disperse_spores":
+			_disperse_spores(agent_id, float(intention["amount"]))
 		"predate":
 			_predate(agent_id, String(intention["prey_id"]), float(intention["amount"]))
 		"reproduce":
@@ -407,6 +425,26 @@ func _pollinate(agent_id: String, requested: float) -> void:
 	agents[agent_id] = agent
 	if deposited > 0.0:
 		_emit("organism.patch_pollinated", agent_id, {"cell": agent["cell"], "amount": deposited})
+
+
+func _collect_spores(agent_id: String, amount: float) -> void:
+	var agent: Dictionary = agents[agent_id]
+	agent["spore_load"] = minf(0.12, float(agent["spore_load"]) + maxf(0.0, amount))
+	agent["state"] = "spore_collecting"
+	agents[agent_id] = agent
+	_emit("organism.fungal_spores_collected", agent_id, {"cell": agent["cell"], "amount": amount})
+
+
+func _disperse_spores(agent_id: String, requested: float) -> void:
+	var agent: Dictionary = agents[agent_id]
+	var offered := minf(float(agent["spore_load"]), maxf(0.0, requested))
+	var accepted: Dictionary = ecology.add_resources(agent["cell"], {"fungal_spores": offered})
+	var deposited := float(accepted.get("fungal_spores", 0.0))
+	agent["spore_load"] = float(agent["spore_load"]) - deposited
+	agent["state"] = "spore_dispersing"
+	agents[agent_id] = agent
+	if deposited > 0.0:
+		_emit("organism.fungal_spores_distributed", agent_id, {"cell": agent["cell"], "amount": deposited})
 
 
 func _deposit_carried(agent_id: String, source_resource: String, target_resource: String) -> void:

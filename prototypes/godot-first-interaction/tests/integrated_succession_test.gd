@@ -29,6 +29,9 @@ func _init() -> void:
 	_assert(summary["aquatic_cells"] > 0, "standing water did not support aquatic production")
 	_assert(sample["aquatic_consumer"] > 0.0, "aquatic production did not establish a consumer population")
 	_assert(summary["total_volatile_sulfur"] > 0.0, "balanced aquatic metabolism produced no volatile sulfur contribution")
+	_assert(sample["ground_bloom"] > 0.0, "rooted plants produced no flowering signal for pollinators")
+	_assert(sample["canopy_bloom"] > 0.0, "canopy plants produced no distinct blossom signal")
+	_assert(sample["pollination"] == 0.0, "plants should not become pollinated without an animal vector")
 	_assert(sample["dissolved_oxygen"] < 0.9 and sample["dissolved_oxygen"] > 0.0, "aquatic oxygen did not respond within physical bounds")
 
 	print("PASS: pioneer soil supports rooted and canopy succession while standing water develops a regulated sulfur-processing food web")

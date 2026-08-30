@@ -99,7 +99,7 @@ This prototype keeps the records in memory and exposes a textual observer adapte
 
 `animal_simulation.gd` is a pure-data prototype module for issue #21. Its small interface owns stable-ID registration, queued astronaut interventions, deterministic ticks, factual domain events, versioned full snapshots, and restoration. Species choose intentions behind that seam; the ecological grid accepts common material-transfer operations; presentation nodes are not authoritative.
 
-The integrated proof uses grazers, a predator, an eusocial colony, a flying reproductive vector, and a Wetland Engineer through the same resolution path. Grazers can reproduce by transferring parental biomass into a stable-ID juvenile. The colony converts detritus into available nutrients but may strip plants when hungry; the vector carries reproductive material between patches; the engineer converts gathered biomass into dams that retain water while obstructing drainage; and the predator limits grazer pressure while remaining a possible combat threat.
+The integrated proof uses grazers, a predator, an eusocial colony, a flying reproductive vector, and a Wetland Engineer through the same resolution path. Grazers can reproduce by transferring parental biomass into a stable-ID juvenile. The colony converts detritus into available nutrients but may strip plants when hungry; the vector carries pollen only between flowering ground-cover and canopy plants, while fungal fruiting bodies use separately named spore dispersal into wet detritus; the engineer converts gathered biomass into dams that retain water while obstructing drainage; and the predator limits grazer pressure while remaining a possible combat threat.
 
 ## Integrated succession and First Rain
 

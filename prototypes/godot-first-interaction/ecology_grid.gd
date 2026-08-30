@@ -30,7 +30,10 @@ var aquatic_consumer := PackedFloat32Array()
 var dissolved_oxygen := PackedFloat32Array()
 var sulfur_precursor := PackedFloat32Array()
 var volatile_sulfur := PackedFloat32Array()
+var ground_bloom := PackedFloat32Array()
+var canopy_bloom := PackedFloat32Array()
 var pollination := PackedFloat32Array()
+var fungal_spores := PackedFloat32Array()
 var dam_material := PackedFloat32Array()
 var shade := PackedFloat32Array()
 var habitat_shade := PackedFloat32Array()
@@ -41,7 +44,7 @@ var tick := 0
 
 func _init() -> void:
 	var count: int = WIDTH * HEIGHT
-	for field in [moisture, temperature, toxicity, nutrients, dormant_moss, moss, dead_biomass, fungus, fruiting, microbial_crust, dormant_rhizome, rhizome, dormant_canopy, canopy, surface_water, aquatic_producer, aquatic_consumer, dissolved_oxygen, sulfur_precursor, volatile_sulfur, pollination, dam_material, shade]:
+	for field in [moisture, temperature, toxicity, nutrients, dormant_moss, moss, dead_biomass, fungus, fruiting, microbial_crust, dormant_rhizome, rhizome, dormant_canopy, canopy, surface_water, aquatic_producer, aquatic_consumer, dissolved_oxygen, sulfur_precursor, volatile_sulfur, ground_bloom, canopy_bloom, pollination, fungal_spores, dam_material, shade]:
 		field.resize(count)
 	_seed_barren_basin()
 	habitat_shade = shade.duplicate()
@@ -94,7 +97,10 @@ func step() -> void:
 	var next_dissolved_oxygen: PackedFloat32Array = dissolved_oxygen.duplicate()
 	var next_sulfur_precursor: PackedFloat32Array = sulfur_precursor.duplicate()
 	var next_volatile_sulfur: PackedFloat32Array = volatile_sulfur.duplicate()
+	var next_ground_bloom: PackedFloat32Array = ground_bloom.duplicate()
+	var next_canopy_bloom: PackedFloat32Array = canopy_bloom.duplicate()
 	var next_pollination: PackedFloat32Array = pollination.duplicate()
+	var next_fungal_spores: PackedFloat32Array = fungal_spores.duplicate()
 	var next_dam_material: PackedFloat32Array = dam_material.duplicate()
 
 	for y in range(HEIGHT):
@@ -147,7 +153,7 @@ func step() -> void:
 			var fungal_moisture: float = smoothstep(0.17, 0.56, local_moisture)
 			var fungal_temperature: float = 1.0 - clampf(absf(local_temperature - 0.36) * 2.3, 0.0, 1.0)
 			var fungal_suitability: float = fungal_moisture * fungal_temperature * (1.0 - local_toxicity * 0.75)
-			var fungal_awakening: float = maxf(0.0, local_dead - 0.015) * fungal_suitability * 0.22
+			var fungal_awakening: float = maxf(0.0, local_dead - 0.015) * fungal_suitability * 0.22 + fungal_spores[index] * fungal_suitability * 0.018
 			var fungal_spread: float = neighbor_fungus * fungal_suitability * 0.08
 			var fungal_growth: float = local_fungus * local_dead * fungal_suitability * 0.08
 			var fungal_decay: float = local_fungus * (0.003 + maxf(0.0, 0.1 - local_moisture) * 0.05)
@@ -174,7 +180,7 @@ func step() -> void:
 			# drainage while competing for the same shallow water.
 			var rhizome_suitability: float = smoothstep(0.16, 0.5, local_moisture) * smoothstep(0.04, 0.3, nutrients[index]) * (1.0 - local_toxicity)
 			var rhizome_awakening: float = dormant_rhizome[index] * maxf(0.0, local_moss + local_crust - 0.08) * rhizome_suitability * 0.045
-			var rhizome_spread: float = neighbor_rhizome * rhizome_suitability * 0.016
+			var rhizome_spread: float = neighbor_rhizome * rhizome_suitability * 0.016 * (0.45 + pollination[index] * 0.55)
 			var rhizome_growth: float = local_rhizome * rhizome_suitability * 0.022
 			var rhizome_stress: float = local_rhizome * (maxf(0.0, 0.12 - local_moisture) * 0.08 + local_canopy * 0.006)
 			next_rhizome[index] = clampf(local_rhizome + rhizome_awakening + rhizome_spread + rhizome_growth - rhizome_stress, 0.0, 1.0)
@@ -194,6 +200,13 @@ func step() -> void:
 			next_dormant_canopy[index] = maxf(0.0, dormant_canopy[index] - canopy_awakening * 0.5)
 			next_moisture[index] = maxf(0.0, next_moisture[index] - canopy_growth * 0.055)
 			next_dead[index] = clampf(next_dead[index] + local_canopy * 0.0018 + canopy_stress * 0.55, 0.0, 1.0)
+
+			# Flowering is explicitly plant reproduction. Fungal fruiting remains a
+			# separate spore pathway and is never treated as a pollen source.
+			var ground_flowering: float = local_rhizome * rhizome_suitability * (0.003 + pollination[index] * 0.004)
+			var canopy_flowering: float = local_canopy * canopy_suitability * (0.002 + pollination[index] * 0.003)
+			next_ground_bloom[index] = clampf(ground_bloom[index] * 0.982 + ground_flowering, 0.0, 1.0)
+			next_canopy_bloom[index] = clampf(canopy_bloom[index] * 0.987 + canopy_flowering, 0.0, 1.0)
 
 			# Standing water supports a regulated aquatic food web. Producer blooms
 			# generate sulfur precursor, while consumers and oxygen limit runaway gain.
@@ -219,6 +232,7 @@ func step() -> void:
 			next_sulfur_precursor[index] = clampf(sulfur_precursor[index] + sulfur_created - sulfur_processed, 0.0, 1.0)
 			next_volatile_sulfur[index] = clampf(volatile_sulfur[index] * 0.94 + sulfur_processed * (0.45 + local_surface_water * 0.25), 0.0, 1.0)
 			next_pollination[index] = maxf(0.0, pollination[index] * 0.965)
+			next_fungal_spores[index] = maxf(0.0, fungal_spores[index] * 0.94)
 			next_dam_material[index] = maxf(0.0, local_dam * (0.9992 - local_surface_water * 0.0005))
 
 	# Apply terrain-directed transport after every cell has completed its local
@@ -262,7 +276,10 @@ func step() -> void:
 	dissolved_oxygen = next_dissolved_oxygen
 	sulfur_precursor = next_sulfur_precursor
 	volatile_sulfur = next_volatile_sulfur
+	ground_bloom = next_ground_bloom
+	canopy_bloom = next_canopy_bloom
 	pollination = next_pollination
+	fungal_spores = next_fungal_spores
 	dam_material = next_dam_material
 	tick += 1
 
@@ -359,6 +376,8 @@ func deposit_manure(cell: Vector2i, digested_moss: float) -> void:
 func resource_amount(cell: Vector2i, resource: String) -> float:
 	var index: int = _index(clampi(cell.x, 0, WIDTH - 1), clampi(cell.y, 0, HEIGHT - 1))
 	match resource:
+		"moisture":
+			return moisture[index]
 		"moss":
 			return moss[index]
 		"dead_biomass":
@@ -385,8 +404,14 @@ func resource_amount(cell: Vector2i, resource: String) -> float:
 			return aquatic_producer[index]
 		"aquatic_consumer":
 			return aquatic_consumer[index]
+		"ground_bloom":
+			return ground_bloom[index]
+		"canopy_bloom":
+			return canopy_bloom[index]
 		"pollination":
 			return pollination[index]
+		"fungal_spores":
+			return fungal_spores[index]
 		"dam_material":
 			return dam_material[index]
 	return 0.0
@@ -404,6 +429,8 @@ func consume_resource(cell: Vector2i, resource: String, requested: float) -> flo
 			nutrients[index] -= consumed
 		"fungus":
 			fungus[index] -= consumed
+		"fruiting":
+			fruiting[index] -= consumed
 		"microbial_crust":
 			microbial_crust[index] -= consumed
 		"rhizome":
@@ -414,8 +441,14 @@ func consume_resource(cell: Vector2i, resource: String, requested: float) -> flo
 			aquatic_producer[index] -= consumed
 		"aquatic_consumer":
 			aquatic_consumer[index] -= consumed
+		"ground_bloom":
+			ground_bloom[index] -= consumed
+		"canopy_bloom":
+			canopy_bloom[index] -= consumed
 		"pollination":
 			pollination[index] -= consumed
+		"fungal_spores":
+			fungal_spores[index] -= consumed
 		"dam_material":
 			dam_material[index] -= consumed
 		_:
@@ -438,6 +471,8 @@ func add_resources(cell: Vector2i, resources: Dictionary) -> Dictionary:
 				nutrients[index] = clampf(nutrients[index] + requested, 0.0, 1.0)
 			"fungus":
 				fungus[index] = clampf(fungus[index] + requested, 0.0, 1.0)
+			"fruiting":
+				fruiting[index] = clampf(fruiting[index] + requested, 0.0, 1.0)
 			"microbial_crust":
 				microbial_crust[index] = clampf(microbial_crust[index] + requested, 0.0, 1.0)
 			"dormant_rhizome":
@@ -454,8 +489,14 @@ func add_resources(cell: Vector2i, resources: Dictionary) -> Dictionary:
 				aquatic_producer[index] = clampf(aquatic_producer[index] + requested, 0.0, 1.0)
 			"aquatic_consumer":
 				aquatic_consumer[index] = clampf(aquatic_consumer[index] + requested, 0.0, 1.0)
+			"ground_bloom":
+				ground_bloom[index] = clampf(ground_bloom[index] + requested, 0.0, 1.0)
+			"canopy_bloom":
+				canopy_bloom[index] = clampf(canopy_bloom[index] + requested, 0.0, 1.0)
 			"pollination":
 				pollination[index] = clampf(pollination[index] + requested, 0.0, 1.0)
+			"fungal_spores":
+				fungal_spores[index] = clampf(fungal_spores[index] + requested, 0.0, 1.0)
 			"dam_material":
 				dam_material[index] = clampf(dam_material[index] + requested, 0.0, 1.0)
 			_:
@@ -502,7 +543,10 @@ func sample_world(world: Vector2) -> Dictionary:
 		"dissolved_oxygen": dissolved_oxygen[index],
 		"sulfur_precursor": sulfur_precursor[index],
 		"volatile_sulfur": volatile_sulfur[index],
+		"ground_bloom": ground_bloom[index],
+		"canopy_bloom": canopy_bloom[index],
 		"pollination": pollination[index],
+		"fungal_spores": fungal_spores[index],
 		"dam_material": dam_material[index],
 		"shade": shade[index]
 	}
@@ -522,6 +566,9 @@ func summary() -> Dictionary:
 	var total_canopy := 0.0
 	var total_surface_water := 0.0
 	var total_pollination := 0.0
+	var total_ground_bloom := 0.0
+	var total_canopy_bloom := 0.0
+	var total_fungal_spores := 0.0
 	var total_dam_material := 0.0
 	for index in range(WIDTH * HEIGHT):
 		total_moss += moss[index]
@@ -530,6 +577,9 @@ func summary() -> Dictionary:
 		total_canopy += canopy[index]
 		total_surface_water += surface_water[index]
 		total_pollination += pollination[index]
+		total_ground_bloom += ground_bloom[index]
+		total_canopy_bloom += canopy_bloom[index]
+		total_fungal_spores += fungal_spores[index]
 		total_dam_material += dam_material[index]
 		if moss[index] >= 0.03:
 			moss_cells += 1
@@ -559,6 +609,9 @@ func summary() -> Dictionary:
 		"total_canopy": total_canopy,
 		"total_surface_water": total_surface_water,
 		"total_pollination": total_pollination,
+		"total_ground_bloom": total_ground_bloom,
+		"total_canopy_bloom": total_canopy_bloom,
+		"total_fungal_spores": total_fungal_spores,
 		"total_dam_material": total_dam_material,
 		"tick": tick
 	}
@@ -587,7 +640,10 @@ func cell_snapshot(x: int, y: int) -> Dictionary:
 		"dissolved_oxygen": dissolved_oxygen[index],
 		"sulfur_precursor": sulfur_precursor[index],
 		"volatile_sulfur": volatile_sulfur[index],
+		"ground_bloom": ground_bloom[index],
+		"canopy_bloom": canopy_bloom[index],
 		"pollination": pollination[index],
+		"fungal_spores": fungal_spores[index],
 		"dam_material": dam_material[index],
 		"shade": shade[index]
 	}
@@ -619,7 +675,10 @@ func full_snapshot() -> Dictionary:
 		"dissolved_oxygen": dissolved_oxygen.duplicate(),
 		"sulfur_precursor": sulfur_precursor.duplicate(),
 		"volatile_sulfur": volatile_sulfur.duplicate(),
+		"ground_bloom": ground_bloom.duplicate(),
+		"canopy_bloom": canopy_bloom.duplicate(),
 		"pollination": pollination.duplicate(),
+		"fungal_spores": fungal_spores.duplicate(),
 		"dam_material": dam_material.duplicate(),
 		"shade": shade.duplicate(),
 		"habitat_shade": habitat_shade.duplicate(),
@@ -633,7 +692,7 @@ func restore_snapshot(snapshot: Dictionary) -> bool:
 		return false
 	if int(snapshot.get("width", 0)) != WIDTH or int(snapshot.get("height", 0)) != HEIGHT:
 		return false
-	for field_name in ["moisture", "temperature", "toxicity", "nutrients", "dormant_moss", "moss", "dead_biomass", "fungus", "fruiting", "microbial_crust", "dormant_rhizome", "rhizome", "dormant_canopy", "canopy", "surface_water", "aquatic_producer", "aquatic_consumer", "dissolved_oxygen", "sulfur_precursor", "volatile_sulfur", "pollination", "dam_material", "shade"]:
+	for field_name in ["moisture", "temperature", "toxicity", "nutrients", "dormant_moss", "moss", "dead_biomass", "fungus", "fruiting", "microbial_crust", "dormant_rhizome", "rhizome", "dormant_canopy", "canopy", "surface_water", "aquatic_producer", "aquatic_consumer", "dissolved_oxygen", "sulfur_precursor", "volatile_sulfur", "ground_bloom", "canopy_bloom", "pollination", "fungal_spores", "dam_material", "shade"]:
 		if not snapshot.has(field_name) or snapshot[field_name].size() != WIDTH * HEIGHT:
 			return false
 	moisture = snapshot["moisture"].duplicate()
@@ -656,7 +715,10 @@ func restore_snapshot(snapshot: Dictionary) -> bool:
 	dissolved_oxygen = snapshot["dissolved_oxygen"].duplicate()
 	sulfur_precursor = snapshot["sulfur_precursor"].duplicate()
 	volatile_sulfur = snapshot["volatile_sulfur"].duplicate()
+	ground_bloom = snapshot["ground_bloom"].duplicate()
+	canopy_bloom = snapshot["canopy_bloom"].duplicate()
 	pollination = snapshot["pollination"].duplicate()
+	fungal_spores = snapshot["fungal_spores"].duplicate()
 	dam_material = snapshot["dam_material"].duplicate()
 	shade = snapshot["shade"].duplicate()
 	habitat_shade = snapshot.get("habitat_shade", shade).duplicate()

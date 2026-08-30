@@ -1303,6 +1303,20 @@ func _handle_authoritative_animal_events(events: Array[Dictionary]) -> void:
 					grazer_manure_announced = true
 					_add_discovery("Grazer manure — moves nutrients from feeding sites into new ecological cells")
 					_set_status("The grazer deposits dark pellets away from the moss it ate. Local dead biomass and nutrient readings rise.")
+			"organism.patch_pollinated":
+				var facts: Dictionary = event["facts"]
+				evidence.record_event(ecology.tick, "organism.plant_pollinated", event["subject"], [], facts)
+				if not animal_roles_announced.has("pollination_observed"):
+					animal_roles_announced["pollination_observed"] = true
+					_add_discovery("Plant pollination — flying vectors carry pollen between ground-cover flowers and canopy blossoms")
+					_set_status("The flying vector moves between two flowering plant patches. The scanner detects transferred pollen; no fungal tissue is involved.")
+			"organism.fungal_spores_distributed":
+				var facts: Dictionary = event["facts"]
+				evidence.record_event(ecology.tick, "organism.fungal_spores_distributed", event["subject"], [], facts)
+				if not animal_roles_announced.has("spore_dispersal_observed"):
+					animal_roles_announced["spore_dispersal_observed"] = true
+					_add_discovery("Fungal spore dispersal — animals carry spores from fruiting bodies into wet detritus; this is not pollination")
+					_set_status("A vector leaves a fungal fruiting body dusted with spores, then sheds them over wet dead matter. The scanner records dispersal, not pollination.")
 
 
 func _update_disturbance(delta: float) -> void:
@@ -1366,6 +1380,8 @@ func _refresh_ecology_visuals() -> void:
 			color = color.lerp(Color("285d4f"), clamp(sample["canopy"] * 80.0, 0.0, 0.72))
 			color = color.lerp(Color("327ba5"), clamp(sample["surface_water"] * 1.3, 0.0, 0.8))
 			color = color.lerp(Color("28b9b2"), clamp(sample["aquatic_producer"] * 50.0, 0.0, 0.75))
+			color = color.lerp(Color("e2cf62"), clamp(sample["ground_bloom"] * 8.0, 0.0, 0.55))
+			color = color.lerp(Color("e790c4"), clamp(sample["canopy_bloom"] * 8.0, 0.0, 0.55))
 			color = color.lerp(Color("ad7b45"), clamp(sample["dam_material"] * 5.0, 0.0, 0.65))
 			if analysis_lens_enabled and scanner_recovered:
 				var world: Vector2 = ecology.world_position(x, y)
@@ -1735,7 +1751,8 @@ func _scanner_measurement_text(site_id: String, sample: Dictionary, confidence: 
 		"ROOTED     %s  /  canopy %s" % [_signal_band(sample.get("rhizome", 0.0)), _signal_band(sample.get("canopy", 0.0))],
 		"AQUATIC    water %s  /  producer %s  /  consumer %s" % [_signal_band(sample.get("surface_water", 0.0)), _signal_band(sample.get("aquatic_producer", 0.0)), _signal_band(sample.get("aquatic_consumer", 0.0))],
 		"AIR LINK   sulfur precursor %s  /  volatile %s" % [_signal_band(sample.get("sulfur_precursor", 0.0)), _signal_band(sample.get("volatile_sulfur", 0.0))],
-		"ANIMAL LINK  pollination %s  /  dam %s" % [_signal_band(sample.get("pollination", 0.0)), _signal_band(sample.get("dam_material", 0.0))],
+		"FLOWERING  ground %s  /  canopy %s" % [_signal_band(sample.get("ground_bloom", 0.0)), _signal_band(sample.get("canopy_bloom", 0.0))],
+		"ANIMAL LINK  pollen %s  /  fungal spores %s  /  dam %s" % [_signal_band(sample.get("pollination", 0.0)), _signal_band(sample.get("fungal_spores", 0.0)), _signal_band(sample.get("dam_material", 0.0))],
 		"",
 		_change_text(site_id, sample),
 		_comparison_text(site_id, sample),
