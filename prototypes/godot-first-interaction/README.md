@@ -95,6 +95,12 @@ The contract separates three records:
 
 This prototype keeps the records in memory and exposes a textual observer adapter. Production persistence, file formats, compression, telemetry consent, and a full rewind player remain outside this decision.
 
+## Authoritative animal-simulation seam
+
+`animal_simulation.gd` is a pure-data prototype module for issue #21. Its small interface owns stable-ID registration, queued astronaut interventions, deterministic ticks, factual domain events, versioned full snapshots, and restoration. Species choose intentions behind that seam; the ecological grid accepts common material-transfer operations; presentation nodes are not authoritative.
+
+The current proof uses a grazer and predator through the same resolution path. It checks environment consumption and deposition, animal–animal predation, intervention resolution, deterministic replay, and conservation of transferred material. Reproduction, Wetland Engineer hydrology, presentation migration, and the complete species roster remain work for the integrated prototype after this seam is accepted.
+
 ## Embodied-toolkit question
 
 The loose shade panel can be carried as the astronaut's one bulky object and placed on any reachable ecological cell. A translucent footprint shows immediate coverage without predicting biological success. Retrieving it removes that shade immediately; forced recovery drops it at the collapse location instead of teleporting it to the wreck.
@@ -123,6 +129,7 @@ The captured idle-opening failure can be replayed headlessly:
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/crash_basin_spatial_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/survival_pacing_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/rewater_after_disturbance_test.gd
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/animal_simulation_test.gd
 ```
 
-The checks verify that an idle opening cannot pre-age the dormant ecology, that the grazer moves visibly without frame-sized jumps while holding a roaming direction instead of curling around adjacent cells, that it exposes a complete seek–digest–roam–manure cycle, that the scanner preserves bounded baseline, comparison, rescan, pulse, and local-lens feedback, that the evidence recorder reconstructs an ordered causal episode from command through outcome, that the toolkit preserves free placement, persistent bulky objects, Reservoir refill, and the irreversible reclaimer trade-off, that the enlarged basin preserves the accepted traversal scale, five zones, unguided Basin Survey, and episodic downhill drainage, that survival pacing preserves four-times-longer exposure plus an eight-field-hour meal cadence, and that storm-dried established habitat can receive recovery water while moist habitat rejects redundant spending.
+The checks verify that an idle opening cannot pre-age the dormant ecology, that the grazer moves visibly without frame-sized jumps while holding a roaming direction instead of curling around adjacent cells, that it exposes a complete seek–digest–roam–manure cycle, that the scanner preserves bounded baseline, comparison, rescan, pulse, and local-lens feedback, that the evidence recorder reconstructs an ordered causal episode from command through outcome, that the toolkit preserves free placement, persistent bulky objects, Reservoir refill, and the irreversible reclaimer trade-off, that the enlarged basin preserves the accepted traversal scale, five zones, unguided Basin Survey, and episodic downhill drainage, that survival pacing preserves four-times-longer exposure plus an eight-field-hour meal cadence, that storm-dried established habitat can receive recovery water while moist habitat rejects redundant spending, and that two animal roles share deterministic authority for ecological transfers, predation, interventions, snapshots, replay, and conservation.

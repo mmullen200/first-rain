@@ -239,6 +239,52 @@ func deposit_manure(cell: Vector2i, digested_moss: float) -> void:
 	nutrients[index] = clampf(nutrients[index] + digested_moss * 0.58, 0.0, 1.0)
 
 
+func resource_amount(cell: Vector2i, resource: String) -> float:
+	var index: int = _index(clampi(cell.x, 0, WIDTH - 1), clampi(cell.y, 0, HEIGHT - 1))
+	match resource:
+		"moss":
+			return moss[index]
+		"dead_biomass":
+			return dead_biomass[index]
+		"nutrients":
+			return nutrients[index]
+	return 0.0
+
+
+func consume_resource(cell: Vector2i, resource: String, requested: float) -> float:
+	var index: int = _index(clampi(cell.x, 0, WIDTH - 1), clampi(cell.y, 0, HEIGHT - 1))
+	var consumed := minf(resource_amount(cell, resource), maxf(0.0, requested))
+	match resource:
+		"moss":
+			moss[index] -= consumed
+		"dead_biomass":
+			dead_biomass[index] -= consumed
+		"nutrients":
+			nutrients[index] -= consumed
+		_:
+			return 0.0
+	return consumed
+
+
+func add_resources(cell: Vector2i, resources: Dictionary) -> Dictionary:
+	var index: int = _index(clampi(cell.x, 0, WIDTH - 1), clampi(cell.y, 0, HEIGHT - 1))
+	var accepted := {}
+	for resource in resources:
+		var requested: float = maxf(0.0, float(resources[resource]))
+		var before := resource_amount(cell, resource)
+		match resource:
+			"moss":
+				moss[index] = clampf(moss[index] + requested, 0.0, 1.0)
+			"dead_biomass":
+				dead_biomass[index] = clampf(dead_biomass[index] + requested, 0.0, 1.0)
+			"nutrients":
+				nutrients[index] = clampf(nutrients[index] + requested, 0.0, 1.0)
+			_:
+				continue
+		accepted[resource] = resource_amount(cell, resource) - before
+	return accepted
+
+
 func apply_dust_front(column: int) -> void:
 	var x: int = clampi(column, 0, WIDTH - 1)
 	for y in range(HEIGHT):
@@ -330,8 +376,36 @@ func full_snapshot() -> Dictionary:
 		"dead_biomass": dead_biomass.duplicate(),
 		"fungus": fungus.duplicate(),
 		"fruiting": fruiting.duplicate(),
-		"shade": shade.duplicate()
+		"shade": shade.duplicate(),
+		"habitat_shade": habitat_shade.duplicate(),
+		"equipment_shade_world": equipment_shade_world,
+		"equipment_shade_active": equipment_shade_active
 	}
+
+
+func restore_snapshot(snapshot: Dictionary) -> bool:
+	if int(snapshot.get("version", 0)) != 1:
+		return false
+	if int(snapshot.get("width", 0)) != WIDTH or int(snapshot.get("height", 0)) != HEIGHT:
+		return false
+	for field_name in ["moisture", "temperature", "toxicity", "nutrients", "dormant_moss", "moss", "dead_biomass", "fungus", "fruiting", "shade"]:
+		if not snapshot.has(field_name) or snapshot[field_name].size() != WIDTH * HEIGHT:
+			return false
+	moisture = snapshot["moisture"].duplicate()
+	temperature = snapshot["temperature"].duplicate()
+	toxicity = snapshot["toxicity"].duplicate()
+	nutrients = snapshot["nutrients"].duplicate()
+	dormant_moss = snapshot["dormant_moss"].duplicate()
+	moss = snapshot["moss"].duplicate()
+	dead_biomass = snapshot["dead_biomass"].duplicate()
+	fungus = snapshot["fungus"].duplicate()
+	fruiting = snapshot["fruiting"].duplicate()
+	shade = snapshot["shade"].duplicate()
+	habitat_shade = snapshot.get("habitat_shade", shade).duplicate()
+	equipment_shade_world = snapshot.get("equipment_shade_world", Vector2.ZERO)
+	equipment_shade_active = bool(snapshot.get("equipment_shade_active", false))
+	tick = int(snapshot["tick"])
+	return true
 
 
 func world_position(x: int, y: int) -> Vector2:
