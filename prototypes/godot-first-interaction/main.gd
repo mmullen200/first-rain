@@ -6,10 +6,6 @@ extends Node3D
 
 const WALK_SPEED := 1.9
 const GRAZER_MOVE_SPEED := 0.38
-const GRAZER_HUNGER_RATE := 0.055
-const GRAZER_SEEK_THRESHOLD := 0.72
-const GRAZER_DIGEST_SECONDS := 5.0
-const GRAZER_BITE_SIZE := 0.1
 const WORLD_MIN_X := -9.0
 const WORLD_MAX_X := 41.0
 const WORLD_MIN_Z := -7.0
@@ -27,10 +23,14 @@ const REWATER_MOISTURE_THRESHOLD := 0.16
 const HUNGER_RATE := 0.01875
 const EcologyGridModel = preload("res://ecology_grid.gd")
 const EvidenceRecorder = preload("res://evidence_recorder.gd")
+const AnimalSimulation = preload("res://animal_simulation.gd")
+const WeatherSimulation = preload("res://weather_simulation.gd")
 
 var astronaut: CharacterBody3D
 var camera: Camera3D
 var ecology
+var animal_simulation
+var weather_simulation
 var evidence
 var evidence_debug_open := false
 var evidence_debug_selection := 0
@@ -46,6 +46,10 @@ var ecology_started := false
 var moss_spread_announced := false
 var fungus_announced := false
 var fruiting_announced := false
+var rhizome_announced := false
+var canopy_announced := false
+var aquatic_announced := false
+var sulfur_announced := false
 var water_doses := 0
 var ration_packs := 0
 var fresh_food := 0
@@ -114,16 +118,11 @@ var grazer_awake := false
 var grazer_cell := Vector2i.ZERO
 var grazer_target_position := Vector3.ZERO
 var grazer_step_timer := 0.0
-var grazer_failed_to_feed := 0
 var grazer_state := "dormant"
-var grazer_hunger := 1.0
-var grazer_meal := 0.0
-var grazer_digestion_timer := 0.0
-var grazer_last_feeding_cell := Vector2i(-1, -1)
-var grazer_wander_cursor := 0
-var grazer_wander_heading := Vector2i(1, 0)
-var grazer_heading_steps_remaining := 5
 var grazer_manure_announced := false
+var animal_markers: Dictionary = {}
+var animal_roles_announced: Dictionary = {}
+var first_rain_announced := false
 
 var disturbance_state := "quiet"
 var disturbance_timer := 0.0
@@ -157,6 +156,7 @@ func _ready() -> void:
 	_build_presence_signals()
 	_build_refuge()
 	_build_grazer()
+	_build_ecological_animal_markers()
 	_build_disturbance()
 	_build_scan_pulse()
 	_build_interface()
@@ -313,6 +313,8 @@ func _build_world() -> void:
 
 func _build_ecology_grid() -> void:
 	ecology = EcologyGridModel.new()
+	animal_simulation = AnimalSimulation.new(ecology, 1)
+	weather_simulation = WeatherSimulation.new(1701)
 	var root := Node3D.new()
 	root.name = "ProvisionalEcologicalCells"
 	add_child(root)
@@ -555,6 +557,39 @@ func _build_grazer() -> void:
 	grazer_root.add_child(grazer_glow)
 
 
+func _build_ecological_animal_markers() -> void:
+	var specifications := {
+		"grazer:2": ["GRAZER / JUVENILE", Color("8edbc3")],
+		"colony:1": ["EUSOCIAL COLONY", Color("dc9a52")],
+		"vector:1": ["FLYING VECTOR", Color("e9d36a")],
+		"engineer:1": ["WETLAND ENGINEER", Color("5da7c9")],
+		"predator:1": ["PREDATOR", Color("d76767")]
+	}
+	for stable_id in specifications:
+		var specification: Array = specifications[stable_id]
+		var marker := Node3D.new()
+		marker.name = "AnimalMarker_" + String(stable_id).replace(":", "_")
+		marker.visible = false
+		var body := MeshInstance3D.new()
+		var mesh := SphereMesh.new()
+		mesh.radius = 0.2
+		mesh.height = 0.36
+		body.mesh = mesh
+		body.material_override = _material(specification[1], 0.58, specification[1].darkened(0.45))
+		marker.add_child(body)
+		var label := Label3D.new()
+		label.text = specification[0]
+		label.position.y = 0.58
+		label.font_size = 26
+		label.pixel_size = 0.0042
+		label.modulate = specification[1]
+		label.outline_size = 7
+		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		marker.add_child(label)
+		add_child(marker)
+		animal_markers[stable_id] = marker
+
+
 func _build_disturbance() -> void:
 	dust_front = _create_box(Vector3(-7.0, 1.15, 10.0), Vector3(0.5, 2.3, 34.0), Color("b97845"))
 	dust_front.name = "HeatDustFront"
@@ -777,6 +812,8 @@ func _evidence_snapshot() -> Dictionary:
 			"crust": {"state": patches["crust"]["state"], "shade": patches["crust"]["shade"]}
 		},
 		"grazer": {"awake": grazer_awake, "state": grazer_state, "cell": grazer_cell},
+		"animals": animal_simulation.snapshot(),
+		"weather": weather_simulation.snapshot(),
 		"disturbance": disturbance_state
 	}
 
@@ -1102,9 +1139,16 @@ func _update_ecology_grid(delta: float) -> void:
 	ecology_step_accumulator += delta
 	while ecology_step_accumulator >= ECOLOGY_STEP_SECONDS:
 		ecology_step_accumulator -= ECOLOGY_STEP_SECONDS
-		ecology.step()
-		_refresh_ecology_visuals()
+		_seed_integrated_animals(ecology.summary())
+		var animal_events: Array[Dictionary] = animal_simulation.step()
+		_handle_authoritative_animal_events(animal_events)
 		var state: Dictionary = ecology.summary()
+		var weather_events: Array[Dictionary] = weather_simulation.step(state)
+		_handle_weather_events(weather_events)
+		if weather_simulation.precipitation > 0.0:
+			ecology.add_water(Vector2(16.0, 10.0), weather_simulation.precipitation * 0.04, 58.0)
+		_refresh_ecology_visuals()
+		_update_ecological_animal_markers()
 		if not moss_spread_announced and state["moss_cells"] >= 5:
 			moss_spread_announced = true
 			var moss_causes := [] if last_intervention_event_id == "" else [last_intervention_event_id]
@@ -1121,6 +1165,82 @@ func _update_ecology_grid(delta: float) -> void:
 			evidence.record_event(ecology.tick, "ecology.fruiting_bodies", "basin", [], state)
 			_add_discovery("Fungal fruiting body — edible; depends on wet nutrient-rich mycelium")
 			_set_status("Amber fruiting bodies rise from the violet network. The scanner marks their tissue as edible.")
+		if not rhizome_announced and state["rhizome_cells"] >= 2:
+			rhizome_announced = true
+			evidence.record_event(ecology.tick, "ecology.rhizome_established", "basin", [], state)
+			_add_discovery("Rhizome mat — rooted forage; binds drainage sediment and competes for shallow water")
+			_set_status("Blue-green ribbons root beneath the pioneer cover. Loose sediment holds while nearby shallow moisture falls.")
+		if not canopy_announced and state["canopy_cells"] >= 1:
+			canopy_announced = true
+			evidence.record_event(ecology.tick, "ecology.canopy_established", "basin", [], state)
+			_add_discovery("Canopy-former — deep-rooted shade, litter, transpiration, and atmospheric vapor")
+			_set_status("A dark branching fan rises above the rooted mat. Its shade cools the soil while its crown releases moisture.")
+		if not aquatic_announced and state["aquatic_cells"] >= 1:
+			aquatic_announced = true
+			evidence.record_event(ecology.tick, "ecology.aquatic_food_web", "basin", [], state)
+			_add_discovery("Aquatic food web — producer bloom regulated by consumers and dissolved oxygen")
+			_set_status("Turquoise cells gather in standing water. Smaller moving flecks graze the bloom instead of letting it grow unchecked.")
+		if not sulfur_announced and state["total_volatile_sulfur"] >= 0.012:
+			sulfur_announced = true
+			evidence.record_event(ecology.tick, "ecology.volatile_sulfur_released", "basin", [], state)
+			_add_discovery("Volatile sulfur analogue — aquatic microbial processing contributes material to the air")
+			_set_status("The wetland releases a sharp airborne trace. The scanner separates sulfur precursor in water from volatile material above it.")
+
+
+func _seed_integrated_animals(state: Dictionary) -> void:
+	if int(state["rhizome_cells"]) >= 1 and not animal_simulation.agents.has("colony:1"):
+		_register_ecological_role("colony", "colony:1", Vector2i(10, 8), "Eusocial colony — recycles detritus into nutrients, but hungry workers can strip rooted growth")
+	if int(state["canopy_cells"]) >= 1 and not animal_simulation.agents.has("vector:1"):
+		_register_ecological_role("vector", "vector:1", Vector2i(12, 8), "Flying vector — carries reproductive material between separated plant patches")
+	if int(state["aquatic_cells"]) >= 1 and not animal_simulation.agents.has("engineer:1"):
+		_register_ecological_role("wetland_engineer", "engineer:1", Vector2i(16, 11), "Wetland engineer — converts gathered biomass into dams that retain water and obstruct drainage")
+	if int(state["rhizome_cells"]) >= 1 and grazer_awake and not animal_simulation.agents.has("grazer:2"):
+		_register_ecological_role("grazer", "grazer:2", Vector2i(9, 8), "Second grazer — makes mating and population recovery possible when forage persists")
+	if animal_simulation.agents.has("grazer:2") and int(state["canopy_cells"]) >= 1 and not animal_simulation.agents.has("predator:1"):
+		_register_ecological_role("predator", "predator:1", Vector2i(20, 9), "Predator — limits grazer pressure and may become a direct combat threat")
+
+
+func _register_ecological_role(species: String, stable_id: String, cell: Vector2i, discovery: String) -> void:
+	if not animal_simulation.register_agent(species, stable_id, {"cell": cell, "hunger": 0.35, "body_biomass": 0.8}):
+		return
+	animal_roles_announced[stable_id] = true
+	_add_discovery(discovery)
+	evidence.record_event(ecology.tick, "organism.%s_established" % species, stable_id, [], {"cell": cell})
+
+
+func _update_ecological_animal_markers() -> void:
+	for stable_id in animal_markers:
+		var marker: Node3D = animal_markers[stable_id]
+		var agent: Dictionary = animal_simulation.agent_state(stable_id)
+		if agent.is_empty() or not bool(agent["alive"]):
+			marker.visible = false
+			continue
+		marker.visible = true
+		var cell: Vector2i = agent["cell"]
+		var world: Vector2 = ecology.world_position(cell.x, cell.y)
+		var height := 0.62 if String(agent["species"]) == "vector" else 0.25
+		marker.position = marker.position.lerp(Vector3(world.x, height, world.y), 0.45)
+		var label: Label3D = marker.get_child(1)
+		label.text = String(label.text).split(" / ")[0] + " / " + String(agent["state"]).to_upper()
+
+
+func _handle_weather_events(events: Array[Dictionary]) -> void:
+	for event in events:
+		match String(event["taxonomy"]):
+			"weather.dust":
+				if disturbance_state == "quiet" or disturbance_state == "passed":
+					disturbance_state = "warning"
+					disturbance_timer = 8.0
+					disturbance_event_id = evidence.record_event(ecology.tick, "environment.dust_window_detected", "regional_atmosphere", [], weather_simulation.snapshot())
+					_set_status("Pressure falls while hot crosswinds lift dust from bare ground. The suit projects only a short warning; the flame turns toward the advancing haze.")
+			"weather.first_rain":
+				if first_rain_announced:
+					continue
+				first_rain_announced = true
+				evidence.record_event(ecology.tick, "environment.first_rain", "crash_basin", [], weather_simulation.snapshot())
+				evidence.checkpoint(ecology.tick, "first_rain", _evidence_snapshot())
+				_add_discovery("First Rain — sustained natural precipitation after biological vapor, cloud-active material, and a favorable regional weather window converge")
+				_set_status("Rain reaches the basin floor and keeps falling. The restored life helped prepare the air and retain what lands here—but the regional weather supplied the opening.")
 
 
 func _update_grazer(delta: float) -> void:
@@ -1128,6 +1248,7 @@ func _update_grazer(delta: float) -> void:
 		var dormant_state: Dictionary = ecology.summary()
 		if dormant_state["moss_cells"] >= 7 and dormant_state["fungus_cells"] >= 3 and dormant_state["fruiting_cells"] >= 2:
 			grazer_awake = true
+			animal_simulation.register_agent("grazer", "grazer:1", {"cell": grazer_cell, "hunger": 1.0})
 			grazer_wake_event_id = evidence.record_event(ecology.tick, "organism.grazer_awakened", "grazer:1", [], dormant_state)
 			_set_grazer_state("seeking")
 			grazer_root.scale = Vector3.ONE * 1.35
@@ -1138,71 +1259,17 @@ func _update_grazer(delta: float) -> void:
 			_add_discovery("Grazer — wakes above biomass threshold; eats moss and returns nutrients")
 			_presence_focus("grazer", grazer_root.position)
 			_set_status("A stone-like shell unfolds into a small grazer. The flame moves beside it and repeats the same single pulse used at the moss.")
-			disturbance_state = "warning"
-			disturbance_timer = 14.0
-			disturbance_event_id = evidence.record_event(ecology.tick, "environment.disturbance_warning", "heat_dust_front:1", [grazer_wake_event_id])
 			evidence.checkpoint(ecology.tick, "episode_boundary", _evidence_snapshot())
 		return
-
-	grazer_hunger = minf(1.0, grazer_hunger + delta * GRAZER_HUNGER_RATE)
-	if grazer_meal > 0.0:
-		grazer_digestion_timer -= delta
-		if grazer_digestion_timer <= 0.0:
-			var manure_cell: Vector2i = ecology.world_to_cell(Vector2(grazer_root.position.x, grazer_root.position.z))
-			if manure_cell != grazer_last_feeding_cell:
-				ecology.deposit_manure(manure_cell, grazer_meal)
-				var manure_causes := [] if grazer_bite_event_id == "" else [grazer_bite_event_id]
-				evidence.record_event(ecology.tick, "organism.manure_deposited", "cell:%d,%d" % [manure_cell.x, manure_cell.y], manure_causes, {"amount": grazer_meal})
-				grazer_meal = 0.0
-				_set_grazer_state("roaming")
-				_refresh_ecology_visuals()
-				if not grazer_manure_announced:
-					grazer_manure_announced = true
-					_add_discovery("Grazer manure — moves nutrients from feeding sites into new ecological cells")
-					_set_status("The grazer deposits dark pellets away from the moss it ate. Local dead biomass and nutrient readings rise.")
-	elif grazer_hunger >= GRAZER_SEEK_THRESHOLD:
-		_set_grazer_state("seeking")
-
-	grazer_root.position = grazer_root.position.move_toward(grazer_target_position, GRAZER_MOVE_SPEED * delta)
-	grazer_step_timer -= delta
-	if grazer_root.position.distance_to(grazer_target_position) > 0.015:
+	var authoritative: Dictionary = animal_simulation.agent_state("grazer:1")
+	if authoritative.is_empty() or not bool(authoritative["alive"]):
+		_set_grazer_state("dead")
 		return
-	if grazer_step_timer > 0.0:
-		return
-	grazer_step_timer = 0.18
-
-	if grazer_state == "seeking":
-		var local_food: Dictionary = ecology.cell_snapshot(grazer_cell.x, grazer_cell.y)
-		if local_food["moss"] >= 0.025:
-			var eaten: float = ecology.graze_cell(grazer_cell, GRAZER_BITE_SIZE)
-			if eaten > 0.0:
-				grazer_bite_event_id = evidence.record_event(ecology.tick, "organism.moss_grazed", "cell:%d,%d" % [grazer_cell.x, grazer_cell.y], [grazer_wake_event_id], {"amount": eaten})
-				grazer_hunger = 0.0
-				grazer_meal = eaten
-				grazer_digestion_timer = GRAZER_DIGEST_SECONDS
-				grazer_last_feeding_cell = grazer_cell
-				_set_grazer_state("digesting")
-				_set_status("The grazer takes one measured bite, then leaves the moss to recover while it digests.")
-				_refresh_ecology_visuals()
-				_set_grazer_target(_next_grazer_wander_cell())
-				return
-		var scent_cell := _strongest_grazer_food_cell()
-		if scent_cell != grazer_cell:
-			grazer_failed_to_feed = 0
-			_set_grazer_target(grazer_cell + Vector2i(signi(scent_cell.x - grazer_cell.x), signi(scent_cell.y - grazer_cell.y)))
-		else:
-			grazer_failed_to_feed += 1
-			if grazer_failed_to_feed == 4:
-				_set_status("The grazer finds no viable moss. Its movement slows; this ecological trajectory cannot support it.")
-		return
-
-	_set_grazer_target(_next_grazer_wander_cell())
-
-
-func _set_grazer_target(cell: Vector2i) -> void:
-	grazer_cell = Vector2i(clampi(cell.x, 0, EcologyGridModel.WIDTH - 1), clampi(cell.y, 0, EcologyGridModel.HEIGHT - 1))
+	grazer_cell = authoritative["cell"]
+	_set_grazer_state(authoritative["state"])
 	var target_world: Vector2 = ecology.world_position(grazer_cell.x, grazer_cell.y)
 	grazer_target_position = Vector3(target_world.x, 0.28, target_world.y)
+	grazer_root.position = grazer_root.position.move_toward(grazer_target_position, GRAZER_MOVE_SPEED * delta)
 	if grazer_root.position.distance_to(grazer_target_position) > 0.01:
 		grazer_root.look_at(grazer_target_position, Vector3.UP)
 
@@ -1215,50 +1282,27 @@ func _set_grazer_state(next_state: String) -> void:
 		grazer_label.text = "GRAZER / " + next_state.to_upper()
 
 
-func _next_grazer_wander_cell() -> Vector2i:
-	var directions := [
-		Vector2i(1, 0), Vector2i(1, 1), Vector2i(0, 1), Vector2i(-1, 1),
-		Vector2i(-1, 0), Vector2i(-1, -1), Vector2i(0, -1), Vector2i(1, -1)
-	]
-	var forward := grazer_cell + grazer_wander_heading
-	if grazer_heading_steps_remaining > 0 and _grazer_roam_cell_is_viable(forward):
-		grazer_heading_steps_remaining -= 1
-		return forward
-
-	var heading_index := directions.find(grazer_wander_heading)
-	if heading_index < 0:
-		heading_index = 0
-	var turn_pattern := [1, -1, 0, 1, -2, 0, 2, -1]
-	for attempt in range(turn_pattern.size()):
-		var pattern_index: int = (grazer_wander_cursor + attempt) % turn_pattern.size()
-		var direction_index: int = posmod(heading_index + turn_pattern[pattern_index], directions.size())
-		var candidate: Vector2i = grazer_cell + directions[direction_index]
-		if not _grazer_roam_cell_is_viable(candidate):
-			continue
-		grazer_wander_heading = directions[direction_index]
-		grazer_wander_cursor = (pattern_index + 1) % turn_pattern.size()
-		grazer_heading_steps_remaining = 3 + (grazer_wander_cursor % 4)
-		return candidate
-	return grazer_cell
 
 
-func _grazer_roam_cell_is_viable(cell: Vector2i) -> bool:
-	if cell.x < 0 or cell.x >= EcologyGridModel.WIDTH or cell.y < 0 or cell.y >= EcologyGridModel.HEIGHT:
-		return false
-	return ecology.cell_snapshot(cell.x, cell.y)["toxicity"] < 0.82
-
-
-func _strongest_grazer_food_cell() -> Vector2i:
-	var strongest_cell := grazer_cell
-	var strongest_score := 0.025
-	for y in range(EcologyGridModel.HEIGHT):
-		for x in range(EcologyGridModel.WIDTH):
-			var sample: Dictionary = ecology.cell_snapshot(x, y)
-			var score: float = sample["moss"] - sample["toxicity"] * 0.25
-			if score > strongest_score:
-				strongest_score = score
-				strongest_cell = Vector2i(x, y)
-	return strongest_cell
+func _handle_authoritative_animal_events(events: Array[Dictionary]) -> void:
+	for event in events:
+		match String(event["taxonomy"]):
+			"organism.moss_consumed", "organism.rhizome_consumed":
+				var facts: Dictionary = event["facts"]
+				var cell: Vector2i = facts["cell"]
+				grazer_bite_event_id = evidence.record_event(ecology.tick, "organism.moss_grazed", "cell:%d,%d" % [cell.x, cell.y], [grazer_wake_event_id], {"amount": facts["amount"]})
+				_set_status("The grazer takes one measured bite, then leaves the moss to recover while it digests.")
+			"organism.material_deposited":
+				var facts: Dictionary = event["facts"]
+				if event["subject"] != "grazer:1":
+					continue
+				var cell: Vector2i = facts["cell"]
+				var manure_causes := [] if grazer_bite_event_id == "" else [grazer_bite_event_id]
+				evidence.record_event(ecology.tick, "organism.manure_deposited", "cell:%d,%d" % [cell.x, cell.y], manure_causes, {"amount": facts["amount"]})
+				if not grazer_manure_announced:
+					grazer_manure_announced = true
+					_add_discovery("Grazer manure — moves nutrients from feeding sites into new ecological cells")
+					_set_status("The grazer deposits dark pellets away from the moss it ate. Local dead biomass and nutrient readings rise.")
 
 
 func _update_disturbance(delta: float) -> void:
@@ -1314,9 +1358,15 @@ func _refresh_ecology_visuals() -> void:
 			color = color.lerp(Color("31515a"), clamp(sample["moisture"] * 0.52, 0.0, 0.5))
 			color = color.lerp(Color("9a7240"), clamp(sample["toxicity"] * 0.32, 0.0, 0.3))
 			color = color.lerp(Color("81553d"), clamp(sample["dead_biomass"] * 1.8, 0.0, 0.72))
+			color = color.lerp(Color("9c8a56"), clamp(sample["microbial_crust"] * 0.8, 0.0, 0.48))
 			color = color.lerp(Color("4fa45e"), clamp(sample["moss"] * 1.45, 0.0, 0.9))
 			color = color.lerp(Color("c064d3"), clamp(sample["fungus"] * 3.2, 0.0, 0.96))
 			color = color.lerp(Color("efb34f"), clamp(sample["fruiting"] * 4.0, 0.0, 0.98))
+			color = color.lerp(Color("67c88f"), clamp(sample["rhizome"] * 30.0, 0.0, 0.82))
+			color = color.lerp(Color("285d4f"), clamp(sample["canopy"] * 80.0, 0.0, 0.72))
+			color = color.lerp(Color("327ba5"), clamp(sample["surface_water"] * 1.3, 0.0, 0.8))
+			color = color.lerp(Color("28b9b2"), clamp(sample["aquatic_producer"] * 50.0, 0.0, 0.75))
+			color = color.lerp(Color("ad7b45"), clamp(sample["dam_material"] * 5.0, 0.0, 0.65))
 			if analysis_lens_enabled and scanner_recovered:
 				var world: Vector2 = ecology.world_position(x, y)
 				var distance: float = world.distance_to(Vector2(astronaut.position.x, astronaut.position.z))
@@ -1333,7 +1383,10 @@ func _refresh_ecology_visuals() -> void:
 				material.emission = Color("7b2c89") * min(sample["fungus"] * 2.4, 0.85)
 				material.emission_energy_multiplier = 1.15
 			ecology_cells[index].material_override = material
-			if sample["fruiting"] >= 0.055:
+			ecology_cells[index].scale.y = 1.0 + sample["canopy"] * 80.0
+			if sample["canopy"] >= 0.002:
+				ecology_cells[index].position.y = 0.16 + sample["canopy"] * 0.3
+			elif sample["fruiting"] >= 0.055:
 				ecology_cells[index].position.y = 0.19
 			elif sample["fungus"] >= 0.012:
 				ecology_cells[index].position.y = 0.14
@@ -1643,13 +1696,13 @@ func _update_interface() -> void:
 		ecosystem_label.text = "LOCAL LENS OFF  /  V toggles scanner-assisted nearby conditions"
 	match disturbance_state:
 		"quiet":
-			weather_label.text = "WEATHER  still / no active disturbance"
+			weather_label.text = "WEATHER  %s  / humidity %d%% / cloud %d%%" % [String(weather_simulation.state).replace("_", " ").to_upper(), roundi(weather_simulation.humidity * 100.0), roundi(weather_simulation.cloud_water * 100.0)]
 		"warning":
 			weather_label.text = "WEATHER  heat-and-dust front approaching in %02ds" % ceili(disturbance_timer)
 		"active":
 			weather_label.text = "WEATHER  HEAT-AND-DUST FRONT crossing basin"
 		_:
-			weather_label.text = "WEATHER  front passed / recovery in progress"
+			weather_label.text = "WEATHER  %s  / front passed / recovery in progress" % String(weather_simulation.state).replace("_", " ").to_upper()
 
 
 func _scanner_consequence_text(patch: Dictionary) -> String:
@@ -1679,6 +1732,10 @@ func _scanner_measurement_text(site_id: String, sample: Dictionary, confidence: 
 		"SURFACE    %s  /  ~%d C" % [_temperature_band(sample["temperature"]), surface_celsius],
 		"TOXICITY   %s  /  ~%02d%%" % [_toxicity_band(sample["toxicity"]), toxicity_percent],
 		"BIOLOGY    " + life_signal,
+		"ROOTED     %s  /  canopy %s" % [_signal_band(sample.get("rhizome", 0.0)), _signal_band(sample.get("canopy", 0.0))],
+		"AQUATIC    water %s  /  producer %s  /  consumer %s" % [_signal_band(sample.get("surface_water", 0.0)), _signal_band(sample.get("aquatic_producer", 0.0)), _signal_band(sample.get("aquatic_consumer", 0.0))],
+		"AIR LINK   sulfur precursor %s  /  volatile %s" % [_signal_band(sample.get("sulfur_precursor", 0.0)), _signal_band(sample.get("volatile_sulfur", 0.0))],
+		"ANIMAL LINK  pollination %s  /  dam %s" % [_signal_band(sample.get("pollination", 0.0)), _signal_band(sample.get("dam_material", 0.0))],
 		"",
 		_change_text(site_id, sample),
 		_comparison_text(site_id, sample),
@@ -1745,11 +1802,22 @@ func _toxicity_band(value: float) -> String:
 
 
 func _life_signal_text(sample: Dictionary) -> String:
+	if sample.get("canopy", 0.0) >= 0.002: return "canopy metabolism and transpiration detected"
+	if sample.get("rhizome", 0.0) >= 0.008: return "rooted mat growth detected"
+	if sample.get("aquatic_consumer", 0.0) >= 0.012: return "regulated aquatic food web detected"
+	if sample.get("aquatic_producer", 0.0) >= 0.004: return "aquatic producer bloom detected"
 	if sample["fruiting"] >= 0.055: return "fruiting tissue detected"
 	if sample["fungus"] >= 0.012: return "fungal metabolism detected"
 	if sample["moss"] >= 0.03: return "active moss analogue"
 	if sample["dormant_moss"] >= 0.08: return "dormant biological trace"
 	return "no resolved biological signal"
+
+
+func _signal_band(value: float) -> String:
+	if value < 0.01: return "NONE"
+	if value < 0.06: return "TRACE"
+	if value < 0.22: return "ACTIVE"
+	return "DENSE"
 
 
 func _toggle_analysis_lens() -> void:

@@ -47,7 +47,7 @@ Cell color is the first readable world cue: blue-green indicates moisture, green
 - Wet, nutrient-rich fungus produces harvestable fruiting bodies. Harvest removes some fungus and nutrients, so repeated harvesting can damage the food source.
 - Hunger creates a provisional survival reason to replace finite rations with renewable food.
 - A simple agent-based grazer awakens when moss, fungus, and fruiting biomass cross thresholds. Its luminous teal body, amber head, and world label distinguish it from its dormant stone-like shell. When hungry it slowly follows the strongest viable moss signal, takes one bite, then holds a roaming direction across several cells while digesting before making an occasional bounded turn. It deposits manure in a different ecological cell, moving dead biomass and nutrients away from the feeding site before hunger sends it seeking again.
-- Grazer awakening starts a warning for a moving heat-and-dust front. The front dries cells, raises heat and toxicity, and converts damaged moss to dead biomass; established living cover reduces the damage.
+- Seeded regional weather continuously evolves heat, pressure, humidity, wind, cloud water, and dust. A heat-and-dust front can emerge from those conditions; grazer awakening does not trigger it. The front dries cells, raises heat and toxicity, and converts damaged moss to dead biomass; established living cover reduces the damage.
 - During the warning, the Presence moves from the ridge to a bare depression and exposes a subsurface-moisture signal. This is a directional nudge, not an instruction: the player can scan, ignore, or spend water there.
 
 All thresholds, meters, timings, yields, and weather damage values are accelerated prototype fixtures rather than balance decisions.
@@ -99,7 +99,13 @@ This prototype keeps the records in memory and exposes a textual observer adapte
 
 `animal_simulation.gd` is a pure-data prototype module for issue #21. Its small interface owns stable-ID registration, queued astronaut interventions, deterministic ticks, factual domain events, versioned full snapshots, and restoration. Species choose intentions behind that seam; the ecological grid accepts common material-transfer operations; presentation nodes are not authoritative.
 
-The current proof uses a grazer and predator through the same resolution path. It checks environment consumption and deposition, animal–animal predation, intervention resolution, deterministic replay, and conservation of transferred material. Reproduction, Wetland Engineer hydrology, presentation migration, and the complete species roster remain work for the integrated prototype after this seam is accepted.
+The integrated proof uses grazers, a predator, an eusocial colony, a flying reproductive vector, and a Wetland Engineer through the same resolution path. Grazers can reproduce by transferring parental biomass into a stable-ID juvenile. The colony converts detritus into available nutrients but may strip plants when hungry; the vector carries reproductive material between patches; the engineer converts gathered biomass into dams that retain water while obstructing drainage; and the predator limits grazer pressure while remaining a possible combat threat.
+
+## Integrated succession and First Rain
+
+The grid now carries microbial crust, rooted rhizome mats, canopy-formers, standing water, aquatic producers and consumers, dissolved oxygen, sulfur precursor, volatile sulfur, pollination, and dam material. These roles form a provisional succession rather than an upgrade ladder: pioneers prepare soil, rooted plants stabilize and compete for water, canopy creates shade/litter/vapor, wet cells support a regulated aquatic food web, animals move matter and reproduction between patches, and engineered dams alter drainage.
+
+First Rain is a natural threshold, not a Presence ability. Surface water and canopy contribute vapor; fungal and aquatic sulfur pathways contribute cloud-active material; and a seeded regional pressure/lift window determines whether clouds can precipitate. Three sustained surface-reaching rain ticks mark First Rain. The Presence may visibly attend or warn, but is absent from the weather model's inputs.
 
 ## Embodied-toolkit question
 
@@ -130,6 +136,10 @@ The captured idle-opening failure can be replayed headlessly:
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/survival_pacing_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/rewater_after_disturbance_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/animal_simulation_test.gd
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/integrated_succession_test.gd
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/ecological_roles_test.gd
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/procedural_weather_test.gd
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/playable_progression_test.gd
 ```
 
-The checks verify that an idle opening cannot pre-age the dormant ecology, that the grazer moves visibly without frame-sized jumps while holding a roaming direction instead of curling around adjacent cells, that it exposes a complete seek–digest–roam–manure cycle, that the scanner preserves bounded baseline, comparison, rescan, pulse, and local-lens feedback, that the evidence recorder reconstructs an ordered causal episode from command through outcome, that the toolkit preserves free placement, persistent bulky objects, Reservoir refill, and the irreversible reclaimer trade-off, that the enlarged basin preserves the accepted traversal scale, five zones, unguided Basin Survey, and episodic downhill drainage, that survival pacing preserves four-times-longer exposure plus an eight-field-hour meal cadence, that storm-dried established habitat can receive recovery water while moist habitat rejects redundant spending, and that two animal roles share deterministic authority for ecological transfers, predation, interventions, snapshots, replay, and conservation.
+The checks verify the opening, movement, grazer behavior, scanner evidence, replay record, toolkit economy, basin traversal, survival pacing, disturbance recovery, and shared animal authority established by earlier revisions. Integrated checks additionally verify rooted/canopy/aquatic succession, sulfur processing, reproduction without spontaneous biomass, distinct colony/vector/engineer effects, seeded weather that produces ecological disturbances plus ecosystem-enabled First Rain without a fixed schedule or Presence trigger, and an end-to-end route from ordinary finite watering through Reservoir refills to every ecological milestone.

@@ -13,7 +13,7 @@ func _init() -> void:
 	_assert(not simulation.register_agent("grazer", "grazer:1", {"cell": forage_cell}), "duplicate stable ID was accepted")
 
 	var initial := simulation.snapshot()
-	for ignored in range(14):
+	for ignored in range(48):
 		simulation.step()
 	var expected := simulation.snapshot()
 	_assert(_has_event(simulation.event_history, "organism.moss_consumed"), "grazer never consumed environmental biomass")
@@ -22,7 +22,7 @@ func _init() -> void:
 
 	var replay = AnimalSimulation.new(EcologyGrid.new(), 1)
 	_assert(replay.restore(initial), "versioned simulation snapshot did not restore")
-	for ignored in range(14):
+	for ignored in range(48):
 		replay.step()
 	_assert(replay.snapshot() == expected, "stable-ID agents did not replay deterministically from a full snapshot")
 
@@ -39,6 +39,18 @@ func _init() -> void:
 	var intervention_events := simulation.step()
 	_assert(_has_event(intervention_events, "intervention.animal_deterred"), "accepted intervention did not resolve on the authoritative tick")
 	_assert(float(simulation.agent_state("predator:1")["fear"]) > 0.0, "deterrence did not change authoritative animal state")
+
+	var reproduction_ecology = EcologyGrid.new()
+	var reproduction = AnimalSimulation.new(reproduction_ecology, 19)
+	reproduction.register_agent("grazer", "grazer:parent:a", {"cell": Vector2i(4, 4), "hunger": 0.0, "reproductive_readiness": 1.0})
+	reproduction.register_agent("grazer", "grazer:parent:b", {"cell": Vector2i(5, 4), "hunger": 0.0, "reproductive_readiness": 1.0})
+	var parent_biomass_before: float = reproduction.agent_state("grazer:parent:a")["body_biomass"] + reproduction.agent_state("grazer:parent:b")["body_biomass"]
+	reproduction.step()
+	_assert(_has_event(reproduction.event_history, "organism.reproduced"), "compatible animal population did not reproduce through the shared authority")
+	var child_ids: Array = reproduction.agents.keys().filter(func(id): return String(id).begins_with("grazer:offspring:"))
+	_assert(child_ids.size() == 1, "one reproductive episode did not create exactly one stable-ID juvenile")
+	var family_biomass_after: float = reproduction.agent_state("grazer:parent:a")["body_biomass"] + reproduction.agent_state("grazer:parent:b")["body_biomass"] + reproduction.agent_state(child_ids[0])["body_biomass"]
+	_assert(is_equal_approx(parent_biomass_before, family_biomass_after), "reproduction created animal biomass from nothing")
 
 	var shade_world := ecology.world_position(4, 4)
 	ecology.place_equipment_shade(shade_world)
