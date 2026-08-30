@@ -68,6 +68,10 @@ _Avoid_: Level, test arena, collection of rooms
 A recognizable part of the Crash Basin shaped by local terrain and environmental conditions, with gradients rather than hard biome borders.
 _Avoid_: Biome room, stage
 
+**Regional Ecology**:
+The recovering living landscape beyond the Crash Basin that exchanges organisms, water, airborne material, and weather influences with the playable Ecosystem.
+_Avoid_: Background simulation, off-screen timer, decorative horizon
+
 **Drainage Spine**:
 The connected low ground through which water, nutrients, organisms, and some disturbances can move between Ecological Zones.
 _Avoid_: Water track, scripted route
@@ -75,6 +79,10 @@ _Avoid_: Water track, scripted route
 **Drainage Pulse**:
 The temporary downhill movement of excess water and mobile nutrients after a real water input exceeds local retention; the initially dry Drainage Spine does not generate continuous flow.
 _Avoid_: Permanent river, passive water source
+
+**Wetland Engineer**:
+A dam-building animal whose autonomous changes to water flow create and disrupt persistent aquatic habitat.
+_Avoid_: Beaver, dam tool, water generator
 
 **Wreck Shelter**:
 The compact safe area beneath and immediately around the wreck where the Astronaut can deliberate and recover without extending safety into the living basin.
@@ -119,6 +127,10 @@ _Avoid_: Victory cutscene, summoned storm, Presence-triggered weather
 **Atmospheric ecological feedback**:
 The conditional influence of living water cycling, volatile emissions, and airborne biological material on clouds and precipitation within a naturally changing atmosphere.
 _Avoid_: Rain progress, ecology-completion switch, life creating water
+
+**Atmospheric Window**:
+A naturally recurring interval in which humidity, temperature, wind, and lift make cloud formation or precipitation possible without guaranteeing it.
+_Avoid_: Rain event trigger, scheduled reward, Presence action
 
 **Awakening**:
 The planet's increasing capacity to perceive, respond, and act as the restored ecosystem becomes more diverse and resilient.
