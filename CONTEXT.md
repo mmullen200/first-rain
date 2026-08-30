@@ -121,8 +121,8 @@ The established pattern in which the astronaut and Presence notice, answer, and 
 _Avoid_: Obedience, favor, exchange
 
 **First Rain**:
-The first natural precipitation to emerge when a recovering ecosystem's water cycling and biological atmospheric contributions coincide with favorable weather conditions.
-_Avoid_: Victory cutscene, summoned storm, Presence-triggered weather
+The first sustained, surface-reaching rainfall to measurably change the Crash Basin when a recovering Ecosystem's water cycling and biological atmospheric contributions coincide with favorable weather conditions.
+_Avoid_: Virga, isolated drops, victory cutscene, summoned storm, Presence-triggered weather
 
 **Atmospheric ecological feedback**:
 The conditional influence of living water cycling, volatile emissions, and airborne biological material on clouds and precipitation within a naturally changing atmosphere.
