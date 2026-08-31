@@ -3,7 +3,7 @@
 ## Sources of truth
 
 - Before changing game concepts, player-facing language, or design decisions, read `CONTEXT.md` and use its canonical terms.
-- Before selecting, claiming, creating, resolving, or organizing GitHub issue work, read `docs/agents/issue-tracker.md` and follow its Wayfinder workflow.
+- Before starting or handing off issue-backed work—or selecting, creating, resolving, or organizing tickets—read `docs/agents/issue-tracker.md` and follow its Wayfinder workflow.
 - Before changing a prototype, read the README beside that prototype for its question, controls, boundaries, and verification commands.
 
 ## Gameplay prototypes
