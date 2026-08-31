@@ -24,6 +24,10 @@ _Avoid_: Spell, command
 The astronaut's damaged scientific device, used to measure a limited set of local environmental properties, record discovered species and substances, and build an ecological map. Its readings may be incomplete, coarse, or visibly uncertain, but it does not secretly provide false information.
 _Avoid_: Journal, codex, omniscient scanner
 
+**Basin Survey**:
+The Field Scanner's coarse, pause-only spatial record of visited Ecological Zones, last observed conditions, placed equipment, and explicit uncertainty about stale evidence.
+_Avoid_: Minimap, route planner, objective map
+
 **Field Experiment**:
 A repeatable passage from noticing an ecological opportunity or problem through local inspection, hypothesis, situated intervention, observation, interpretation, and adaptation. It concludes with a meaningful change in ecological understanding or capability rather than a declared quest result.
 _Avoid_: Quest, recipe, minigame
@@ -43,6 +47,50 @@ _Avoid_: Recycler, water generator
 **Ecological Infrastructure**:
 A reusable, physically situated object or habitat alteration that changes local ecological conditions without generating matter from nothing.
 _Avoid_: Upgrade, building, resource generator
+
+**Ecological Role**:
+An observable function through which an organism moves resources, changes habitat, regulates other life, or supports ecological recovery. A species may perform more than one role.
+_Avoid_: Unit class, species tier
+
+**Succession**:
+The overlapping and reversible change in organisms and habitat conditions as life creates opportunities and constraints for other life.
+_Avoid_: Unlock ladder, biome level
+
+**Ecological Mosaic**:
+The coexistence of pioneer, established, disturbed, and recovering habitats in different parts of the same region as local Succession follows different trajectories.
+_Avoid_: Global biome stage, region level
+
+**Crash Basin**:
+The single connected landform surrounding the wreck in which the prototype's Ecological Mosaic, survival expeditions, and First Rain unfold.
+_Avoid_: Level, test arena, collection of rooms
+
+**Ecological Zone**:
+A recognizable part of the Crash Basin shaped by local terrain and environmental conditions, with gradients rather than hard biome borders.
+_Avoid_: Biome room, stage
+
+**Regional Ecology**:
+The recovering living landscape beyond the Crash Basin that exchanges organisms, water, airborne material, and weather influences with the playable Ecosystem.
+_Avoid_: Background simulation, off-screen timer, decorative horizon
+
+**Drainage Spine**:
+The connected low ground through which water, nutrients, organisms, and some disturbances can move between Ecological Zones.
+_Avoid_: Water track, scripted route
+
+**Drainage Pulse**:
+The temporary downhill movement of excess water and mobile nutrients after a real water input exceeds local retention; the initially dry Drainage Spine does not generate continuous flow.
+_Avoid_: Permanent river, passive water source
+
+**Wetland Engineer**:
+A dam-building animal whose autonomous changes to water flow create and disrupt persistent aquatic habitat.
+_Avoid_: Beaver, dam tool, water generator
+
+**Wreck Shelter**:
+The compact safe area beneath and immediately around the wreck where the Astronaut can deliberate and recover without extending safety into the living basin.
+_Avoid_: Base zone, safe level
+
+**Animal Stewardship**:
+The species-specific ways the Astronaut develops more predictable relationships with animals through habitat care, habituation, individual trust, husbandry, and—where generational inheritance is simulated—Domestication.
+_Avoid_: Unit control, universal pet system
 
 **Presence**:
 The planet's localized, non-corporeal manifestation, provisionally perceived as a floating flame, which becomes the astronaut's alien co-investigator.
@@ -69,8 +117,16 @@ The established pattern in which the astronaut and Presence notice, answer, and 
 _Avoid_: Obedience, favor, exchange
 
 **First Rain**:
-The first deliberate cooperation in which the astronaut prepares a resilient ecosystem to receive water and the Presence concentrates dormant planetary processes into rainfall.
-_Avoid_: Victory cutscene, summoned storm
+The first sustained, surface-reaching rainfall to measurably change the Crash Basin when a recovering Ecosystem's water cycling and biological atmospheric contributions coincide with favorable weather conditions.
+_Avoid_: Virga, isolated drops, victory cutscene, summoned storm, Presence-triggered weather
+
+**Atmospheric ecological feedback**:
+The conditional influence of living water cycling, volatile emissions, and airborne biological material on clouds and precipitation within a naturally changing atmosphere.
+_Avoid_: Rain progress, ecology-completion switch, life creating water
+
+**Atmospheric Window**:
+A naturally recurring interval in which humidity, temperature, wind, and lift make cloud formation or precipitation possible without guaranteeing it.
+_Avoid_: Rain event trigger, scheduled reward, Presence action
 
 **Awakening**:
 The planet's increasing capacity to perceive, respond, and act as the restored ecosystem becomes more diverse and resilient.
@@ -111,6 +167,14 @@ _Avoid_: Taming, recruitment, instant domestication
 **Detritus**:
 Dead organic material that retains nutrients and can be consumed by decomposers rather than disappearing from the ecosystem.
 _Avoid_: Waste, generic debris, dead mass
+
+**Disturbance**:
+A consequential environmental or ecological event that damages, redistributes, or creates habitat and thereby changes an Ecological trajectory.
+_Avoid_: Disaster, punishment event
+
+**Disturbance Regime**:
+The characteristic pattern of cyclical environmental pressure, irregular external events, and ecology-triggered feedback that repeatedly reshapes an Ecosystem.
+_Avoid_: Disaster schedule, random-event table
 
 **Emergent ecological episode**:
 A consequential chain of ecological events produced by reusable interacting rules rather than a sequence authored for that particular situation.
