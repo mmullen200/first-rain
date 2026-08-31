@@ -143,9 +143,10 @@ func step() -> void:
 			var spreading: float = neighbor_moss * maxf(0.0, local_moisture - 0.1) * moss_suitability * 0.22
 			var moss_growth: float = local_moss * moss_suitability * (0.018 + nutrients[index] * 0.026)
 			var dry_decay: float = local_moss * maxf(0.0, 0.13 - local_moisture) * 0.24
+			var heat_decay: float = local_moss * maxf(0.0, local_temperature - 0.62) * 0.1
 			var toxic_decay: float = local_moss * maxf(0.0, local_toxicity - 0.5) * 0.16
 			var turnover: float = local_moss * 0.012
-			var moss_loss: float = dry_decay + toxic_decay + turnover
+			var moss_loss: float = dry_decay + heat_decay + toxic_decay + turnover
 
 			next_moss[index] = clamp(local_moss + awakening + spreading + moss_growth - moss_loss, 0.0, 1.0)
 			next_dormant[index] = clamp(dormant_moss[index] - awakening * 0.55, 0.0, 1.0)
@@ -182,7 +183,7 @@ func step() -> void:
 			var rhizome_awakening: float = dormant_rhizome[index] * maxf(0.0, local_moss + local_crust - 0.08) * rhizome_suitability * 0.045
 			var rhizome_spread: float = neighbor_rhizome * rhizome_suitability * 0.016 * (0.45 + pollination[index] * 0.55)
 			var rhizome_growth: float = local_rhizome * rhizome_suitability * 0.022
-			var rhizome_stress: float = local_rhizome * (maxf(0.0, 0.12 - local_moisture) * 0.08 + local_canopy * 0.006)
+			var rhizome_stress: float = local_rhizome * (maxf(0.0, 0.12 - local_moisture) * 0.08 + maxf(0.0, local_temperature - 0.62) * 0.045 + maxf(0.0, local_toxicity - 0.46) * 0.08 + local_canopy * 0.006)
 			next_rhizome[index] = clampf(local_rhizome + rhizome_awakening + rhizome_spread + rhizome_growth - rhizome_stress, 0.0, 1.0)
 			next_dormant_rhizome[index] = maxf(0.0, dormant_rhizome[index] - rhizome_awakening * 0.45)
 			next_moisture[index] = maxf(0.0, next_moisture[index] - rhizome_growth * 0.038)
@@ -454,6 +455,32 @@ func consume_resource(cell: Vector2i, resource: String, requested: float) -> flo
 		_:
 			return 0.0
 	return consumed
+
+
+func extract_living_clump(cell: Vector2i) -> Dictionary:
+	var bounded := Vector2i(clampi(cell.x, 0, WIDTH - 1), clampi(cell.y, 0, HEIGHT - 1))
+	var local_rhizome := resource_amount(bounded, "rhizome")
+	var local_moss := resource_amount(bounded, "moss")
+	var resource := ""
+	var amount := 0.0
+	if local_rhizome >= 0.025:
+		resource = "rhizome"
+		amount = minf(0.08, local_rhizome * 0.4)
+	elif local_moss >= 0.08:
+		resource = "moss"
+		amount = minf(0.12, local_moss * 0.4)
+	if resource == "":
+		return {}
+	var extracted := consume_resource(bounded, resource, amount)
+	if extracted <= 0.0:
+		return {}
+	return {"resource": resource, "amount": extracted, "source_cell": bounded}
+
+
+func place_living_clump(cell: Vector2i, resource: String, amount: float) -> float:
+	if resource not in ["moss", "rhizome"]:
+		return 0.0
+	return float(add_resources(cell, {resource: amount}).get(resource, 0.0))
 
 
 func add_resources(cell: Vector2i, resources: Dictionary) -> Dictionary:

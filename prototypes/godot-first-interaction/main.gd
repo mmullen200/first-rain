@@ -86,6 +86,8 @@ var shade_panel_home := Vector3(-5.4, 0.32, 2.7)
 var carrying_shade := false
 var shade_placed := false
 var shade_placed_cell := Vector2i(-1, -1)
+var clump_marker: MeshInstance3D
+var carried_clump: Dictionary = {}
 var reservoir_established := false
 var reclaimer_intact := true
 var reclaimer_hold_active := false
@@ -215,6 +217,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_request_water_intervention()
 		KEY_E:
 			_interact()
+		KEY_T:
+			_transplant_living_clump()
 		KEY_Q:
 			_use_water_for_survival()
 		KEY_Z:
@@ -308,6 +312,9 @@ func _build_world() -> void:
 	shade_preview = _create_cylinder(shade_panel_home, 4.0, 0.025, Color(0.25, 0.75, 0.72, 0.28))
 	shade_preview.name = "ShadeFootprintPreview"
 	shade_preview.visible = false
+	clump_marker = _create_cylinder(shade_panel_home, 0.34, 0.22, Color("4fa45e"))
+	clump_marker.name = "CarriedLivingClump"
+	clump_marker.visible = false
 	_create_world_label("LOOSE WRECK PANEL", shade_panel_home + Vector3(0.0, 0.45, 0.0), Color("e4e8e4"), 0.0055)
 
 
@@ -668,7 +675,7 @@ func _build_interface() -> void:
 
 	var controls := Label.new()
 	controls.position = Vector2(24, 606)
-	controls.text = "WASD move   E interact/recover   F scan   C signal   J records   V lens   SPACE water   Q drink   Z eat   F9 evidence"
+	controls.text = "WASD move   E interact/recover   T transplant   F scan   C signal   J records   V lens   SPACE water   Q drink   Z eat   F9 evidence"
 	controls.add_theme_font_size_override("font_size", 14)
 	controls.add_theme_color_override("font_color", Color("aeb7b4"))
 	canvas.add_child(controls)
@@ -806,6 +813,7 @@ func _evidence_snapshot() -> Dictionary:
 		"field_time": field_time,
 		"ecology": ecology.full_snapshot(),
 		"supplies": {"water": water_doses, "rations": ration_packs, "fresh_food": fresh_food},
+		"carried_clump": carried_clump.duplicate(true),
 		"astronaut": {"position": astronaut.position, "hunger": hunger, "exposure": exposure},
 		"patches": {
 			"hollow": {"state": patches["hollow"]["state"], "shade": patches["hollow"]["shade"]},
@@ -860,6 +868,12 @@ func _move_astronaut(_delta: float) -> void:
 		shade_preview.visible = true
 	elif shade_preview != null:
 		shade_preview.visible = false
+	if not carried_clump.is_empty():
+		clump_marker.visible = true
+		clump_marker.global_position = astronaut.global_position + Vector3(0.0, 1.25, 0.0)
+		clump_marker.rotation = astronaut.rotation
+	else:
+		clump_marker.visible = false
 
 
 func _update_camera() -> void:
@@ -928,6 +942,12 @@ func _update_nearby_interactions() -> void:
 		prompt_label.text = "The wreck's blinking cache may contain usable instruments."
 	else:
 		prompt_label.text = "Look for surfaces that seem almost—but not quite—alive."
+	var current_cell: Vector2i = ecology.world_to_cell(Vector2(astronaut.position.x, astronaut.position.z))
+	var current_sample: Dictionary = ecology.cell_snapshot(current_cell.x, current_cell.y)
+	if not carried_clump.is_empty():
+		prompt_label.text += "     T  place carried %s clump" % String(carried_clump["resource"])
+	elif not carrying_shade and (current_sample["moss"] >= 0.08 or current_sample["rhizome"] >= 0.025):
+		prompt_label.text += "     T  lift living clump"
 	if presence_root.visible:
 		prompt_label.text += "     C  signal toward nearby subject"
 	if last_water_hold_active:
@@ -1001,6 +1021,7 @@ func _basin_survey_text() -> String:
 		lines.append(("• " + zone) if visited_zones.has(zone) else "• ?????  /  unvisited")
 	lines.append("")
 	lines.append("SHADE PANEL  " + ("last observed at cell %d,%d" % [shade_placed_cell.x, shade_placed_cell.y] if shade_placed else ("carried" if carrying_shade else "last observed near wreck")))
+	lines.append("LIVING CLUMP  " + ("%s carried" % String(carried_clump.get("resource", "")) if not carried_clump.is_empty() else "none carried"))
 	lines.append("Conditions may have changed since observation.")
 	lines.append("No route or objective is inferred.")
 	return "\n".join(lines)
@@ -1051,6 +1072,9 @@ func _recover_at_wreck(forced: bool) -> void:
 			shade_placed = true
 			shade_panel.position = Vector3(dropped_world.x, 0.18, dropped_world.y)
 			ecology.place_equipment_shade(dropped_world)
+		if not carried_clump.is_empty():
+			var dropped_cell: Vector2i = ecology.world_to_cell(Vector2(astronaut.position.x, astronaut.position.z))
+			_place_carried_clump(dropped_cell, true)
 		astronaut.position = Vector3(-5.4, 0.05, -3.1)
 		astronaut.velocity = Vector3.ZERO
 	exposure = 0.0
@@ -1632,6 +1656,9 @@ func _interact_with_shade() -> void:
 		return
 
 	if not carrying_shade and _flat_distance(astronaut.global_position, shade_panel.global_position) < 1.55:
+		if not carried_clump.is_empty():
+			_set_status("The living clump already occupies the astronaut's bulky carry frame. Place it before lifting the panel.")
+			return
 		if shade_placed:
 			ecology.remove_equipment_shade()
 			patches["crust"]["shade"] = false
@@ -1647,6 +1674,60 @@ func _interact_with_shade() -> void:
 		_set_status("The panel needs a deliberate site. The sun-struck film is the clearest candidate.")
 	else:
 		_set_status("There is nothing here to handle.")
+
+
+func _transplant_living_clump() -> void:
+	if not scanner_recovered:
+		_set_status("The excavation wrap and sampling blade remain sealed in the emergency cache.")
+		return
+	if carrying_shade:
+		_set_status("The shade panel occupies the astronaut's bulky carry frame. Place it before lifting living material.")
+		return
+	var cell: Vector2i = ecology.world_to_cell(Vector2(astronaut.position.x, astronaut.position.z))
+	if not carried_clump.is_empty():
+		_place_carried_clump(cell, false)
+		return
+	var extracted: Dictionary = ecology.extract_living_clump(cell)
+	if extracted.is_empty():
+		_set_status("There is no robust living clump here to lift without destroying the patch.")
+		return
+	carried_clump = extracted
+	var command_id := _record_command("extract", "cell:%d,%d" % [cell.x, cell.y], {"resource": extracted["resource"], "amount": extracted["amount"]})
+	last_intervention_event_id = evidence.record_event(ecology.tick, "intervention.living_clump_extracted", "cell:%d,%d" % [cell.x, cell.y], [command_id], {"resource": extracted["resource"], "amount": extracted["amount"]})
+	evidence.checkpoint(ecology.tick, "player_intervention", _evidence_snapshot())
+	_refresh_ecology_visuals()
+	_set_status("The astronaut cuts beneath a %s clump. The donor patch is visibly thinner; the living material now occupies the bulky carry frame." % String(extracted["resource"]))
+
+
+func _place_carried_clump(cell: Vector2i, forced_drop: bool) -> void:
+	var resource := String(carried_clump["resource"])
+	var amount := float(carried_clump["amount"])
+	var source_cell: Vector2i = carried_clump["source_cell"]
+	if cell == source_cell and not forced_drop:
+		_set_status("This is the disturbed donor cell. Carry the clump elsewhere before setting it down.")
+		return
+	if ecology.resource_amount(cell, resource) >= 0.72:
+		_set_status("This cell is already too densely occupied to receive the clump intact.")
+		return
+	var sample: Dictionary = ecology.cell_snapshot(cell.x, cell.y)
+	var accepted: float = ecology.place_living_clump(cell, resource, amount)
+	if accepted <= 0.0:
+		_set_status("The clump cannot be seated in this cell.")
+		return
+	carried_clump = {}
+	ecology_started = true
+	var command_id := _record_command("drop" if forced_drop else "transplant", "cell:%d,%d" % [cell.x, cell.y], {"resource": resource, "amount": accepted, "source_cell": source_cell})
+	last_intervention_event_id = evidence.record_event(ecology.tick, "intervention.living_clump_dropped" if forced_drop else "intervention.living_clump_transplanted", "cell:%d,%d" % [cell.x, cell.y], [command_id], {"resource": resource, "amount": accepted, "source_cell": source_cell, "moisture": sample["moisture"], "temperature": sample["temperature"], "toxicity": sample["toxicity"]})
+	evidence.checkpoint(ecology.tick, "player_intervention", _evidence_snapshot())
+	_refresh_ecology_visuals()
+	if forced_drop:
+		return
+	if sample["toxicity"] >= 0.5 or sample["temperature"] >= 0.62:
+		_set_status("The %s clump is seated, but its edges curl against the hot, toxic ground. Survival will require observation." % resource)
+	elif sample["moisture"] < 0.13:
+		_set_status("The %s clump is seated intact, but the exposed edges are already drying. Its fate is not yet settled." % resource)
+	else:
+		_set_status("The %s clump is seated intact. The source has paid the cost; only later growth or decay will show whether this site works." % resource)
 
 
 func _request_reclaimer_dismantle() -> void:
@@ -1685,7 +1766,8 @@ func _update_interface() -> void:
 	visited_zones[current_zone] = true
 	zone_label.text = "ZONE  %s  /  %d of 5 surveyed" % [current_zone, visited_zones.size()]
 	if cache_opened:
-		water_label.text = "WATER %d     RATIONS %d     FRESH FOOD %d" % [water_doses, ration_packs, fresh_food]
+		var bulky := "     BULKY  %s CLUMP" % String(carried_clump["resource"]).to_upper() if not carried_clump.is_empty() else ("     BULKY  SHADE PANEL" if carrying_shade else "")
+		water_label.text = "WATER %d     RATIONS %d     FRESH FOOD %d%s" % [water_doses, ration_packs, fresh_food, bulky]
 	else:
 		water_label.text = "SUPPLIES  — emergency cache sealed"
 	var exposure_state := "grace period"

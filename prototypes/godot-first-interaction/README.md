@@ -15,6 +15,7 @@ Open `project.godot` in Godot 4.6 and press **F6/F5**, or run:
 - **WASD / arrow keys** — move
 - **E** — open the emergency cache, then pick up or place the loose shade panel
 - **E** — harvest when standing beside a mature fungal fruiting cell
+- **T** — lift a robust living moss/rhizome clump, then place it on another ecological cell
 - **F** — scan a nearby moss patch
 - **C** — send a suit-light signal toward a nearby ecological subject
 - **J** — open or close the pause-only Basin Survey and detailed field record
@@ -110,6 +111,8 @@ First Rain is a natural threshold, not a Presence ability. Surface water and can
 ## Embodied-toolkit question
 
 The loose shade panel can be carried as the astronaut's one bulky object and placed on any reachable ecological cell. A translucent footprint shows immediate coverage without predicting biological success. Retrieving it removes that shade immediately; forced recovery drops it at the collapse location instead of teleporting it to the wreck.
+
+A robust living moss or rhizome cell can also surrender a finite clump to the same bulky carry frame. Extraction immediately thins the donor; placement transfers that exact living biomass rather than creating a planting token. Hot, dry, or toxic ground stresses the transplant through the ordinary ecological rules, so the initial placement is not proof of establishment. This asks whether source sacrifice and uncertain destination choice create a legible spatial Field Experiment.
 
 The revealed depression is a provisional terrain-bound Reservoir: after it is established, **E** refills one empty canister at a time. If water reaches zero before that Reservoir exists, holding **E** at the wreck dismantles the Wreck Life-Support Reclaimer for one final dose. The wreck stays safe, but voluntary recovery thereafter advances the same longer ecological interval as forced recovery. These fixtures test the accepted toolkit and material-economy boundaries; they do not settle later toolkit progression or the final Reservoir-forming ecology.
 
