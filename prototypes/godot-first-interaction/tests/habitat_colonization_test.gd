@@ -61,12 +61,12 @@ func _run() -> void:
 
 	scene.grazer_awake = true
 	scene.animal_simulation.register_agent("grazer", "grazer:1", {"cell": grazer_patch})
-	scene._seed_integrated_animals()
+	for ignored in range(20):
+		scene._seed_integrated_animals()
 	_assert(scene.animal_simulation.agents.has("colony:1"), "qualifying local habitat should establish the colony")
 	_assert(scene.animal_simulation.agents.has("vector:1"), "separated flowering patches should establish a reproductive vector")
 	_assert(scene.animal_simulation.agents.has("engineer:1"), "a planted wet Drainage Spine should establish a Wetland Engineer")
 	_assert(scene.animal_simulation.agents.has("grazer:2"), "open forage beside cover should establish the second grazer")
-	scene._seed_integrated_animals()
 	_assert(scene.animal_simulation.agents.has("predator:1"), "two living grazers should establish a nearby predator")
 	_assert(scene.animal_simulation.agent_state("colony:1")["cell"] == colony_habitat["cell"], "registration should use the selected local colony habitat")
 	_assert(not _discoveries_explain_roles(scene.discoveries), "arrival discoveries should describe evidence without announcing ecological functions")

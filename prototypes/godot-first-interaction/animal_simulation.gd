@@ -42,10 +42,17 @@ func register_agent(species: String, stable_id: String, initial_state := {}) -> 
 		"wetland_engineer": "gathering"
 	}.get(species, "seeking"))
 	var cell: Vector2i = initial_state.get("cell", Vector2i.ZERO)
+	var bounded_cell := _bounded_cell(cell)
 	var agent := {
 		"id": stable_id,
 		"species": species,
-		"cell": _bounded_cell(cell),
+		"cell": bounded_cell,
+		"home_cell": initial_state.get("home_cell", bounded_cell),
+		"worker_cell": initial_state.get("worker_cell", bounded_cell),
+		"worker_target": initial_state.get("worker_target", bounded_cell),
+		"worker_phase": String(initial_state.get("worker_phase", "idle")),
+		"worker_load_resource": String(initial_state.get("worker_load_resource", "")),
+		"worker_load": float(initial_state.get("worker_load", 0.0)),
 		"alive": true,
 		"state": initial_activity,
 		"hunger": float(initial_state.get("hunger", 1.0)),
@@ -149,6 +156,11 @@ func _resolve_interventions() -> void:
 		match String(intervention["type"]):
 			"relocate":
 				agent["cell"] = _bounded_cell(intervention.get("cell", agent["cell"]))
+				if String(agent["species"]) == "colony":
+					agent["home_cell"] = agent["cell"]
+					agent["worker_cell"] = agent["cell"]
+					agent["worker_target"] = agent["cell"]
+					agent["worker_phase"] = "idle"
 				_emit("intervention.animal_relocated", agent_id, {"cell": agent["cell"]})
 			"deter":
 				agent["fear"] = clampf(float(agent["fear"]) + float(intervention.get("pressure", 0.5)), 0.0, 1.0)
@@ -244,6 +256,9 @@ func _choose_predator_intention(agent: Dictionary) -> Dictionary:
 
 func _choose_colony_intention(agent: Dictionary) -> Dictionary:
 	var agent_id := String(agent["id"])
+	var home_cell: Vector2i = agent.get("home_cell", agent["cell"])
+	var worker_cell: Vector2i = agent.get("worker_cell", home_cell)
+	var worker_phase := String(agent.get("worker_phase", "idle"))
 	agent["hunger"] = minf(1.0, float(agent["hunger"]) + 0.035)
 	agent["brood"] = maxf(0.0, float(agent["brood"]) - 0.002)
 	if int(agent["move_cooldown"]) > 0:
@@ -251,17 +266,30 @@ func _choose_colony_intention(agent: Dictionary) -> Dictionary:
 		agents[agent_id] = agent
 		return {"type": "wait", "agent_id": agent_id}
 	agents[agent_id] = agent
-	var detritus: float = ecology.resource_amount(agent["cell"], "dead_biomass")
+	if worker_phase == "returning":
+		if worker_cell == home_cell:
+			return {"type": "colony_worker_return", "agent_id": agent_id}
+		return {"type": "colony_worker_move", "agent_id": agent_id, "cell": _step_toward(worker_cell, home_cell), "phase": "returning"}
+	if worker_phase == "outbound":
+		var target: Vector2i = agent.get("worker_target", worker_cell)
+		if worker_cell == target:
+			var target_plant := String(agent.get("worker_load_resource", "moss"))
+			return {"type": "colony_worker_gather", "agent_id": agent_id, "resource": target_plant, "amount": 0.018}
+		return {"type": "colony_worker_move", "agent_id": agent_id, "cell": _step_toward(worker_cell, target), "phase": "outbound"}
+	var detritus: float = ecology.resource_amount(home_cell, "dead_biomass")
 	if detritus >= 0.025:
 		return {"type": "colony_recycle", "agent_id": agent_id, "amount": 0.06}
-	if float(agent["hunger"]) > 0.72:
-		var local_plant: String = "rhizome" if ecology.resource_amount(agent["cell"], "rhizome") >= ecology.resource_amount(agent["cell"], "moss") else "moss"
-		if ecology.resource_amount(agent["cell"], local_plant) >= 0.02:
-			return {"type": "consume", "agent_id": agent_id, "resource": local_plant, "amount": 0.045}
-	var target: Vector2i = _strongest_resource_cell("dead_biomass")
-	if ecology.resource_amount(target, "dead_biomass") < 0.025:
-		target = _strongest_resource_cell("rhizome")
-	return {"type": "move", "agent_id": agent_id, "cell": _step_toward(agent["cell"], target)}
+	var moss_target := _strongest_resource_cell("moss")
+	var rhizome_target := _strongest_resource_cell("rhizome")
+	var moss_amount: float = ecology.resource_amount(moss_target, "moss")
+	var rhizome_amount: float = ecology.resource_amount(rhizome_target, "rhizome")
+	var resource := "rhizome" if rhizome_amount > moss_amount else "moss"
+	var forage_target: Vector2i = rhizome_target if resource == "rhizome" else moss_target
+	if maxf(moss_amount, rhizome_amount) < 0.02:
+		agent["state"] = "hive idle"
+		agents[agent_id] = agent
+		return {"type": "wait", "agent_id": agent_id}
+	return {"type": "colony_worker_depart", "agent_id": agent_id, "cell": forage_target, "resource": resource}
 
 
 func _choose_vector_intention(agent: Dictionary) -> Dictionary:
@@ -336,6 +364,14 @@ func _resolve_intention(intention: Dictionary) -> void:
 			_deposit_carried(agent_id, String(intention["source_resource"]), String(intention["resource"]))
 		"colony_recycle":
 			_colony_recycle(agent_id, float(intention["amount"]))
+		"colony_worker_depart":
+			_depart_colony_worker(agent_id, intention["cell"], String(intention["resource"]))
+		"colony_worker_move":
+			_move_colony_worker(agent_id, intention["cell"], String(intention["phase"]))
+		"colony_worker_gather":
+			_gather_colony_plant(agent_id, String(intention["resource"]), float(intention["amount"]))
+		"colony_worker_return":
+			_return_colony_plant(agent_id)
 		"collect_pollen":
 			_collect_pollen(agent_id, float(intention["amount"]))
 		"pollinate":
@@ -394,17 +430,80 @@ func _gather_material(agent_id: String, resource: String, requested: float) -> v
 
 func _colony_recycle(agent_id: String, requested: float) -> void:
 	var agent: Dictionary = agents[agent_id]
-	var removed: float = ecology.consume_resource(agent["cell"], "dead_biomass", requested)
+	var home_cell: Vector2i = agent.get("home_cell", agent["cell"])
+	var removed: float = ecology.consume_resource(home_cell, "dead_biomass", requested)
 	var returned := removed * 0.72
-	var accepted: Dictionary = ecology.add_resources(agent["cell"], {"nutrients": returned})
+	var accepted: Dictionary = ecology.add_resources(home_cell, {"nutrients": returned})
 	var deposited := float(accepted.get("nutrients", 0.0))
 	var metabolic_loss := removed - deposited
 	agent["hunger"] = maxf(0.0, float(agent["hunger"]) - removed * 5.0)
 	agent["brood"] = minf(1.0, float(agent["brood"]) + metabolic_loss * 0.5)
-	agent["state"] = "recycling"
+	agent["state"] = "hive recycling"
+	agent["move_cooldown"] = 8
 	agents[agent_id] = agent
 	if removed > 0.0:
-		_emit("organism.detritus_recycled", agent_id, {"cell": agent["cell"], "removed": removed, "nutrients": deposited, "metabolic_loss": metabolic_loss})
+		_emit("organism.detritus_recycled", agent_id, {"cell": home_cell, "removed": removed, "nutrients": deposited, "metabolic_loss": metabolic_loss})
+
+
+func _depart_colony_worker(agent_id: String, target: Vector2i, resource: String) -> void:
+	var agent: Dictionary = agents[agent_id]
+	var home_cell: Vector2i = agent.get("home_cell", agent["cell"])
+	agent["cell"] = home_cell
+	agent["worker_cell"] = home_cell
+	agent["worker_target"] = _bounded_cell(target)
+	agent["worker_phase"] = "outbound"
+	agent["worker_load_resource"] = resource
+	agent["worker_load"] = 0.0
+	agent["move_cooldown"] = 12
+	agent["state"] = "workers outbound"
+	agents[agent_id] = agent
+	_emit("organism.colony_worker_departed", agent_id, {"home_cell": home_cell, "target_cell": agent["worker_target"], "resource": resource})
+
+
+func _move_colony_worker(agent_id: String, destination: Vector2i, phase: String) -> void:
+	var agent: Dictionary = agents[agent_id]
+	var origin: Vector2i = agent.get("worker_cell", agent["cell"])
+	var bounded := _bounded_cell(destination)
+	agent["worker_cell"] = bounded
+	agent["worker_phase"] = phase
+	agent["move_cooldown"] = 12
+	agent["state"] = "workers " + phase
+	agents[agent_id] = agent
+	if origin != bounded:
+		_emit("organism.colony_worker_moved", agent_id, {"from": origin, "to": bounded, "phase": phase, "home_cell": agent["home_cell"]})
+
+
+func _gather_colony_plant(agent_id: String, resource: String, requested: float) -> void:
+	var agent: Dictionary = agents[agent_id]
+	var worker_cell: Vector2i = agent.get("worker_cell", agent["cell"])
+	var gathered: float = ecology.consume_resource(worker_cell, resource, requested)
+	agent["worker_load_resource"] = resource
+	agent["worker_load"] = float(agent.get("worker_load", 0.0)) + gathered
+	agent["worker_phase"] = "returning"
+	agent["move_cooldown"] = 12
+	agent["state"] = "workers returning"
+	agents[agent_id] = agent
+	if gathered > 0.0:
+		_emit("organism.colony_plant_gathered", agent_id, {"cell": worker_cell, "resource": resource, "amount": gathered, "home_cell": agent["home_cell"]})
+
+
+func _return_colony_plant(agent_id: String) -> void:
+	var agent: Dictionary = agents[agent_id]
+	var home_cell: Vector2i = agent.get("home_cell", agent["cell"])
+	var offered: float = maxf(0.0, float(agent.get("worker_load", 0.0)))
+	var accepted: Dictionary = ecology.add_resources(home_cell, {"dead_biomass": offered})
+	var deposited := float(accepted.get("dead_biomass", 0.0))
+	agent["worker_load"] = offered - deposited
+	agent["worker_cell"] = home_cell
+	agent["worker_target"] = home_cell
+	agent["worker_phase"] = "idle"
+	agent["move_cooldown"] = 12
+	agent["state"] = "hive receiving"
+	agent["hunger"] = maxf(0.0, float(agent["hunger"]) - deposited * 3.0)
+	agents[agent_id] = agent
+	_check_transfer(deposited, offered - float(agent["worker_load"]), "%s_worker_to_hive" % agent_id)
+	if deposited > 0.0:
+		_emit("organism.colony_plant_returned", agent_id, {"home_cell": home_cell, "source_resource": agent["worker_load_resource"], "amount": deposited})
 
 
 func _collect_pollen(agent_id: String, amount: float) -> void:

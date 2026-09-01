@@ -124,6 +124,13 @@ var grazer_state := "dormant"
 var grazer_manure_announced := false
 var animal_markers: Dictionary = {}
 var animal_roles_announced: Dictionary = {}
+var colony_ant_stream_root: Node3D
+var colony_ant_markers: Array[MeshInstance3D] = []
+var habitat_search_species: Array[String] = []
+var habitat_search_cursor := 0
+var habitat_search_scores: Dictionary = {}
+var habitat_search_best: Dictionary = {}
+var habitat_search_snapshot: Dictionary = {}
 var first_rain_announced := false
 
 var disturbance_state := "quiet"
@@ -182,6 +189,7 @@ func _physics_process(delta: float) -> void:
 	_update_ecology(delta)
 	_update_ecology_grid(delta)
 	_update_grazer(delta)
+	_update_colony_worker_visual()
 	_update_disturbance(delta)
 	_update_presence()
 	_update_presence_signals(delta)
@@ -567,7 +575,7 @@ func _build_grazer() -> void:
 func _build_ecological_animal_markers() -> void:
 	var specifications := {
 		"grazer:2": ["GRAZER / JUVENILE", Color("8edbc3")],
-		"colony:1": ["EUSOCIAL COLONY", Color("dc9a52")],
+		"colony:1": ["EUSOCIAL HIVE", Color("dc9a52")],
 		"vector:1": ["FLYING VECTOR", Color("e9d36a")],
 		"engineer:1": ["WETLAND ENGINEER", Color("5da7c9")],
 		"predator:1": ["PREDATOR", Color("d76767")]
@@ -578,10 +586,18 @@ func _build_ecological_animal_markers() -> void:
 		marker.name = "AnimalMarker_" + String(stable_id).replace(":", "_")
 		marker.visible = false
 		var body := MeshInstance3D.new()
-		var mesh := SphereMesh.new()
-		mesh.radius = 0.2
-		mesh.height = 0.36
-		body.mesh = mesh
+		if stable_id == "colony:1":
+			var hive_mesh := CylinderMesh.new()
+			hive_mesh.top_radius = 0.18
+			hive_mesh.bottom_radius = 0.34
+			hive_mesh.height = 0.24
+			hive_mesh.radial_segments = 12
+			body.mesh = hive_mesh
+		else:
+			var mesh := SphereMesh.new()
+			mesh.radius = 0.2
+			mesh.height = 0.36
+			body.mesh = mesh
 		body.material_override = _material(specification[1], 0.58, specification[1].darkened(0.45))
 		marker.add_child(body)
 		var label := Label3D.new()
@@ -595,6 +611,20 @@ func _build_ecological_animal_markers() -> void:
 		marker.add_child(label)
 		add_child(marker)
 		animal_markers[stable_id] = marker
+	colony_ant_stream_root = Node3D.new()
+	colony_ant_stream_root.name = "ColonyWorkerStream"
+	colony_ant_stream_root.visible = false
+	add_child(colony_ant_stream_root)
+	for worker_index in range(7):
+		var ant := MeshInstance3D.new()
+		var ant_mesh := SphereMesh.new()
+		ant_mesh.radius = 0.045
+		ant_mesh.height = 0.075
+		ant.mesh = ant_mesh
+		ant.scale = Vector3(1.35, 0.55, 0.75)
+		ant.material_override = _material(Color("e4a85b"), 0.42, Color("75401f"))
+		colony_ant_stream_root.add_child(ant)
+		colony_ant_markers.append(ant)
 
 
 func _build_disturbance() -> void:
@@ -1221,37 +1251,110 @@ func _seed_integrated_animals() -> void:
 		arrivals.append(["grazer", "grazer:2"])
 	if animal_simulation.agents.has("grazer:2"):
 		arrivals.append(["predator", "predator:1"])
+	var missing_species: Array[String] = []
+	for arrival in arrivals:
+		if not animal_simulation.agents.has(String(arrival[1])):
+			missing_species.append(String(arrival[0]))
+	if missing_species.is_empty():
+		_reset_habitat_search()
+		return
+	var habitats := _continue_arrival_habitat_search(missing_species)
+	if habitats.is_empty():
+		return
 	for arrival in arrivals:
 		var species: String = arrival[0]
 		var stable_id: String = arrival[1]
 		if animal_simulation.agents.has(stable_id):
 			continue
-		var habitat: Dictionary = _best_arrival_habitat(species)
+		var habitat: Dictionary = habitats.get(species, {})
 		if habitat.is_empty():
 			continue
 		_register_ecological_role(species, stable_id, habitat)
 
 
+func _continue_arrival_habitat_search(species: Array[String]) -> Dictionary:
+	const CELLS_PER_ECOLOGY_TICK := 24
+	if species.size() == 1 and species[0] == "predator":
+		return {"predator": _best_predator_arrival_habitat()}
+	if habitat_search_species != species or habitat_search_snapshot.is_empty():
+		habitat_search_species = species.duplicate()
+		habitat_search_cursor = 0
+		habitat_search_scores.clear()
+		habitat_search_best.clear()
+		habitat_search_snapshot = ecology.full_snapshot()
+		for candidate in species:
+			if candidate != "predator":
+				habitat_search_scores[candidate] = -1.0
+	var cell_count: int = ecology.WIDTH * ecology.HEIGHT
+	var end_cursor: int = mini(habitat_search_cursor + CELLS_PER_ECOLOGY_TICK, cell_count)
+	for flat_index in range(habitat_search_cursor, end_cursor):
+		var cell := Vector2i(flat_index % ecology.WIDTH, floori(float(flat_index) / float(ecology.WIDTH)))
+		var evidence_by_radius := {}
+		for candidate in habitat_search_scores:
+			var radius := 3 if candidate == "vector" else 2
+			if not evidence_by_radius.has(radius):
+				evidence_by_radius[radius] = _local_habitat_evidence(cell, radius, candidate == "vector", habitat_search_snapshot)
+			var evidence: Dictionary = evidence_by_radius[radius]
+			var score := _species_habitat_score(candidate, evidence)
+			if score > float(habitat_search_scores[candidate]):
+				habitat_search_scores[candidate] = score
+				habitat_search_best[candidate] = {"cell": cell, "score": score, "evidence": evidence}
+	habitat_search_cursor = end_cursor
+	if habitat_search_cursor < cell_count:
+		return {}
+	var completed := {}
+	for candidate in species:
+		if candidate == "predator":
+			completed[candidate] = _best_predator_arrival_habitat()
+		elif float(habitat_search_scores[candidate]) >= 0.0:
+			completed[candidate] = habitat_search_best[candidate]
+		else:
+			completed[candidate] = {}
+	_reset_habitat_search()
+	return completed
+
+
+func _reset_habitat_search() -> void:
+	habitat_search_species.clear()
+	habitat_search_cursor = 0
+	habitat_search_scores.clear()
+	habitat_search_best.clear()
+	habitat_search_snapshot.clear()
+
+
 func _best_arrival_habitat(species: String) -> Dictionary:
-	if species == "predator":
-		return _best_predator_arrival_habitat()
-	var radius := 3 if species == "vector" else 2
-	var best := {}
-	var best_score := -1.0
+	return _best_arrival_habitats([species]).get(species, {})
+
+
+func _best_arrival_habitats(species: Array[String]) -> Dictionary:
+	var best_by_species := {}
+	var best_scores := {}
+	for candidate in species:
+		if candidate == "predator":
+			best_by_species[candidate] = _best_predator_arrival_habitat()
+		else:
+			best_scores[candidate] = -1.0
+	var habitat_snapshot: Dictionary = ecology.full_snapshot()
 	for y in range(ecology.HEIGHT):
 		for x in range(ecology.WIDTH):
 			var cell := Vector2i(x, y)
-			var evidence := _local_habitat_evidence(cell, radius)
-			var score := _species_habitat_score(species, evidence)
-			if score > best_score:
-				best_score = score
-				best = {"cell": cell, "score": score, "evidence": evidence}
-	if best_score < 0.0:
-		return {}
-	return best
+			var evidence_by_radius := {}
+			for candidate in best_scores:
+				var radius := 3 if candidate == "vector" else 2
+				if not evidence_by_radius.has(radius):
+					evidence_by_radius[radius] = _local_habitat_evidence(cell, radius, candidate == "vector", habitat_snapshot)
+				var evidence: Dictionary = evidence_by_radius[radius]
+				var score := _species_habitat_score(candidate, evidence)
+				if score > float(best_scores[candidate]):
+					best_scores[candidate] = score
+					best_by_species[candidate] = {"cell": cell, "score": score, "evidence": evidence}
+	for candidate in best_scores:
+		if float(best_scores[candidate]) < 0.0:
+			best_by_species[candidate] = {}
+	return best_by_species
 
 
-func _local_habitat_evidence(center: Vector2i, radius: int) -> Dictionary:
+func _local_habitat_evidence(center: Vector2i, radius: int, include_flowering_topology := true, habitat_state: Dictionary = {}) -> Dictionary:
 	var evidence := {
 		"detritus": 0.0,
 		"dry_detritus": 0.0,
@@ -1273,42 +1376,54 @@ func _local_habitat_evidence(center: Vector2i, radius: int) -> Dictionary:
 	var flowering_cells: Array[Vector2i] = []
 	var open_forage_cells: Array[Vector2i] = []
 	var cover_cells: Array[Vector2i] = []
+	var dead_biomass_values: PackedFloat32Array = habitat_state.get("dead_biomass", ecology.dead_biomass)
+	var moss_values: PackedFloat32Array = habitat_state.get("moss", ecology.moss)
+	var rhizome_values: PackedFloat32Array = habitat_state.get("rhizome", ecology.rhizome)
+	var canopy_values: PackedFloat32Array = habitat_state.get("canopy", ecology.canopy)
+	var shade_values: PackedFloat32Array = habitat_state.get("shade", ecology.shade)
+	var surface_water_values: PackedFloat32Array = habitat_state.get("surface_water", ecology.surface_water)
+	var ground_bloom_values: PackedFloat32Array = habitat_state.get("ground_bloom", ecology.ground_bloom)
+	var canopy_bloom_values: PackedFloat32Array = habitat_state.get("canopy_bloom", ecology.canopy_bloom)
+	var moisture_values: PackedFloat32Array = habitat_state.get("moisture", ecology.moisture)
+	var toxicity_values: PackedFloat32Array = habitat_state.get("toxicity", ecology.toxicity)
 	for y in range(maxi(0, center.y - radius), mini(ecology.HEIGHT - 1, center.y + radius) + 1):
 		for x in range(maxi(0, center.x - radius), mini(ecology.WIDTH - 1, center.x + radius) + 1):
 			var cell := Vector2i(x, y)
-			var sample: Dictionary = ecology.cell_snapshot(x, y)
+			var index: int = y * ecology.WIDTH + x
 			var distance := absi(x - center.x) + absi(y - center.y)
 			var weight := 1.0 / float(distance + 1)
-			var local_detritus: float = float(sample["dead_biomass"])
-			var local_forage: float = float(sample["moss"]) + float(sample["rhizome"])
-			var local_cover: float = float(sample["canopy"]) + float(sample["shade"])
-			var local_surface_water: float = float(sample["surface_water"])
-			var local_flowering: float = float(sample["ground_bloom"]) + float(sample["canopy_bloom"])
+			var local_detritus: float = dead_biomass_values[index]
+			var local_forage: float = moss_values[index] + rhizome_values[index]
+			var local_cover: float = canopy_values[index] + shade_values[index]
+			var local_surface_water: float = surface_water_values[index]
+			var local_flowering: float = ground_bloom_values[index] + canopy_bloom_values[index]
 			evidence["detritus"] += local_detritus * weight
 			evidence["forage"] += local_forage * weight
 			evidence["surface_water"] += local_surface_water * weight
-			evidence["plant_material"] += (float(sample["moss"]) + float(sample["rhizome"]) + float(sample["canopy"])) * weight
-			evidence["flowering"] += local_flowering * weight
-			if local_detritus >= 0.03 and float(sample["moisture"]) <= 0.2 and local_surface_water <= 0.03:
+			evidence["plant_material"] += (moss_values[index] + rhizome_values[index] + canopy_values[index]) * weight
+			if include_flowering_topology:
+				evidence["flowering"] += local_flowering * weight
+			if local_detritus >= 0.03 and moisture_values[index] <= 0.2 and local_surface_water <= 0.03:
 				evidence["dry_detritus"] += local_detritus * weight
-			if local_forage >= 0.16 and float(sample["canopy"]) < 0.06:
+			if local_forage >= 0.16 and canopy_values[index] < 0.06:
 				evidence["open_forage"] += local_forage * weight
 				open_forage_cells.append(cell)
 			if local_cover >= 0.1:
 				evidence["nearby_cover"] += local_cover * weight
 				cover_cells.append(cell)
 			evidence["drainage_flow"] += local_surface_water * _drainage_spine_affinity(cell) * weight
-			if local_flowering >= 0.025:
+			if include_flowering_topology and local_flowering >= 0.025:
 				evidence["flowering_sources"] += 1
 				flowering_cells.append(cell)
-			evidence["moisture"] += float(sample["moisture"]) * weight
-			evidence["toxicity"] += float(sample["toxicity"]) * weight
+			evidence["moisture"] += moisture_values[index] * weight
+			evidence["toxicity"] += toxicity_values[index] * weight
 			evidence["weight"] += weight
 	evidence["moisture"] /= maxf(0.001, float(evidence["weight"]))
 	evidence["toxicity"] /= maxf(0.001, float(evidence["weight"]))
-	var flowering_topology := _flowering_topology(flowering_cells)
-	evidence["flowering_clusters"] = flowering_topology["clusters"]
-	evidence["flowering_separation"] = flowering_topology["separation"]
+	if include_flowering_topology:
+		var flowering_topology := _flowering_topology(flowering_cells)
+		evidence["flowering_clusters"] = flowering_topology["clusters"]
+		evidence["flowering_separation"] = flowering_topology["separation"]
 	for forage_cell in open_forage_cells:
 		for cover_cell in cover_cells:
 			var edge_distance := absi(forage_cell.x - cover_cell.x) + absi(forage_cell.y - cover_cell.y)
@@ -1417,7 +1532,7 @@ func _register_ecological_role(species: String, stable_id: String, habitat: Dict
 		return
 	animal_roles_announced[stable_id] = true
 	var arrival_observations := {
-		"colony": "Eusocial colony — fresh galleries and clustered workers appear beside a damp detritus patch",
+		"colony": "Eusocial hive — a fixed earthen mound forms beside dry Detritus; tiny workers begin tracing one route outward",
 		"vector": "Flying animal — repeated crossings begin between nearby blossoms",
 		"wetland_engineer": "Large wetland animal — tracks gather beside shallow water and nearby plant growth",
 		"grazer": "Second grazer — another animal settles into a concentrated forage patch",
@@ -1432,6 +1547,8 @@ func _register_ecological_role(species: String, stable_id: String, habitat: Dict
 
 
 func _update_ecological_animal_markers() -> void:
+	if colony_ant_stream_root != null:
+		colony_ant_stream_root.visible = false
 	for stable_id in animal_markers:
 		var marker: Node3D = animal_markers[stable_id]
 		var agent: Dictionary = animal_simulation.agent_state(stable_id)
@@ -1439,12 +1556,50 @@ func _update_ecological_animal_markers() -> void:
 			marker.visible = false
 			continue
 		marker.visible = true
-		var cell: Vector2i = agent["cell"]
+		var cell: Vector2i = agent.get("home_cell", agent["cell"]) if String(agent["species"]) == "colony" else agent["cell"]
 		var world: Vector2 = ecology.world_position(cell.x, cell.y)
 		var height := 0.62 if String(agent["species"]) == "vector" else 0.25
 		marker.position = marker.position.lerp(Vector3(world.x, height, world.y), 0.45)
 		var label: Label3D = marker.get_child(1)
 		label.text = String(label.text).split(" / ")[0] + " / " + String(agent["state"]).to_upper()
+		if stable_id == "colony:1":
+			_update_colony_worker_stream(agent)
+
+
+func _update_colony_worker_stream(agent: Dictionary) -> void:
+	if colony_ant_stream_root == null:
+		return
+	var home_cell: Vector2i = agent.get("home_cell", agent["cell"])
+	var worker_cell: Vector2i = agent.get("worker_cell", home_cell)
+	var phase := String(agent.get("worker_phase", "idle"))
+	colony_ant_stream_root.visible = phase != "idle" or worker_cell != home_cell
+	if not colony_ant_stream_root.visible:
+		return
+	var home_world: Vector2 = ecology.world_position(home_cell.x, home_cell.y)
+	var worker_world: Vector2 = ecology.world_position(worker_cell.x, worker_cell.y)
+	var direction := worker_world - home_world
+	var lateral := Vector2(-direction.y, direction.x).normalized() * 0.08 if direction.length() > 0.01 else Vector2.ZERO
+	var flow_offset := fmod(float(Time.get_ticks_msec()) / 4200.0, 1.0)
+	for worker_index in range(colony_ant_markers.size()):
+		var ant := colony_ant_markers[worker_index]
+		var progress := fmod(flow_offset + float(worker_index) / float(colony_ant_markers.size()), 1.0)
+		if phase == "returning":
+			progress = 1.0 - progress
+		var trail_point := home_world.lerp(worker_world, progress) + lateral * (0.5 if worker_index % 2 == 0 else -0.5)
+		var target := Vector3(trail_point.x, 0.16, trail_point.y)
+		ant.position = target
+
+
+func _update_colony_worker_visual() -> void:
+	if animal_simulation == null or not animal_simulation.agents.has("colony:1"):
+		if colony_ant_stream_root != null:
+			colony_ant_stream_root.visible = false
+		return
+	var colony: Dictionary = animal_simulation.agent_state("colony:1")
+	if colony.is_empty() or not bool(colony["alive"]):
+		colony_ant_stream_root.visible = false
+		return
+	_update_colony_worker_stream(colony)
 
 
 func _handle_weather_events(events: Array[Dictionary]) -> void:
@@ -1540,6 +1695,13 @@ func _handle_authoritative_animal_events(events: Array[Dictionary]) -> void:
 					animal_roles_announced["spore_dispersal_observed"] = true
 					_add_discovery("Fungal spore dispersal — animals carry spores from fruiting bodies into wet detritus; this is not pollination")
 					_set_status("A vector leaves a fungal fruiting body dusted with spores, then sheds them over wet dead matter. The scanner records dispersal, not pollination.")
+			"organism.colony_plant_returned":
+				var facts: Dictionary = event["facts"]
+				evidence.record_event(ecology.tick, "organism.colony_plant_returned", event["subject"], [], facts)
+				if not animal_roles_announced.has("colony_transport_observed"):
+					animal_roles_announced["colony_transport_observed"] = true
+					_add_discovery("Eusocial worker trail — small plant loads travel back to one fixed hive and enter its Detritus cycle")
+					_set_status("A thin worker stream returns to the same mound carrying clipped plant matter. The hive stays fixed while its foraging reach changes.")
 
 
 func _update_disturbance(delta: float) -> void:
