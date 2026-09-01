@@ -627,7 +627,7 @@ func _build_interface() -> void:
 
 	var title := Label.new()
 	title.position = Vector2(24, 18)
-	title.text = "FIRST RAIN  /  HABITAT RECOVERY PROTOTYPE"
+	title.text = "FIRST RAIN  /  HABITAT COLONIZATION PROTOTYPE"
 	title.add_theme_font_size_override("font_size", 15)
 	title.add_theme_color_override("font_color", Color("e9b36e"))
 	canvas.add_child(title)
@@ -1163,7 +1163,7 @@ func _update_ecology_grid(delta: float) -> void:
 	ecology_step_accumulator += delta
 	while ecology_step_accumulator >= ECOLOGY_STEP_SECONDS:
 		ecology_step_accumulator -= ECOLOGY_STEP_SECONDS
-		_seed_integrated_animals(ecology.summary())
+		_seed_integrated_animals()
 		var animal_events: Array[Dictionary] = animal_simulation.step()
 		_handle_authoritative_animal_events(animal_events)
 		var state: Dictionary = ecology.summary()
@@ -1211,25 +1211,141 @@ func _update_ecology_grid(delta: float) -> void:
 			_set_status("The wetland releases a sharp airborne trace. The scanner separates sulfur precursor in water from volatile material above it.")
 
 
-func _seed_integrated_animals(state: Dictionary) -> void:
-	if int(state["rhizome_cells"]) >= 1 and not animal_simulation.agents.has("colony:1"):
-		_register_ecological_role("colony", "colony:1", Vector2i(10, 8), "Eusocial colony — recycles detritus into nutrients, but hungry workers can strip rooted growth")
-	if int(state["canopy_cells"]) >= 1 and not animal_simulation.agents.has("vector:1"):
-		_register_ecological_role("vector", "vector:1", Vector2i(12, 8), "Flying vector — carries reproductive material between separated plant patches")
-	if int(state["aquatic_cells"]) >= 1 and not animal_simulation.agents.has("engineer:1"):
-		_register_ecological_role("wetland_engineer", "engineer:1", Vector2i(16, 11), "Wetland engineer — converts gathered biomass into dams that retain water and obstruct drainage")
-	if int(state["rhizome_cells"]) >= 1 and grazer_awake and not animal_simulation.agents.has("grazer:2"):
-		_register_ecological_role("grazer", "grazer:2", Vector2i(9, 8), "Second grazer — makes mating and population recovery possible when forage persists")
-	if animal_simulation.agents.has("grazer:2") and int(state["canopy_cells"]) >= 1 and not animal_simulation.agents.has("predator:1"):
-		_register_ecological_role("predator", "predator:1", Vector2i(20, 9), "Predator — limits grazer pressure and may become a direct combat threat")
+func _seed_integrated_animals() -> void:
+	var arrivals := [
+		["colony", "colony:1"],
+		["vector", "vector:1"],
+		["wetland_engineer", "engineer:1"]
+	]
+	if grazer_awake:
+		arrivals.append(["grazer", "grazer:2"])
+	if animal_simulation.agents.has("grazer:2"):
+		arrivals.append(["predator", "predator:1"])
+	for arrival in arrivals:
+		var species: String = arrival[0]
+		var stable_id: String = arrival[1]
+		if animal_simulation.agents.has(stable_id):
+			continue
+		var habitat: Dictionary = _best_arrival_habitat(species)
+		if habitat.is_empty():
+			continue
+		_register_ecological_role(species, stable_id, habitat)
 
 
-func _register_ecological_role(species: String, stable_id: String, cell: Vector2i, discovery: String) -> void:
+func _best_arrival_habitat(species: String) -> Dictionary:
+	if species == "predator":
+		return _best_predator_arrival_habitat()
+	var radius := 3 if species == "vector" else 2
+	var best := {}
+	var best_score := -1.0
+	for y in range(ecology.HEIGHT):
+		for x in range(ecology.WIDTH):
+			var cell := Vector2i(x, y)
+			var evidence := _local_habitat_evidence(cell, radius)
+			var score := _species_habitat_score(species, evidence)
+			if score > best_score:
+				best_score = score
+				best = {"cell": cell, "score": score, "evidence": evidence}
+	if best_score < 0.0:
+		return {}
+	return best
+
+
+func _local_habitat_evidence(center: Vector2i, radius: int) -> Dictionary:
+	var evidence := {
+		"detritus": 0.0,
+		"forage": 0.0,
+		"surface_water": 0.0,
+		"plant_material": 0.0,
+		"flowering": 0.0,
+		"flowering_sources": 0,
+		"moisture": 0.0,
+		"toxicity": 0.0,
+		"weight": 0.0
+	}
+	for y in range(maxi(0, center.y - radius), mini(ecology.HEIGHT - 1, center.y + radius) + 1):
+		for x in range(maxi(0, center.x - radius), mini(ecology.WIDTH - 1, center.x + radius) + 1):
+			var sample: Dictionary = ecology.cell_snapshot(x, y)
+			var distance := absi(x - center.x) + absi(y - center.y)
+			var weight := 1.0 / float(distance + 1)
+			var local_flowering: float = float(sample["ground_bloom"]) + float(sample["canopy_bloom"])
+			evidence["detritus"] += float(sample["dead_biomass"]) * weight
+			evidence["forage"] += (float(sample["moss"]) + float(sample["rhizome"])) * weight
+			evidence["surface_water"] += float(sample["surface_water"]) * weight
+			evidence["plant_material"] += (float(sample["moss"]) + float(sample["rhizome"]) + float(sample["canopy"])) * weight
+			evidence["flowering"] += local_flowering * weight
+			if local_flowering >= 0.025:
+				evidence["flowering_sources"] += 1
+			evidence["moisture"] += float(sample["moisture"]) * weight
+			evidence["toxicity"] += float(sample["toxicity"]) * weight
+			evidence["weight"] += weight
+	evidence["moisture"] /= maxf(0.001, float(evidence["weight"]))
+	evidence["toxicity"] /= maxf(0.001, float(evidence["weight"]))
+	return evidence
+
+
+func _species_habitat_score(species: String, evidence: Dictionary) -> float:
+	var viability: float = maxf(0.0, 1.0 - float(evidence["toxicity"]))
+	match species:
+		"colony":
+			if float(evidence["detritus"]) < 0.42 or float(evidence["moisture"]) < 0.08:
+				return -1.0
+			return float(evidence["detritus"]) * (0.4 + float(evidence["moisture"])) * viability
+		"vector":
+			if int(evidence["flowering_sources"]) < 2 or float(evidence["flowering"]) < 0.1:
+				return -1.0
+			return float(evidence["flowering"]) * viability + float(evidence["flowering_sources"]) * 0.025
+		"wetland_engineer":
+			if float(evidence["surface_water"]) < 0.28 or float(evidence["plant_material"]) < 0.32:
+				return -1.0
+			return minf(float(evidence["surface_water"]), float(evidence["plant_material"])) * viability
+		"grazer":
+			if float(evidence["forage"]) < 0.65:
+				return -1.0
+			return float(evidence["forage"]) * viability
+	return -1.0
+
+
+func _best_predator_arrival_habitat() -> Dictionary:
+	var prey_cells: Array[Vector2i] = []
+	for stable_id in animal_simulation.agents:
+		var agent: Dictionary = animal_simulation.agent_state(stable_id)
+		if not agent.is_empty() and bool(agent["alive"]) and String(agent["species"]) == "grazer":
+			prey_cells.append(agent["cell"])
+	if prey_cells.size() < 2:
+		return {}
+	var best_cell := Vector2i.ZERO
+	var best_score := -1.0
+	for y in range(ecology.HEIGHT):
+		for x in range(ecology.WIDTH):
+			var cell := Vector2i(x, y)
+			var score := 0.0
+			for prey_cell in prey_cells:
+				score += 1.0 / float(absi(prey_cell.x - cell.x) + absi(prey_cell.y - cell.y) + 1)
+			if score > best_score:
+				best_score = score
+				best_cell = cell
+	return {"cell": best_cell, "score": best_score, "evidence": {"living_grazers": prey_cells.size()}}
+
+
+func _register_ecological_role(species: String, stable_id: String, habitat: Dictionary) -> void:
+	var cell: Vector2i = habitat["cell"]
 	if not animal_simulation.register_agent(species, stable_id, {"cell": cell, "hunger": 0.35, "body_biomass": 0.8}):
 		return
 	animal_roles_announced[stable_id] = true
-	_add_discovery(discovery)
-	evidence.record_event(ecology.tick, "organism.%s_established" % species, stable_id, [], {"cell": cell})
+	var arrival_observations := {
+		"colony": "Eusocial colony — fresh galleries and clustered workers appear beside a damp detritus patch",
+		"vector": "Flying animal — repeated crossings begin between nearby blossoms",
+		"wetland_engineer": "Large wetland animal — tracks gather beside shallow water and nearby plant growth",
+		"grazer": "Second grazer — another animal settles into a concentrated forage patch",
+		"predator": "Predator — fresh tracks converge on the grazers' range"
+	}
+	_add_discovery(arrival_observations.get(species, "New animal activity appears in a changed habitat"))
+	evidence.record_event(ecology.tick, "organism.%s_established" % species, stable_id, [], {
+		"cell": cell,
+		"habitat_score": habitat["score"],
+		"habitat_evidence": habitat["evidence"]
+	})
 
 
 func _update_ecological_animal_markers() -> void:
