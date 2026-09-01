@@ -10,7 +10,9 @@ First Rain is built around field experiments rather than quests or recipes. The 
 
 Those interventions are deliberately situated and limited. Water poured into one patch is water no longer available elsewhere. Moving shade, transplanting living material, redirecting drainage, relocating nutrients, sowing spores or seed, clearing overgrowth, and caring for animals all change local opportunities without guaranteeing success. A useful action in a sheltered hollow may fail on hot, dry, or toxic ground. Ecological management includes subtraction and disruption as well as cultivation.
 
-Survival gives those experiments consequence. The wreck provides temporary shelter and finite bootstrap supplies, while hunger and exposure create an expedition rhythm: prepare, enter the basin, observe and act, then return before the field becomes lethal. Recovery remains possible after mistakes, but time passes and the ecology continues changing.
+Survival gives those experiments consequence. The wreck provides temporary shelter, finite bootstrap supplies, and damaged support systems that slowly lose reliability. Hunger and exposure create an expedition rhythm: prepare, enter the basin, observe and act, then return before the field becomes lethal. Recovery remains possible after mistakes, but time passes, technology deteriorates, and the ecology continues changing.
+
+The clock is deliberately slow and legible. Wreck services and imported equipment fail in stages rather than disappearing in one surprise catastrophe. Each failing dependency gives the player time to recognize what it provides and establish an ecological replacement: renewable food instead of rations, retained and accessible water instead of canisters, living shelter instead of powered protection, and eventually local knowledge and cooperation instead of total dependence on damaged instruments. Maintenance or salvage may buy time and force trade-offs, but off-world technology cannot sustain the astronaut forever.
 
 ## A living, changing basin
 
@@ -30,6 +32,7 @@ The planet's broader awakening follows ecological recovery: a more diverse and r
 
 - **Understanding before instruction.** World cues, local measurements, comparison, and consequences should let players discover relationships without an omniscient interface or prescribed solution.
 - **Finite matter, systemic renewal.** Early wreck supplies run out. Durable progress comes from restoring cycles that retain and redistribute existing water and nutrients rather than generating resources from nothing.
+- **Technology as a bridge.** The wreck and the Astronaut's imported equipment create a grace period, not a permanent base. Their staged, observable decline makes ecological independence increasingly necessary without imposing a hidden death timer.
 - **Ecology, not an upgrade ladder.** Succession is overlapping and reversible. A healthy region contains different habitats and stages at once.
 - **Embodied intervention.** The astronaut carries, places, digs, gathers, feeds, and clears in the world. Tools create spatial decisions instead of abstract management commands.
 - **Autonomous life.** Organisms pursue their own needs and reshape the habitat through reusable rules. Care can make relationships more predictable, but it does not turn animals into units.

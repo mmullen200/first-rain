@@ -40,6 +40,14 @@ _Avoid_: Hotbar, crafting arsenal
 A finite resource recovered from the wreck that enables early survival or Field Experiments but cannot sustain the Astronaut or Ecosystem indefinitely.
 _Avoid_: Starter loot, renewable resource
 
+**Wreck Dependency**:
+A survival or investigation function still supplied by the Astronaut's damaged off-world technology because the local Ecosystem cannot yet replace it.
+_Avoid_: Permanent base service, upgrade
+
+**Technological Attrition**:
+The gradual, legible loss of Wreck Dependencies as damaged equipment ages, is used, and endures the alien environment, making ecological replacement necessary before imported support becomes unreliable.
+_Avoid_: Durability grind, sudden doomsday timer, scripted failure sequence
+
 **Wreck Life-Support Reclaimer**:
 The damaged wreck module that enables rapid suit servicing at shelter and contains one finite emergency water reserve that can be recovered only by permanently disabling that service.
 _Avoid_: Recycler, water generator
@@ -85,7 +93,7 @@ A dam-building animal whose autonomous changes to water flow create and disrupt 
 _Avoid_: Beaver, dam tool, water generator
 
 **Wreck Shelter**:
-The compact safe area beneath and immediately around the wreck where the Astronaut can deliberate and recover without extending safety into the living basin.
+The compact area beneath and immediately around the wreck where the Astronaut can deliberate and recover while its remaining support functions endure, without extending that protection into the living basin.
 _Avoid_: Base zone, safe level
 
 **Animal Stewardship**:
