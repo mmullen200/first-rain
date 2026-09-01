@@ -1254,55 +1254,138 @@ func _best_arrival_habitat(species: String) -> Dictionary:
 func _local_habitat_evidence(center: Vector2i, radius: int) -> Dictionary:
 	var evidence := {
 		"detritus": 0.0,
+		"dry_detritus": 0.0,
 		"forage": 0.0,
+		"open_forage": 0.0,
+		"nearby_cover": 0.0,
+		"forage_cover_edges": 0,
 		"surface_water": 0.0,
+		"drainage_flow": 0.0,
 		"plant_material": 0.0,
 		"flowering": 0.0,
 		"flowering_sources": 0,
+		"flowering_clusters": 0,
+		"flowering_separation": 0,
 		"moisture": 0.0,
 		"toxicity": 0.0,
 		"weight": 0.0
 	}
+	var flowering_cells: Array[Vector2i] = []
+	var open_forage_cells: Array[Vector2i] = []
+	var cover_cells: Array[Vector2i] = []
 	for y in range(maxi(0, center.y - radius), mini(ecology.HEIGHT - 1, center.y + radius) + 1):
 		for x in range(maxi(0, center.x - radius), mini(ecology.WIDTH - 1, center.x + radius) + 1):
+			var cell := Vector2i(x, y)
 			var sample: Dictionary = ecology.cell_snapshot(x, y)
 			var distance := absi(x - center.x) + absi(y - center.y)
 			var weight := 1.0 / float(distance + 1)
+			var local_detritus: float = float(sample["dead_biomass"])
+			var local_forage: float = float(sample["moss"]) + float(sample["rhizome"])
+			var local_cover: float = float(sample["canopy"]) + float(sample["shade"])
+			var local_surface_water: float = float(sample["surface_water"])
 			var local_flowering: float = float(sample["ground_bloom"]) + float(sample["canopy_bloom"])
-			evidence["detritus"] += float(sample["dead_biomass"]) * weight
-			evidence["forage"] += (float(sample["moss"]) + float(sample["rhizome"])) * weight
-			evidence["surface_water"] += float(sample["surface_water"]) * weight
+			evidence["detritus"] += local_detritus * weight
+			evidence["forage"] += local_forage * weight
+			evidence["surface_water"] += local_surface_water * weight
 			evidence["plant_material"] += (float(sample["moss"]) + float(sample["rhizome"]) + float(sample["canopy"])) * weight
 			evidence["flowering"] += local_flowering * weight
+			if local_detritus >= 0.03 and float(sample["moisture"]) <= 0.2 and local_surface_water <= 0.03:
+				evidence["dry_detritus"] += local_detritus * weight
+			if local_forage >= 0.16 and float(sample["canopy"]) < 0.06:
+				evidence["open_forage"] += local_forage * weight
+				open_forage_cells.append(cell)
+			if local_cover >= 0.1:
+				evidence["nearby_cover"] += local_cover * weight
+				cover_cells.append(cell)
+			evidence["drainage_flow"] += local_surface_water * _drainage_spine_affinity(cell) * weight
 			if local_flowering >= 0.025:
 				evidence["flowering_sources"] += 1
+				flowering_cells.append(cell)
 			evidence["moisture"] += float(sample["moisture"]) * weight
 			evidence["toxicity"] += float(sample["toxicity"]) * weight
 			evidence["weight"] += weight
 	evidence["moisture"] /= maxf(0.001, float(evidence["weight"]))
 	evidence["toxicity"] /= maxf(0.001, float(evidence["weight"]))
+	var flowering_topology := _flowering_topology(flowering_cells)
+	evidence["flowering_clusters"] = flowering_topology["clusters"]
+	evidence["flowering_separation"] = flowering_topology["separation"]
+	for forage_cell in open_forage_cells:
+		for cover_cell in cover_cells:
+			var edge_distance := absi(forage_cell.x - cover_cell.x) + absi(forage_cell.y - cover_cell.y)
+			if edge_distance >= 1 and edge_distance <= 3:
+				evidence["forage_cover_edges"] += 1
 	return evidence
+
+
+func _flowering_topology(flowering_cells: Array[Vector2i]) -> Dictionary:
+	var unvisited := {}
+	for cell in flowering_cells:
+		unvisited[cell] = true
+	var clusters: Array[Array] = []
+	while not unvisited.is_empty():
+		var seed: Vector2i = unvisited.keys()[0]
+		var frontier: Array[Vector2i] = [seed]
+		var cluster: Array[Vector2i] = []
+		unvisited.erase(seed)
+		while not frontier.is_empty():
+			var current: Vector2i = frontier.pop_back()
+			cluster.append(current)
+			for direction in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+				var neighbor: Vector2i = current + direction
+				if unvisited.has(neighbor):
+					unvisited.erase(neighbor)
+					frontier.append(neighbor)
+		clusters.append(cluster)
+	var separation := 0
+	for first_index in range(clusters.size()):
+		for second_index in range(first_index + 1, clusters.size()):
+			var closest_pair: int = ecology.WIDTH + ecology.HEIGHT
+			for first_cell in clusters[first_index]:
+				for second_cell in clusters[second_index]:
+					closest_pair = mini(closest_pair, absi(first_cell.x - second_cell.x) + absi(first_cell.y - second_cell.y))
+			separation = maxi(separation, closest_pair)
+	return {"clusters": clusters.size(), "separation": separation}
+
+
+func _drainage_spine_affinity(cell: Vector2i) -> float:
+	var point: Vector2 = ecology.world_position(cell.x, cell.y)
+	var spine := [
+		Vector2(2.0, 1.0),
+		Vector2(7.0, 5.0),
+		Vector2(12.0, 9.0),
+		Vector2(17.0, 12.0),
+		Vector2(22.0, 15.0),
+		Vector2(27.0, 18.0),
+		Vector2(32.0, 21.0)
+	]
+	var closest_distance := INF
+	for index in range(spine.size() - 1):
+		var start: Vector2 = spine[index]
+		var segment: Vector2 = spine[index + 1] - start
+		var along := clampf((point - start).dot(segment) / maxf(segment.length_squared(), 0.001), 0.0, 1.0)
+		closest_distance = minf(closest_distance, point.distance_to(start + segment * along))
+	return 1.0 - clampf(closest_distance / 4.0, 0.0, 1.0)
 
 
 func _species_habitat_score(species: String, evidence: Dictionary) -> float:
 	var viability: float = maxf(0.0, 1.0 - float(evidence["toxicity"]))
 	match species:
 		"colony":
-			if float(evidence["detritus"]) < 0.42 or float(evidence["moisture"]) < 0.08:
+			if float(evidence["dry_detritus"]) < 0.42:
 				return -1.0
-			return float(evidence["detritus"]) * (0.4 + float(evidence["moisture"])) * viability
+			return float(evidence["dry_detritus"]) * viability
 		"vector":
-			if int(evidence["flowering_sources"]) < 2 or float(evidence["flowering"]) < 0.1:
+			if int(evidence["flowering_clusters"]) < 2 or int(evidence["flowering_separation"]) < 2 or float(evidence["flowering"]) < 0.1:
 				return -1.0
-			return float(evidence["flowering"]) * viability + float(evidence["flowering_sources"]) * 0.025
+			return float(evidence["flowering"]) * viability + float(evidence["flowering_separation"]) * 0.025
 		"wetland_engineer":
-			if float(evidence["surface_water"]) < 0.28 or float(evidence["plant_material"]) < 0.32:
+			if float(evidence["drainage_flow"]) < 0.12 or float(evidence["plant_material"]) < 0.32:
 				return -1.0
-			return minf(float(evidence["surface_water"]), float(evidence["plant_material"])) * viability
+			return minf(float(evidence["drainage_flow"]), float(evidence["plant_material"])) * viability
 		"grazer":
-			if float(evidence["forage"]) < 0.65:
+			if float(evidence["open_forage"]) < 0.65 or float(evidence["nearby_cover"]) < 0.1 or int(evidence["forage_cover_edges"]) < 1:
 				return -1.0
-			return float(evidence["forage"]) * viability
+			return minf(float(evidence["open_forage"]), float(evidence["nearby_cover"]) * 2.0) * viability
 	return -1.0
 
 
