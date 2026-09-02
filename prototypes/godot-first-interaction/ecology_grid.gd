@@ -9,8 +9,19 @@ const WIDTH := 24
 const HEIGHT := 16
 const CELL_SIZE := 2.0
 const ORIGIN := Vector2(-7.0, -5.0)
+const HIGH_CATCHMENT_CELL := Vector2i(2, 2)
+const TOXIC_VENT_CELL := Vector2i(4, 3)
+const CHANNEL_CELL := Vector2i(8, 5)
+const CLOSED_HOLLOW_CELL := Vector2i(20, 12)
+const DRY_TERRACE_CELL := Vector2i(17, 3)
+const DAM_TEST_UPSTREAM_CELL := Vector2i(7, 4)
+const DIG_TEST_CELL := Vector2i(8, 4)
+const MIN_TERRAIN_HEIGHT := 0.1
+const MAX_TERRAIN_HEIGHT := 2.25
+const DAM_HEIGHT_SCALE := 1.0
 
 var moisture := PackedFloat32Array()
+var elevation := PackedFloat32Array()
 var temperature := PackedFloat32Array()
 var toxicity := PackedFloat32Array()
 var nutrients := PackedFloat32Array()
@@ -44,8 +55,9 @@ var tick := 0
 
 func _init() -> void:
 	var count: int = WIDTH * HEIGHT
-	for field in [moisture, temperature, toxicity, nutrients, dormant_moss, moss, dead_biomass, fungus, fruiting, microbial_crust, dormant_rhizome, rhizome, dormant_canopy, canopy, surface_water, aquatic_producer, aquatic_consumer, dissolved_oxygen, sulfur_precursor, volatile_sulfur, ground_bloom, canopy_bloom, pollination, fungal_spores, dam_material, shade]:
+	for field in [elevation, moisture, temperature, toxicity, nutrients, dormant_moss, moss, dead_biomass, fungus, fruiting, microbial_crust, dormant_rhizome, rhizome, dormant_canopy, canopy, surface_water, aquatic_producer, aquatic_consumer, dissolved_oxygen, sulfur_precursor, volatile_sulfur, ground_bloom, canopy_bloom, pollination, fungal_spores, dam_material, shade]:
 		field.resize(count)
+	_seed_terrain()
 	_seed_barren_basin()
 	habitat_shade = shade.duplicate()
 
@@ -53,7 +65,7 @@ func _init() -> void:
 func _seed_barren_basin() -> void:
 	var hollow := Vector2(-2.7, -1.55)
 	var crust := Vector2(16.0, 3.0)
-	var vent := Vector2(17.0, 3.0)
+	var vent := world_position(TOXIC_VENT_CELL.x, TOXIC_VENT_CELL.y)
 	for y in range(HEIGHT):
 		for x in range(WIDTH):
 			var index: int = _index(x, y)
@@ -65,7 +77,7 @@ func _seed_barren_basin() -> void:
 
 			moisture[index] = 0.035 + shelter * 0.15
 			temperature[index] = clamp(0.48 + vent_influence * 0.34 - shelter * 0.2, 0.0, 1.0)
-			toxicity[index] = clamp(0.06 + vent_influence * 0.72, 0.0, 1.0)
+			toxicity[index] = clamp(0.06 + vent_influence * 0.72 + crust_seed * 0.28, 0.0, 1.0)
 			nutrients[index] = 0.05 + shelter * 0.05
 			dormant_moss[index] = max(hollow_seed, crust_seed) * 0.92
 			microbial_crust[index] = crust_seed * 0.16 + hollow_seed * 0.035
@@ -74,6 +86,33 @@ func _seed_barren_basin() -> void:
 			dormant_canopy[index] = shelter * 0.14 + drainage_affinity * 0.08
 			dissolved_oxygen[index] = 0.72
 			shade[index] = shelter * 0.7
+
+
+func _seed_terrain() -> void:
+	# A deliberately hand-authored greybox, not a terrain generator. The narrow
+	# descending list is the Drainage Spine; the named regions pose four distinct
+	# water problems while keeping every cell's state to one height number.
+	elevation.fill(MAX_TERRAIN_HEIGHT)
+	var spine: Array[Vector2i] = [
+		Vector2i(2, 2), Vector2i(3, 2), Vector2i(4, 3), Vector2i(5, 3),
+		Vector2i(6, 4), Vector2i(7, 4), Vector2i(8, 5), Vector2i(9, 5),
+		Vector2i(10, 6), Vector2i(11, 6), Vector2i(12, 7), Vector2i(13, 7),
+		Vector2i(14, 8), Vector2i(15, 8), Vector2i(16, 9), Vector2i(17, 9),
+		Vector2i(18, 10), Vector2i(19, 11), CLOSED_HOLLOW_CELL
+	]
+	for path_index in range(spine.size()):
+		var cell: Vector2i = spine[path_index]
+		elevation[_index(cell.x, cell.y)] = 2.2 - float(path_index) * 0.1
+	elevation[_index(HIGH_CATCHMENT_CELL.x, HIGH_CATCHMENT_CELL.y)] = 2.2
+	for y in range(1, 5):
+		for x in range(14, 20):
+			elevation[_index(x, y)] = 1.65
+	for y in range(CLOSED_HOLLOW_CELL.y - 1, CLOSED_HOLLOW_CELL.y + 2):
+		for x in range(CLOSED_HOLLOW_CELL.x - 1, CLOSED_HOLLOW_CELL.x + 2):
+			elevation[_index(x, y)] = 1.0
+	# Preserve the inlet notch and seal every other side of the low point.
+	elevation[_index(19, 11)] = 0.5
+	elevation[_index(CLOSED_HOLLOW_CELL.x, CLOSED_HOLLOW_CELL.y)] = MIN_TERRAIN_HEIGHT
 
 
 func step() -> void:
@@ -212,7 +251,7 @@ func step() -> void:
 			# Standing water supports a regulated aquatic food web. Producer blooms
 			# generate sulfur precursor, while consumers and oxygen limit runaway gain.
 			var pond_gain: float = maxf(0.0, local_moisture - 0.72) * (0.018 - crust_repellency * 0.006) + local_dam * maxf(0.0, local_moisture - 0.28) * 0.006
-			var pond_loss: float = (0.0015 + local_temperature * 0.0025) * (1.0 - effective_shade * 0.5) * (1.0 - local_dam * 0.72)
+			var pond_loss: float = local_surface_water * (0.0015 + local_temperature * 0.0025) * (1.0 - effective_shade * 0.5) * (1.0 - local_dam * 0.72)
 			next_surface_water[index] = clampf(local_surface_water + pond_gain - pond_loss, 0.0, 1.0)
 			var oxygen_target: float = clampf(0.62 + local_aquatic_producer * 0.16 - local_aquatic_producer * local_aquatic_producer * 0.34 - local_aquatic_consumer * 0.12, 0.0, 1.0)
 			next_dissolved_oxygen[index] = lerpf(dissolved_oxygen[index], oxygen_target, 0.08)
@@ -240,26 +279,33 @@ func step() -> void:
 	# update, preserving the double-buffered traversal-order guarantee.
 	var drained_moisture := next_moisture.duplicate()
 	var drained_nutrients := next_nutrients.duplicate()
+	var drained_toxicity := next_toxicity.duplicate()
+	var drained_surface_water := next_surface_water.duplicate()
 	for y in range(HEIGHT):
 		for x in range(WIDTH):
 			var index: int = _index(x, y)
-			var retention: float = 0.22 + next_moss[index] * 0.28 + next_rhizome[index] * 0.18 + next_crust[index] * 0.06 + shade[index] * 0.12 + next_dam_material[index] * 0.48
-			var runoff: float = maxf(0.0, next_moisture[index] - retention) * 0.025
-			if runoff <= 0.0001 or (x >= WIDTH - 1 and y >= HEIGHT - 1):
+			var retention: float = 0.22 + next_moss[index] * 0.28 + next_rhizome[index] * 0.18 + next_crust[index] * 0.06 + shade[index] * 0.12
+			var runoff: float = maxf(0.0, next_moisture[index] - retention) * 0.08
+			var downhill := downhill_neighbor(Vector2i(x, y), next_dam_material)
+			if downhill == Vector2i(x, y):
 				continue
-			var downhill := Vector2i(mini(x + 1, WIDTH - 1), y)
-			if y < HEIGHT - 1 and (x >= WIDTH - 1 or (x + y) % 2 == 0):
-				downhill = Vector2i(x, y + 1)
 			var downhill_index: int = _index(downhill.x, downhill.y)
-			drained_moisture[index] = maxf(0.0, drained_moisture[index] - runoff)
-			drained_moisture[downhill_index] = clampf(drained_moisture[downhill_index] + runoff * 0.9, 0.0, 1.0)
+			if runoff > 0.0001:
+				drained_moisture[index] = maxf(0.0, drained_moisture[index] - runoff)
+				drained_moisture[downhill_index] = clampf(drained_moisture[downhill_index] + runoff * 0.9, 0.0, 1.0)
+			var surface_runoff: float = next_surface_water[index] * 0.42
+			drained_surface_water[index] = maxf(0.0, drained_surface_water[index] - surface_runoff)
+			drained_surface_water[downhill_index] = clampf(drained_surface_water[downhill_index] + surface_runoff * 0.97, 0.0, 1.0)
 			var mobile_nutrients: float = minf(next_nutrients[index], runoff * 0.035)
 			drained_nutrients[index] = maxf(0.0, drained_nutrients[index] - mobile_nutrients)
 			drained_nutrients[downhill_index] = clampf(drained_nutrients[downhill_index] + mobile_nutrients * 0.9, 0.0, 1.0)
+			var mobile_toxicity: float = minf(next_toxicity[index], (runoff + surface_runoff) * 0.18)
+			drained_toxicity[index] = maxf(0.0, drained_toxicity[index] - mobile_toxicity)
+			drained_toxicity[downhill_index] = clampf(drained_toxicity[downhill_index] + mobile_toxicity * 0.92, 0.0, 1.0)
 
 	moisture = drained_moisture
 	temperature = next_temperature
-	toxicity = next_toxicity
+	toxicity = drained_toxicity
 	nutrients = drained_nutrients
 	dormant_moss = next_dormant
 	moss = next_moss
@@ -271,7 +317,7 @@ func step() -> void:
 	rhizome = next_rhizome
 	dormant_canopy = next_dormant_canopy
 	canopy = next_canopy
-	surface_water = next_surface_water
+	surface_water = drained_surface_water
 	aquatic_producer = next_aquatic_producer
 	aquatic_consumer = next_aquatic_consumer
 	dissolved_oxygen = next_dissolved_oxygen
@@ -294,8 +340,7 @@ func add_water(world: Vector2, amount := 0.9, radius := 4.0) -> void:
 			var strength: float = 1.0 - distance / radius
 			var index: int = _index(x, y)
 			moisture[index] = clamp(moisture[index] + amount * strength, 0.0, 1.0)
-			var basin_depth: float = clampf(float(x + y) / float(WIDTH + HEIGHT - 2), 0.0, 1.0)
-			surface_water[index] = clampf(surface_water[index] + amount * strength * basin_depth * 0.16, 0.0, 1.0)
+			surface_water[index] = clampf(surface_water[index] + amount * strength * 0.24, 0.0, 1.0)
 
 
 func add_shade(world: Vector2, amount := 0.95, radius := 4.0) -> void:
@@ -647,6 +692,7 @@ func summary() -> Dictionary:
 func cell_snapshot(x: int, y: int) -> Dictionary:
 	var index: int = _index(x, y)
 	return {
+		"elevation": elevation[index],
 		"moisture": moisture[index],
 		"temperature": temperature[index],
 		"toxicity": toxicity[index],
@@ -678,10 +724,11 @@ func cell_snapshot(x: int, y: int) -> Dictionary:
 
 func full_snapshot() -> Dictionary:
 	return {
-		"version": 1,
+		"version": 2,
 		"tick": tick,
 		"width": WIDTH,
 		"height": HEIGHT,
+		"elevation": elevation.duplicate(),
 		"moisture": moisture.duplicate(),
 		"temperature": temperature.duplicate(),
 		"toxicity": toxicity.duplicate(),
@@ -715,13 +762,14 @@ func full_snapshot() -> Dictionary:
 
 
 func restore_snapshot(snapshot: Dictionary) -> bool:
-	if int(snapshot.get("version", 0)) != 1:
+	if int(snapshot.get("version", 0)) != 2:
 		return false
 	if int(snapshot.get("width", 0)) != WIDTH or int(snapshot.get("height", 0)) != HEIGHT:
 		return false
-	for field_name in ["moisture", "temperature", "toxicity", "nutrients", "dormant_moss", "moss", "dead_biomass", "fungus", "fruiting", "microbial_crust", "dormant_rhizome", "rhizome", "dormant_canopy", "canopy", "surface_water", "aquatic_producer", "aquatic_consumer", "dissolved_oxygen", "sulfur_precursor", "volatile_sulfur", "ground_bloom", "canopy_bloom", "pollination", "fungal_spores", "dam_material", "shade"]:
+	for field_name in ["elevation", "moisture", "temperature", "toxicity", "nutrients", "dormant_moss", "moss", "dead_biomass", "fungus", "fruiting", "microbial_crust", "dormant_rhizome", "rhizome", "dormant_canopy", "canopy", "surface_water", "aquatic_producer", "aquatic_consumer", "dissolved_oxygen", "sulfur_precursor", "volatile_sulfur", "ground_bloom", "canopy_bloom", "pollination", "fungal_spores", "dam_material", "shade"]:
 		if not snapshot.has(field_name) or snapshot[field_name].size() != WIDTH * HEIGHT:
 			return false
+	elevation = snapshot["elevation"].duplicate()
 	moisture = snapshot["moisture"].duplicate()
 	temperature = snapshot["temperature"].duplicate()
 	toxicity = snapshot["toxicity"].duplicate()
@@ -757,6 +805,52 @@ func restore_snapshot(snapshot: Dictionary) -> bool:
 
 func world_position(x: int, y: int) -> Vector2:
 	return ORIGIN + Vector2(float(x) * CELL_SIZE, float(y) * CELL_SIZE)
+
+
+func terrain_height(cell: Vector2i) -> float:
+	var bounded := Vector2i(clampi(cell.x, 0, WIDTH - 1), clampi(cell.y, 0, HEIGHT - 1))
+	return elevation[_index(bounded.x, bounded.y)]
+
+
+func hydraulic_height(cell: Vector2i, dam_field: PackedFloat32Array = dam_material) -> float:
+	var bounded := Vector2i(clampi(cell.x, 0, WIDTH - 1), clampi(cell.y, 0, HEIGHT - 1))
+	var index := _index(bounded.x, bounded.y)
+	return elevation[index] + dam_field[index] * DAM_HEIGHT_SCALE
+
+
+func downhill_neighbor(cell: Vector2i, dam_field: PackedFloat32Array = dam_material) -> Vector2i:
+	var bounded := Vector2i(clampi(cell.x, 0, WIDTH - 1), clampi(cell.y, 0, HEIGHT - 1))
+	var lowest := bounded
+	var lowest_height := hydraulic_height(bounded, dam_field)
+	for offset in [Vector2i(-1, -1), Vector2i(0, -1), Vector2i(1, -1), Vector2i(-1, 0), Vector2i(1, 0), Vector2i(-1, 1), Vector2i(0, 1), Vector2i(1, 1)]:
+		var candidate: Vector2i = bounded + offset
+		if candidate.x < 0 or candidate.x >= WIDTH or candidate.y < 0 or candidate.y >= HEIGHT:
+			continue
+		var candidate_height := hydraulic_height(candidate, dam_field)
+		if candidate_height < lowest_height - 0.0001:
+			lowest = candidate
+			lowest_height = candidate_height
+	return lowest
+
+
+func flow_path(start: Vector2i, limit := WIDTH * HEIGHT) -> Array[Vector2i]:
+	var path: Array[Vector2i] = []
+	var current := Vector2i(clampi(start.x, 0, WIDTH - 1), clampi(start.y, 0, HEIGHT - 1))
+	for _step in range(limit):
+		path.append(current)
+		var next: Vector2i = downhill_neighbor(current)
+		if next == current or path.has(next):
+			break
+		current = next
+	return path
+
+
+func excavate(cell: Vector2i, amount := 0.2) -> float:
+	var bounded := Vector2i(clampi(cell.x, 0, WIDTH - 1), clampi(cell.y, 0, HEIGHT - 1))
+	var index := _index(bounded.x, bounded.y)
+	var before := elevation[index]
+	elevation[index] = maxf(MIN_TERRAIN_HEIGHT, elevation[index] - maxf(0.0, amount))
+	return before - elevation[index]
 
 
 func world_to_cell(world: Vector2) -> Vector2i:

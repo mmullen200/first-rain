@@ -46,7 +46,7 @@ func _run() -> void:
 	_assert(not vector_habitat.is_empty(), "two nearby flowering patches should qualify for vector arrival")
 	_assert(_cell_distance(vector_habitat["cell"], vector_patch + Vector2i(1, 0)) <= 3, "the vector destination should follow connected blossoms")
 
-	var engineer_patch := Vector2i(18, 12)
+	var engineer_patch: Vector2i = scene.ecology.CHANNEL_CELL
 	_seed_patch(scene, engineer_patch, {"surface_water": 0.18, "rhizome": 0.14}, 1)
 	var engineer_habitat: Dictionary = scene._best_arrival_habitat("wetland_engineer")
 	_assert(not engineer_habitat.is_empty(), "water and plants on the Drainage Spine should qualify for engineer arrival")

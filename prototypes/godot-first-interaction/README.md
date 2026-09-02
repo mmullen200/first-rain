@@ -1,6 +1,6 @@
 # First Rain: opening vertical-slice prototype
 
-Throwaway Godot vertical slice for deciding whether the opening teaches movement, finite supplies, scientific observation, ecological intervention, recovery, cultivation, and the first sighting of the Presence through embodied play. The current branch additionally asks whether survival creates an expedition rhythm without crowding out ecological observation or making recoverable mistakes end the run.
+Throwaway Godot vertical slice for deciding whether the opening teaches movement, finite supplies, scientific observation, ecological intervention, recovery, cultivation, and the first sighting of the Presence through embodied play. The current branch asks whether visible, alterable topography makes water, contamination, and Wetland Engineer dams predictable enough to turn the Crash Basin into a spatial ecological puzzle.
 
 ## Run
 
@@ -16,10 +16,11 @@ Open `project.godot` in Godot 4.6 and press **F6/F5**, or run:
 - **E** — open the emergency cache, then pick up or place the loose shade panel
 - **E** — harvest when standing beside a mature fungal fruiting cell
 - **T** — lift a robust living moss/rhizome clump, then place it on another ecological cell
+- **G** — excavate the Ecological Cell under the astronaut, persistently lowering its drainage height
 - **F** — scan a nearby moss patch
 - **C** — send a suit-light signal toward a nearby ecological subject
 - **J** — open or close the pause-only Basin Survey and detailed field record
-- **V** — toggle the scanner's nearby moisture/toxicity analysis lens
+- **V** — cycle the scanner lens through off, nearby moisture/toxicity, and elevation/downhill flow
 - **Space** — spend one water dose on a nearby moss patch
 - **Q** — spend one water dose on the astronaut when exposure is meaningful
 - **Z** — eat carried fresh food first, otherwise a finite ration
@@ -28,7 +29,7 @@ Open `project.godot` in Godot 4.6 and press **F6/F5**, or run:
 
 ## Question under test
 
-Can one tiny 2.5D space carry the player from the crashed ship and finite wreck supplies through comparison with the damaged Field Scanner, a scarce ecological intervention, immediate and delayed feedback, a legible failure and recovery, a persistent scanner discovery record, and the first successful cultivation—without issuing a quest or revealing a recipe?
+Can the player read where a Drainage Pulse will go, distinguish the high catchment, converging Drainage Spine, closed hollow, and unreachable dry terrace, and deliberately change a route through excavation or a Wetland Engineer dam—without a recipe or omniscient map overlay?
 
 Moss behavior, water quantities, environmental variables, timing, and the loose shade panel are disposable test fixtures. They do not settle the later rule-set, survival-balance, feedback-tool, or toolkit decisions.
 
@@ -41,7 +42,7 @@ The visible square cells now carry provisional moisture, temperature, toxicity, 
 - Moss stress and ordinary turnover create dead biomass.
 - Fungus awakens where dead biomass remains wet, spreads locally, decomposes it into nutrients, and slightly reduces toxicity.
 
-Cell color is the first readable world cue: blue-green indicates moisture, green living moss, brown dead biomass, violet fungus, and gold edible fruiting bodies. The damaged Field Scanner supplements those cues with coarse local bands and explicit confidence; ordinary play does not show system-wide cell counts.
+Each Ecological Cell is a shadow-casting block whose height carries terrain shape while color remains available for living state: blue-green indicates moisture, green living moss, brown Detritus, violet fungus, and gold edible fruiting bodies. Canopy and standing water use separate geometry above the ground. The damaged Field Scanner supplements those cues with coarse local bands and a nearby elevation/downhill-flow mode; ordinary play does not show system-wide cell counts.
 
 ## Expanded ecological arc
 
@@ -152,6 +153,8 @@ The captured idle-opening failure can be replayed headlessly:
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/habitat_arrival_performance_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/procedural_weather_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/playable_progression_test.gd
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/topographic_hydrology_test.gd
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/topographic_presentation_test.gd
 ```
 
 The checks verify the opening, movement, grazer behavior, scanner evidence, replay record, toolkit economy, basin traversal, survival pacing, disturbance recovery, shared animal authority, habitat-driven arrival, fixed-hive worker transport, and the bounded arrival-search frame cost established by earlier revisions. Integrated checks additionally verify rooted/canopy/aquatic succession, sulfur processing, reproduction without spontaneous biomass, distinct colony/vector/engineer effects, seeded weather that produces ecological disturbances plus ecosystem-enabled First Rain without a fixed schedule or Presence trigger, and an end-to-end route from ordinary finite watering through Reservoir refills to every ecological milestone.
