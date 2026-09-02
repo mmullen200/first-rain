@@ -92,7 +92,11 @@ func _seed_terrain() -> void:
 	# A deliberately hand-authored greybox, not a terrain generator. The narrow
 	# descending list is the Drainage Spine; the named regions pose four distinct
 	# water problems while keeping every cell's state to one height number.
-	elevation.fill(MAX_TERRAIN_HEIGHT)
+	for y in range(HEIGHT):
+		for x in range(WIDTH):
+			# Broad fall toward the southeast prevents the unfeatured ground from
+			# becoming hundreds of accidental closed basins.
+			elevation[_index(x, y)] = MAX_TERRAIN_HEIGHT - float(x) * 0.035 - float(y) * 0.02
 	var spine: Array[Vector2i] = [
 		Vector2i(2, 2), Vector2i(3, 2), Vector2i(4, 3), Vector2i(5, 3),
 		Vector2i(6, 4), Vector2i(7, 4), Vector2i(8, 5), Vector2i(9, 5),
@@ -106,7 +110,7 @@ func _seed_terrain() -> void:
 	elevation[_index(HIGH_CATCHMENT_CELL.x, HIGH_CATCHMENT_CELL.y)] = 2.2
 	for y in range(1, 5):
 		for x in range(14, 20):
-			elevation[_index(x, y)] = 1.65
+			elevation[_index(x, y)] = 1.95 - float(x - 14) * 0.03 - float(y - 1) * 0.01
 	for y in range(CLOSED_HOLLOW_CELL.y - 1, CLOSED_HOLLOW_CELL.y + 2):
 		for x in range(CLOSED_HOLLOW_CELL.x - 1, CLOSED_HOLLOW_CELL.x + 2):
 			elevation[_index(x, y)] = 1.0
@@ -293,9 +297,9 @@ func step() -> void:
 			if runoff > 0.0001:
 				drained_moisture[index] = maxf(0.0, drained_moisture[index] - runoff)
 				drained_moisture[downhill_index] = clampf(drained_moisture[downhill_index] + runoff * 0.9, 0.0, 1.0)
-			var surface_runoff: float = next_surface_water[index] * 0.42
+			var surface_runoff: float = next_surface_water[index] * 0.94
 			drained_surface_water[index] = maxf(0.0, drained_surface_water[index] - surface_runoff)
-			drained_surface_water[downhill_index] = clampf(drained_surface_water[downhill_index] + surface_runoff * 0.97, 0.0, 1.0)
+			drained_surface_water[downhill_index] = clampf(drained_surface_water[downhill_index] + surface_runoff * 0.99, 0.0, 1.0)
 			var mobile_nutrients: float = minf(next_nutrients[index], runoff * 0.035)
 			drained_nutrients[index] = maxf(0.0, drained_nutrients[index] - mobile_nutrients)
 			drained_nutrients[downhill_index] = clampf(drained_nutrients[downhill_index] + mobile_nutrients * 0.9, 0.0, 1.0)
@@ -340,7 +344,11 @@ func add_water(world: Vector2, amount := 0.9, radius := 4.0) -> void:
 			var strength: float = 1.0 - distance / radius
 			var index: int = _index(x, y)
 			moisture[index] = clamp(moisture[index] + amount * strength, 0.0, 1.0)
-			surface_water[index] = clampf(surface_water[index] + amount * strength * 0.24, 0.0, 1.0)
+			# A local pour creates a visible Drainage Pulse. Broad precipitation
+			# wets soil first; standing water then emerges only where saturated
+			# runoff actually converges.
+			if radius <= 8.0:
+				surface_water[index] = clampf(surface_water[index] + amount * strength * 0.24, 0.0, 1.0)
 
 
 func add_shade(world: Vector2, amount := 0.95, radius := 4.0) -> void:

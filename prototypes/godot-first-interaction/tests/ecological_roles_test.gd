@@ -10,7 +10,7 @@ func _init() -> void:
 	var colony_cell := Vector2i(4, 4)
 	var vector_cell := Vector2i(8, 7)
 	var spore_cell := Vector2i(7, 6)
-	var engineer_cell := Vector2i(13, 11)
+	var engineer_cell: Vector2i = EcologyGrid.CHANNEL_CELL
 	ecology.add_resources(colony_cell, {"dead_biomass": 0.42})
 	ecology.add_resources(vector_cell, {"rhizome": 0.42, "ground_bloom": 0.28})
 	ecology.add_resources(spore_cell, {"fruiting": 0.3, "dead_biomass": 0.22})

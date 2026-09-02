@@ -18,6 +18,7 @@ const FIELD_TIME_SCALE := 12.0
 const EXPOSED_EXPOSURE_RATE := 0.105
 const MOSS_EXPOSURE_RATE := 0.035
 const REWATER_MOISTURE_THRESHOLD := 0.16
+const VISIBLE_WATER_THRESHOLD := 0.04
 # Forty-five hunger points marks a meal. At 12× displayed field time this
 # takes eight in-world hours, supporting roughly three meals per field day.
 const HUNGER_RATE := 0.01875
@@ -581,7 +582,7 @@ func _build_grazer() -> void:
 	var world: Vector2 = ecology.world_position(grazer_cell.x, grazer_cell.y)
 	grazer_root = Node3D.new()
 	grazer_root.name = "PrototypeGrazer"
-	grazer_root.position = Vector3(world.x, 0.28, world.y)
+	grazer_root.position = Vector3(world.x, ecology.terrain_height(grazer_cell) + 0.28, world.y)
 	grazer_target_position = grazer_root.position
 	add_child(grazer_root)
 
@@ -1335,6 +1336,7 @@ func _continue_arrival_habitat_search(species: Array[String]) -> Dictionary:
 		habitat_search_scores.clear()
 		habitat_search_best.clear()
 		habitat_search_snapshot = ecology.full_snapshot()
+		habitat_search_snapshot["drainage_affinity"] = _drainage_affinity_snapshot()
 		for candidate in species:
 			if candidate != "predator":
 				habitat_search_scores[candidate] = -1.0
@@ -1388,6 +1390,7 @@ func _best_arrival_habitats(species: Array[String]) -> Dictionary:
 		else:
 			best_scores[candidate] = -1.0
 	var habitat_snapshot: Dictionary = ecology.full_snapshot()
+	habitat_snapshot["drainage_affinity"] = _drainage_affinity_snapshot()
 	for y in range(ecology.HEIGHT):
 		for x in range(ecology.WIDTH):
 			var cell := Vector2i(x, y)
@@ -1439,6 +1442,11 @@ func _local_habitat_evidence(center: Vector2i, radius: int, include_flowering_to
 	var canopy_bloom_values: PackedFloat32Array = habitat_state.get("canopy_bloom", ecology.canopy_bloom)
 	var moisture_values: PackedFloat32Array = habitat_state.get("moisture", ecology.moisture)
 	var toxicity_values: PackedFloat32Array = habitat_state.get("toxicity", ecology.toxicity)
+	var drainage_values: PackedFloat32Array
+	if habitat_state.has("drainage_affinity"):
+		drainage_values = habitat_state["drainage_affinity"]
+	else:
+		drainage_values = _drainage_affinity_snapshot()
 	for y in range(maxi(0, center.y - radius), mini(ecology.HEIGHT - 1, center.y + radius) + 1):
 		for x in range(maxi(0, center.x - radius), mini(ecology.WIDTH - 1, center.x + radius) + 1):
 			var cell := Vector2i(x, y)
@@ -1464,7 +1472,7 @@ func _local_habitat_evidence(center: Vector2i, radius: int, include_flowering_to
 			if local_cover >= 0.1:
 				evidence["nearby_cover"] += local_cover * weight
 				cover_cells.append(cell)
-			evidence["drainage_flow"] += local_surface_water * _drainage_spine_affinity(cell) * weight
+			evidence["drainage_flow"] += local_surface_water * drainage_values[index] * weight
 			if include_flowering_topology and local_flowering >= 0.025:
 				evidence["flowering_sources"] += 1
 				flowering_cells.append(cell)
@@ -1526,7 +1534,19 @@ func _drainage_spine_affinity(cell: Vector2i) -> float:
 			continue
 		if ecology.hydraulic_height(neighbor) > local_height + 0.04:
 			incoming += 1
-	return clampf(float(incoming) / 2.0, 0.0, 1.0)
+	# A uniform slope receives three upslope neighbours. Only additional lateral
+	# convergence marks a true Drainage Spine rather than ordinary sheet flow.
+	return clampf(float(incoming - 3) / 3.0, 0.0, 1.0)
+
+
+func _drainage_affinity_snapshot() -> PackedFloat32Array:
+	var values := PackedFloat32Array()
+	values.resize(ecology.WIDTH * ecology.HEIGHT)
+	for y in range(ecology.HEIGHT):
+		for x in range(ecology.WIDTH):
+			var cell := Vector2i(x, y)
+			values[y * ecology.WIDTH + x] = _drainage_spine_affinity(cell)
+	return values
 
 
 func _species_habitat_score(species: String, evidence: Dictionary) -> float:
@@ -1606,7 +1626,7 @@ func _update_ecological_animal_markers() -> void:
 		var cell: Vector2i = agent.get("home_cell", agent["cell"]) if String(agent["species"]) == "colony" else agent["cell"]
 		var world: Vector2 = ecology.world_position(cell.x, cell.y)
 		var height := 0.62 if String(agent["species"]) == "vector" else 0.25
-		marker.position = marker.position.lerp(Vector3(world.x, height, world.y), 0.45)
+		marker.position = marker.position.lerp(Vector3(world.x, ecology.terrain_height(cell) + height, world.y), 0.45)
 		var label: Label3D = marker.get_child(1)
 		label.text = String(label.text).split(" / ")[0] + " / " + String(agent["state"]).to_upper()
 		if stable_id == "colony:1":
@@ -1633,7 +1653,8 @@ func _update_colony_worker_stream(agent: Dictionary) -> void:
 		if phase == "returning":
 			progress = 1.0 - progress
 		var trail_point := home_world.lerp(worker_world, progress) + lateral * (0.5 if worker_index % 2 == 0 else -0.5)
-		var target := Vector3(trail_point.x, 0.16, trail_point.y)
+		var trail_cell: Vector2i = ecology.world_to_cell(trail_point)
+		var target := Vector3(trail_point.x, ecology.terrain_height(trail_cell) + 0.16, trail_point.y)
 		ant.position = target
 
 
@@ -1693,7 +1714,7 @@ func _update_grazer(delta: float) -> void:
 	grazer_cell = authoritative["cell"]
 	_set_grazer_state(authoritative["state"])
 	var target_world: Vector2 = ecology.world_position(grazer_cell.x, grazer_cell.y)
-	grazer_target_position = Vector3(target_world.x, 0.28, target_world.y)
+	grazer_target_position = Vector3(target_world.x, ecology.terrain_height(grazer_cell) + 0.28, target_world.y)
 	grazer_root.position = grazer_root.position.move_toward(grazer_target_position, GRAZER_MOVE_SPEED * delta)
 	if grazer_root.position.distance_to(grazer_target_position) > 0.01:
 		grazer_root.look_at(grazer_target_position, Vector3.UP)
@@ -1849,7 +1870,7 @@ func _refresh_ecology_visuals() -> void:
 			canopy_meshes[index].position = Vector3(world_position.x, terrain_height + canopy_height * 0.5, world_position.y)
 			canopy_meshes[index].scale = Vector3(0.72 + canopy_growth * 0.52, canopy_height / 0.7, 0.72 + canopy_growth * 0.52)
 
-			water_meshes[index].visible = sample["surface_water"] >= 0.012
+			water_meshes[index].visible = sample["surface_water"] >= VISIBLE_WATER_THRESHOLD
 			water_meshes[index].position = Vector3(world_position.x, terrain_height + 0.035 + sample["surface_water"] * 0.16, world_position.y)
 
 			var downhill: Vector2i = ecology.downhill_neighbor(Vector2i(x, y))

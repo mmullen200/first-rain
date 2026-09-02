@@ -5,7 +5,7 @@ const EcologyGrid = preload("res://ecology_grid.gd")
 
 func _init() -> void:
 	var ecology = EcologyGrid.new()
-	var cell := Vector2i(15, 11)
+	var cell: Vector2i = EcologyGrid.CLOSED_HOLLOW_CELL
 	var world: Vector2 = ecology.world_position(cell.x, cell.y)
 	ecology.add_resources(cell, {
 		"moss": 0.55,

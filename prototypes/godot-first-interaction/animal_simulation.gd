@@ -61,6 +61,7 @@ func register_agent(species: String, stable_id: String, initial_state := {}) -> 
 		"digestion_ticks": int(initial_state.get("digestion_ticks", 0)),
 		"digesting_resource": String(initial_state.get("digesting_resource", "")),
 		"last_feeding_cell": initial_state.get("last_feeding_cell", Vector2i(-1, -1)),
+		"last_gather_cell": initial_state.get("last_gather_cell", Vector2i(-1, -1)),
 		"heading": initial_state.get("heading", Vector2i(1, 0)),
 		"heading_steps": int(initial_state.get("heading_steps", 4)),
 		"move_cooldown": int(initial_state.get("move_cooldown", 0)),
@@ -333,11 +334,11 @@ func _choose_engineer_intention(agent: Dictionary) -> Dictionary:
 	var carried_dead := float(agent["carried_material"].get("dead_biomass", 0.0))
 	var carried_roots := float(agent["carried_material"].get("rhizome", 0.0))
 	if carried_dead + carried_roots >= 0.04:
-		var wet_cell: Vector2i = _strongest_resource_cell("surface_water")
-		if agent["cell"] == wet_cell or ecology.resource_amount(agent["cell"], "surface_water") >= 0.035:
+		var build_cell: Vector2i = agent.get("last_gather_cell", agent["cell"])
+		if agent["cell"] == build_cell and ecology.downhill_neighbor(build_cell) != build_cell:
 			var source: String = "dead_biomass" if carried_dead >= carried_roots else "rhizome"
 			return {"type": "deposit", "agent_id": agent_id, "source_resource": source, "resource": "dam_material"}
-		return {"type": "move", "agent_id": agent_id, "cell": _step_toward(agent["cell"], wet_cell)}
+		return {"type": "move", "agent_id": agent_id, "cell": _step_toward(agent["cell"], build_cell)}
 	var building_source: String = "dead_biomass" if ecology.resource_amount(agent["cell"], "dead_biomass") >= ecology.resource_amount(agent["cell"], "rhizome") else "rhizome"
 	if ecology.resource_amount(agent["cell"], building_source) >= 0.025:
 		return {"type": "gather", "agent_id": agent_id, "resource": building_source, "amount": 0.07}
@@ -421,6 +422,7 @@ func _gather_material(agent_id: String, resource: String, requested: float) -> v
 	var before := float(agent["carried_material"].get(resource, 0.0))
 	var gathered: float = ecology.consume_resource(agent["cell"], resource, requested)
 	agent["carried_material"][resource] = before + gathered
+	agent["last_gather_cell"] = agent["cell"]
 	agent["state"] = "gathering"
 	agents[agent_id] = agent
 	_check_transfer(gathered, float(agent["carried_material"][resource]) - before, "environment_to_%s" % agent_id)
