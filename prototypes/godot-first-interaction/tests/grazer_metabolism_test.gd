@@ -15,14 +15,9 @@ func _run() -> void:
 	scene.astronaut.position = scene.patches["hollow"]["node"].position
 	scene._update_nearby_interactions()
 	scene._water_nearby_patch()
-
-	for ignored in range(180):
-		scene._update_ecology_grid(scene.ECOLOGY_STEP_SECONDS)
-		scene._update_grazer(scene.ECOLOGY_STEP_SECONDS)
-		if scene.grazer_awake:
-			break
+	_seed_grazer_fixture(scene)
 	if not scene.grazer_awake:
-		printerr("SETUP FAILED: sheltered cultivation did not awaken the grazer")
+		printerr("SETUP FAILED: qualifying forage beside canopy did not establish the grazer")
 		quit(2)
 		return
 
@@ -47,3 +42,14 @@ func _run() -> void:
 		return
 	print("PASS: grazer exposes seeking, digestion, roaming, and manure deposition")
 	quit(0)
+
+
+func _seed_grazer_fixture(scene) -> void:
+	var center := Vector2i(3, 13)
+	for y in range(center.y - 1, center.y + 2):
+		for x in range(center.x - 1, center.x + 2):
+			scene.ecology.add_resources(Vector2i(x, y), {"moss": 0.15, "rhizome": 0.15})
+	scene.ecology.add_resources(center + Vector2i(2, 0), {"canopy": 0.22})
+	var habitat: Dictionary = scene._best_arrival_habitat("grazer")
+	if not habitat.is_empty():
+		scene._awaken_first_grazer(habitat)

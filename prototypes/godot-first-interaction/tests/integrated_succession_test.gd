@@ -1,6 +1,7 @@
 extends SceneTree
 
 const EcologyGrid = preload("res://ecology_grid.gd")
+const AnimalSimulation = preload("res://animal_simulation.gd")
 
 
 func _init() -> void:
@@ -10,6 +11,7 @@ func _init() -> void:
 	ecology.add_resources(cell, {
 		"moss": 0.55,
 		"fungus": 0.34,
+		"microbial_crust": 0.2,
 		"nutrients": 0.82,
 		"dormant_rhizome": 0.9,
 		"dormant_canopy": 0.8,
@@ -17,10 +19,21 @@ func _init() -> void:
 		"aquatic_producer": 0.035
 	})
 	ecology.add_water(world, 0.95, 3.2)
-	for simulation_tick in range(260):
+	for simulation_tick in range(140):
 		if simulation_tick in [70, 140, 210]:
 			ecology.add_water(world, 0.48, 3.2)
 		ecology.step()
+	var pre_vector: Dictionary = ecology.cell_snapshot(cell.x, cell.y)
+	_assert(pre_vector["rhizome"] > 0.0, "moss, crust, and nutrients did not support a rooted mat")
+	_assert(pre_vector["ground_bloom"] > 0.0, "rooted plants produced no flowering signal for a flying vector")
+	_assert(pre_vector["canopy"] == 0.0, "canopy woke before an animal supplied pollination")
+
+	var animals = AnimalSimulation.new(ecology, 17)
+	_assert(animals.register_agent("vector", "vector:1", {"cell": cell}), "flying vector fixture did not register")
+	for simulation_tick in range(180):
+		if simulation_tick % 70 == 0:
+			ecology.add_water(world, 0.48, 3.2)
+		animals.step()
 
 	var summary: Dictionary = ecology.summary()
 	var sample: Dictionary = ecology.cell_snapshot(cell.x, cell.y)
@@ -29,12 +42,12 @@ func _init() -> void:
 	_assert(summary["aquatic_cells"] > 0, "standing water did not support aquatic production")
 	_assert(sample["aquatic_consumer"] > 0.0, "aquatic production did not establish a consumer population")
 	_assert(summary["total_volatile_sulfur"] > 0.0, "balanced aquatic metabolism produced no volatile sulfur contribution")
-	_assert(sample["ground_bloom"] > 0.0, "rooted plants produced no flowering signal for pollinators")
+	_assert(sample["ground_bloom"] > 0.0, "rooted plants lost their flowering signal")
 	_assert(sample["canopy_bloom"] > 0.0, "canopy plants produced no distinct blossom signal")
-	_assert(sample["pollination"] == 0.0, "plants should not become pollinated without an animal vector")
+	_assert(sample["pollination"] > 0.0, "the flying vector transferred no pollination signal")
 	_assert(sample["dissolved_oxygen"] < 0.9 and sample["dissolved_oxygen"] > 0.0, "aquatic oxygen did not respond within physical bounds")
 
-	print("PASS: pioneer soil supports rooted and canopy succession while standing water develops a regulated sulfur-processing food web")
+	print("PASS: pioneer soil reaches flowering, vector pollination wakes canopy, and standing water develops a regulated sulfur-processing food web")
 	quit(0)
 
 

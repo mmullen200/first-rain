@@ -82,7 +82,7 @@ func _seed_barren_basin() -> void:
 			dormant_moss[index] = max(hollow_seed, crust_seed) * 0.92
 			microbial_crust[index] = crust_seed * 0.16 + hollow_seed * 0.035
 			var drainage_affinity: float = clampf((world.x + world.y - 8.0) / 30.0, 0.0, 1.0)
-			dormant_rhizome[index] = drainage_affinity * (0.3 + hollow_seed * 0.35)
+			dormant_rhizome[index] = maxf(hollow_seed * 0.3, drainage_affinity * (0.3 + hollow_seed * 0.35))
 			dormant_canopy[index] = shelter * 0.14 + drainage_affinity * 0.08
 			dissolved_oxygen[index] = 0.72
 			shade[index] = shelter * 0.7
@@ -197,8 +197,9 @@ func step() -> void:
 			var fungal_moisture: float = smoothstep(0.17, 0.56, local_moisture)
 			var fungal_temperature: float = 1.0 - clampf(absf(local_temperature - 0.36) * 2.3, 0.0, 1.0)
 			var fungal_suitability: float = fungal_moisture * fungal_temperature * (1.0 - local_toxicity * 0.75)
-			var fungal_awakening: float = maxf(0.0, local_dead - 0.015) * fungal_suitability * 0.22 + fungal_spores[index] * fungal_suitability * 0.018
-			var fungal_spread: float = neighbor_fungus * fungal_suitability * 0.08
+			var detritus_support: float = smoothstep(0.008, 0.08, local_dead + moss_loss)
+			var fungal_awakening: float = (maxf(0.0, local_dead - 0.015) * 0.22 + fungal_spores[index] * 0.018) * fungal_suitability * detritus_support
+			var fungal_spread: float = neighbor_fungus * fungal_suitability * detritus_support * 0.08
 			var fungal_growth: float = local_fungus * local_dead * fungal_suitability * 0.08
 			var fungal_decay: float = local_fungus * (0.003 + maxf(0.0, 0.1 - local_moisture) * 0.05)
 			var consumption: float = minf(local_dead + moss_loss, local_fungus * 0.032 + fungal_awakening * 0.22)
@@ -223,8 +224,10 @@ func step() -> void:
 			# Rooted mats need pioneer soil and persistent moisture, then stabilize
 			# drainage while competing for the same shallow water.
 			var rhizome_suitability: float = smoothstep(0.16, 0.5, local_moisture) * smoothstep(0.04, 0.3, nutrients[index]) * (1.0 - local_toxicity)
-			var rhizome_awakening: float = dormant_rhizome[index] * maxf(0.0, local_moss + local_crust - 0.08) * rhizome_suitability * 0.045
-			var rhizome_spread: float = neighbor_rhizome * rhizome_suitability * 0.016 * (0.45 + pollination[index] * 0.55)
+			var pioneer_support: float = smoothstep(0.015, 0.12, local_moss) * smoothstep(0.015, 0.12, local_crust)
+			var rhizome_awakening: float = dormant_rhizome[index] * pioneer_support * rhizome_suitability * 0.045
+			var pollinated_spread: float = smoothstep(0.005, 0.08, pollination[index])
+			var rhizome_spread: float = neighbor_rhizome * rhizome_suitability * 0.016 * pollinated_spread
 			var rhizome_growth: float = local_rhizome * rhizome_suitability * 0.022
 			var rhizome_stress: float = local_rhizome * (maxf(0.0, 0.12 - local_moisture) * 0.08 + maxf(0.0, local_temperature - 0.62) * 0.045 + maxf(0.0, local_toxicity - 0.46) * 0.08 + local_canopy * 0.006)
 			next_rhizome[index] = clampf(local_rhizome + rhizome_awakening + rhizome_spread + rhizome_growth - rhizome_stress, 0.0, 1.0)
@@ -236,9 +239,9 @@ func step() -> void:
 			# Canopy-formers are slow deep-succession producers. They require a
 			# functioning rooted/decomposer patch and create shade, litter, and vapor.
 			var canopy_suitability: float = smoothstep(0.2, 0.55, local_moisture) * smoothstep(0.08, 0.35, nutrients[index]) * smoothstep(0.05, 0.3, local_fungus + local_rhizome)
-			var reproductive_connection: float = 0.35 + pollination[index] * 0.65
-			var canopy_awakening: float = dormant_canopy[index] * canopy_suitability * maxf(0.0, local_rhizome - 0.005) * 0.05 * reproductive_connection
-			var canopy_growth: float = local_canopy * canopy_suitability * 0.006
+			var reproductive_connection: float = smoothstep(0.01, 0.12, pollination[index])
+			var canopy_awakening: float = dormant_canopy[index] * canopy_suitability * maxf(0.0, local_rhizome - 0.005) * 0.005 * reproductive_connection
+			var canopy_growth: float = local_canopy * canopy_suitability * 0.0022
 			var canopy_stress: float = local_canopy * maxf(0.0, 0.16 - local_moisture) * 0.025
 			next_canopy[index] = clampf(local_canopy + canopy_awakening + canopy_growth - canopy_stress, 0.0, 1.0)
 			next_dormant_canopy[index] = maxf(0.0, dormant_canopy[index] - canopy_awakening * 0.5)
@@ -247,7 +250,7 @@ func step() -> void:
 
 			# Flowering is explicitly plant reproduction. Fungal fruiting remains a
 			# separate spore pathway and is never treated as a pollen source.
-			var ground_flowering: float = local_rhizome * rhizome_suitability * (0.003 + pollination[index] * 0.004)
+			var ground_flowering: float = local_rhizome * rhizome_suitability * (0.006 + pollination[index] * 0.004)
 			var canopy_flowering: float = local_canopy * canopy_suitability * (0.002 + pollination[index] * 0.003)
 			next_ground_bloom[index] = clampf(ground_bloom[index] * 0.982 + ground_flowering, 0.0, 1.0)
 			next_canopy_bloom[index] = clampf(canopy_bloom[index] * 0.987 + canopy_flowering, 0.0, 1.0)
@@ -633,6 +636,7 @@ func sample_world(world: Vector2) -> Dictionary:
 
 
 func summary() -> Dictionary:
+	var crust_cells := 0
 	var moss_cells := 0
 	var fungus_cells := 0
 	var dead_cells := 0
@@ -642,6 +646,7 @@ func summary() -> Dictionary:
 	var rhizome_cells := 0
 	var canopy_cells := 0
 	var aquatic_cells := 0
+	var aquatic_consumer_cells := 0
 	var total_volatile_sulfur := 0.0
 	var total_canopy := 0.0
 	var total_surface_water := 0.0
@@ -661,6 +666,8 @@ func summary() -> Dictionary:
 		total_canopy_bloom += canopy_bloom[index]
 		total_fungal_spores += fungal_spores[index]
 		total_dam_material += dam_material[index]
+		if microbial_crust[index] >= 0.08:
+			crust_cells += 1
 		if moss[index] >= 0.03:
 			moss_cells += 1
 		if fungus[index] >= 0.012:
@@ -675,7 +682,10 @@ func summary() -> Dictionary:
 			canopy_cells += 1
 		if aquatic_producer[index] >= 0.004:
 			aquatic_cells += 1
+		if aquatic_consumer[index] >= 0.004:
+			aquatic_consumer_cells += 1
 	return {
+		"crust_cells": crust_cells,
 		"moss_cells": moss_cells,
 		"fungus_cells": fungus_cells,
 		"dead_cells": dead_cells,
@@ -685,6 +695,7 @@ func summary() -> Dictionary:
 		"rhizome_cells": rhizome_cells,
 		"canopy_cells": canopy_cells,
 		"aquatic_cells": aquatic_cells,
+		"aquatic_consumer_cells": aquatic_consumer_cells,
 		"total_volatile_sulfur": total_volatile_sulfur,
 		"total_canopy": total_canopy,
 		"total_surface_water": total_surface_water,

@@ -35,7 +35,9 @@ func step(ecology_state: Dictionary) -> Array[Dictionary]:
 	var thermal_noise := _noise(tick, 17) - 0.5
 	var pressure_noise := _noise(tick, 41) - 0.5
 	var biological_vapor: float = clampf(float(ecology_state.get("total_canopy", 0.0)) / 0.8 + float(ecology_state.get("total_surface_water", 0.0)) / 1.2, 0.0, 0.14)
-	var cloud_nuclei: float = clampf(float(ecology_state.get("total_volatile_sulfur", 0.0)) / 0.04 + float(ecology_state.get("fungus_cells", 0)) / 30.0, 0.0, 0.5)
+	var aquatic_sulfur: float = float(ecology_state.get("total_volatile_sulfur", 0.0))
+	var aquatic_rain_link: float = smoothstep(0.004, 0.04, aquatic_sulfur)
+	var cloud_nuclei: float = clampf(aquatic_sulfur / 0.04 + float(ecology_state.get("fungus_cells", 0)) / 30.0, 0.0, 0.5)
 
 	var heat_target := clampf(0.57 + regional_wave * 0.19 + thermal_noise * 0.12, 0.18, 0.92)
 	temperature = lerpf(temperature, heat_target, 0.055)
@@ -48,7 +50,7 @@ func step(ecology_state: Dictionary) -> Array[Dictionary]:
 	var lift := clampf((0.58 - pressure) * 1.8 + wind * 0.38, 0.0, 1.0)
 	var condensation := maxf(0.0, humidity - (0.69 - lift * 0.18)) * (0.025 + cloud_nuclei * 0.055)
 	cloud_water = clampf(cloud_water + condensation - temperature * 0.0012 - precipitation * 0.15, 0.0, 1.0)
-	var rain_readiness := cloud_water * (0.42 + cloud_nuclei) * lift * (1.0 - maxf(0.0, temperature - 0.72))
+	var rain_readiness := cloud_water * (0.42 + cloud_nuclei) * lift * (1.0 - maxf(0.0, temperature - 0.72)) * aquatic_rain_link
 	precipitation = clampf((rain_readiness - 0.045) * 4.5, 0.0, 0.42)
 
 	var dust_source := maxf(0.0, temperature - 0.58) * maxf(0.0, 0.58 - humidity) * wind * 0.16

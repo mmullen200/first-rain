@@ -12,6 +12,12 @@ func _run() -> void:
 	var scene = load("res://main.tscn").instantiate()
 	root.add_child(scene)
 	await process_frame
+	# Satisfy the first animal's ecological prerequisite so this benchmark times
+	# the distributed habitat scan rather than the cheap precondition guard.
+	scene.ecology.add_resources(Vector2i(4, 12), {"ground_bloom": 0.16})
+	for y in range(12, 15):
+		for x in range(20, 23):
+			scene.ecology.add_resources(Vector2i(x, y), {"dead_biomass": 0.2})
 	for ignored in range(2):
 		scene._seed_integrated_animals()
 	var started := Time.get_ticks_usec()

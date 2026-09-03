@@ -41,13 +41,13 @@ func _run() -> void:
 
 	var vector_patch := Vector2i(4, 12)
 	scene.ecology.add_resources(vector_patch, {"ground_bloom": 0.16})
-	scene.ecology.add_resources(vector_patch + Vector2i(2, 0), {"canopy_bloom": 0.16})
+	scene.ecology.add_resources(vector_patch + Vector2i(2, 0), {"ground_bloom": 0.16})
 	var vector_habitat: Dictionary = scene._best_arrival_habitat("vector")
 	_assert(not vector_habitat.is_empty(), "two nearby flowering patches should qualify for vector arrival")
 	_assert(_cell_distance(vector_habitat["cell"], vector_patch + Vector2i(1, 0)) <= 3, "the vector destination should follow connected blossoms")
 
 	var engineer_patch: Vector2i = scene.ecology.CHANNEL_CELL
-	_seed_patch(scene, engineer_patch, {"surface_water": 0.18, "rhizome": 0.14}, 1)
+	_seed_patch(scene, engineer_patch, {"surface_water": 0.18, "rhizome": 0.14, "aquatic_consumer": 0.12}, 1)
 	var engineer_habitat: Dictionary = scene._best_arrival_habitat("wetland_engineer")
 	_assert(not engineer_habitat.is_empty(), "water and plants on the Drainage Spine should qualify for engineer arrival")
 	_assert(_cell_distance(engineer_habitat["cell"], engineer_patch) <= 1, "the engineer destination should follow the local wetland")
@@ -61,7 +61,7 @@ func _run() -> void:
 
 	scene.grazer_awake = true
 	scene.animal_simulation.register_agent("grazer", "grazer:1", {"cell": grazer_patch})
-	for ignored in range(20):
+	for ignored in range(100):
 		scene._seed_integrated_animals()
 	_assert(scene.animal_simulation.agents.has("colony:1"), "qualifying local habitat should establish the colony")
 	_assert(scene.animal_simulation.agents.has("vector:1"), "separated flowering patches should establish a reproductive vector")

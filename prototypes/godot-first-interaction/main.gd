@@ -47,12 +47,15 @@ var water_meshes: Array[MeshInstance3D] = []
 var flow_arrows: Array[MeshInstance3D] = []
 var ecology_step_accumulator := 0.0
 var ecology_started := false
+var crust_announced := false
 var moss_spread_announced := false
 var fungus_announced := false
 var fruiting_announced := false
 var rhizome_announced := false
+var ground_flowering_announced := false
 var canopy_announced := false
 var aquatic_announced := false
+var aquatic_consumer_announced := false
 var sulfur_announced := false
 var water_doses := 0
 var ration_packs := 0
@@ -709,7 +712,7 @@ func _build_interface() -> void:
 
 	var title := Label.new()
 	title.position = Vector2(24, 18)
-	title.text = "FIRST RAIN  /  TOPOGRAPHIC HYDROLOGY PROTOTYPE"
+	title.text = "FIRST RAIN  /  ECOLOGICAL SUCCESSION PROTOTYPE"
 	title.add_theme_font_size_override("font_size", 15)
 	title.add_theme_color_override("font_color", Color("e9b36e"))
 	canvas.add_child(title)
@@ -1257,6 +1260,11 @@ func _update_ecology_grid(delta: float) -> void:
 			ecology.add_water(Vector2(16.0, 10.0), weather_simulation.precipitation * 0.04, 58.0)
 		_refresh_ecology_visuals()
 		_update_ecological_animal_markers()
+		if not crust_announced and state["crust_cells"] >= 1:
+			crust_announced = true
+			evidence.record_event(ecology.tick, "ecology.microbial_crust_active", "basin", [], state)
+			_add_discovery("Microbial crust — occupies a narrow damp band; binds loose ground, adds nutrients, and repels water when dense and dry")
+			_set_status("A pale living film holds loose grains in a narrow damp band. On its driest dense edge, the next water beads instead of soaking in.")
 		if not moss_spread_announced and state["moss_cells"] >= 5:
 			moss_spread_announced = true
 			var moss_causes := [] if last_intervention_event_id == "" else [last_intervention_event_id]
@@ -1278,6 +1286,11 @@ func _update_ecology_grid(delta: float) -> void:
 			evidence.record_event(ecology.tick, "ecology.rhizome_established", "basin", [], state)
 			_add_discovery("Rhizome mat — rooted forage; binds drainage sediment and competes for shallow water")
 			_set_status("Blue-green ribbons root beneath the pioneer cover. Loose sediment holds while nearby shallow moisture falls.")
+		if not ground_flowering_announced and state["total_ground_bloom"] >= 0.012:
+			ground_flowering_announced = true
+			evidence.record_event(ecology.tick, "ecology.ground_flowering", "basin", [], state)
+			_add_discovery("Ground flowering — rooted mats expose blossoms, but reproduction remains locally stalled without an animal crossing")
+			_set_status("Small gold blossoms open above rooted mats. Nothing answers them yet; separated patches remain reproductively disconnected.")
 		if not canopy_announced and state["canopy_cells"] >= 1:
 			canopy_announced = true
 			evidence.record_event(ecology.tick, "ecology.canopy_established", "basin", [], state)
@@ -1285,9 +1298,14 @@ func _update_ecology_grid(delta: float) -> void:
 			_set_status("A dark branching fan rises above the rooted mat. Its shade cools the soil while its crown releases moisture.")
 		if not aquatic_announced and state["aquatic_cells"] >= 1:
 			aquatic_announced = true
-			evidence.record_event(ecology.tick, "ecology.aquatic_food_web", "basin", [], state)
-			_add_discovery("Aquatic food web — producer bloom regulated by consumers and dissolved oxygen")
-			_set_status("Turquoise cells gather in standing water. Smaller moving flecks graze the bloom instead of letting it grow unchecked.")
+			evidence.record_event(ecology.tick, "ecology.aquatic_producer_bloom", "basin", [], state)
+			_add_discovery("Aquatic producer bloom — standing-water growth releases sulfur precursor but cannot make it volatile alone")
+			_set_status("Turquoise cells gather in standing water. The scanner detects a sulfur precursor accumulating in the pond, but little reaches the air.")
+		if not aquatic_consumer_announced and state["aquatic_consumer_cells"] >= 1:
+			aquatic_consumer_announced = true
+			evidence.record_event(ecology.tick, "ecology.aquatic_consumers_active", "basin", [], state)
+			_add_discovery("Aquatic consumers — graze producer blooms, alter dissolved oxygen, and process sulfur precursor into volatile sulfur")
+			_set_status("Warm flecks move through the turquoise bloom. Producer growth falls, dissolved oxygen shifts, and volatile sulfur begins rising above the water.")
 		if not sulfur_announced and state["total_volatile_sulfur"] >= 0.012:
 			sulfur_announced = true
 			evidence.record_event(ecology.tick, "ecology.volatile_sulfur_released", "basin", [], state)
@@ -1296,33 +1314,42 @@ func _update_ecology_grid(delta: float) -> void:
 
 
 func _seed_integrated_animals() -> void:
-	var arrivals := [
-		["colony", "colony:1"],
-		["vector", "vector:1"],
-		["wetland_engineer", "engineer:1"]
-	]
-	if grazer_awake:
-		arrivals.append(["grazer", "grazer:2"])
-	if animal_simulation.agents.has("grazer:2"):
-		arrivals.append(["predator", "predator:1"])
-	var missing_species: Array[String] = []
-	for arrival in arrivals:
-		if not animal_simulation.agents.has(String(arrival[1])):
-			missing_species.append(String(arrival[0]))
-	if missing_species.is_empty():
+	# Establish one ecological role at a time. Habitat still determines where an
+	# animal settles, but a prepared late-stage habitat cannot skip the earlier
+	# relationships that make the Succession legible.
+	var arrival: Array = []
+	var succession: Dictionary = ecology.summary()
+	if not animal_simulation.agents.has("colony:1"):
+		if float(succession["total_ground_bloom"]) < 0.012:
+			_reset_habitat_search()
+			return
+		arrival = ["colony", "colony:1"]
+	elif not animal_simulation.agents.has("vector:1"):
+		arrival = ["vector", "vector:1"]
+	elif not animal_simulation.agents.has("grazer:1"):
+		if int(succession["canopy_cells"]) < 1:
+			_reset_habitat_search()
+			return
+		arrival = ["grazer", "grazer:1"]
+	elif not animal_simulation.agents.has("grazer:2"):
+		arrival = ["grazer", "grazer:2"]
+	elif not animal_simulation.agents.has("engineer:1"):
+		if int(succession["aquatic_consumer_cells"]) < 1:
+			_reset_habitat_search()
+			return
+		arrival = ["wetland_engineer", "engineer:1"]
+	elif not animal_simulation.agents.has("predator:1"):
+		arrival = ["predator", "predator:1"]
+	if arrival.is_empty():
 		_reset_habitat_search()
 		return
-	var habitats := _continue_arrival_habitat_search(missing_species)
+	var species := String(arrival[0])
+	var stable_id := String(arrival[1])
+	var habitats := _continue_arrival_habitat_search([species])
 	if habitats.is_empty():
 		return
-	for arrival in arrivals:
-		var species: String = arrival[0]
-		var stable_id: String = arrival[1]
-		if animal_simulation.agents.has(stable_id):
-			continue
-		var habitat: Dictionary = habitats.get(species, {})
-		if habitat.is_empty():
-			continue
+	var habitat: Dictionary = habitats.get(species, {})
+	if not habitat.is_empty():
 		_register_ecological_role(species, stable_id, habitat)
 
 
@@ -1439,7 +1466,6 @@ func _local_habitat_evidence(center: Vector2i, radius: int, include_flowering_to
 	var shade_values: PackedFloat32Array = habitat_state.get("shade", ecology.shade)
 	var surface_water_values: PackedFloat32Array = habitat_state.get("surface_water", ecology.surface_water)
 	var ground_bloom_values: PackedFloat32Array = habitat_state.get("ground_bloom", ecology.ground_bloom)
-	var canopy_bloom_values: PackedFloat32Array = habitat_state.get("canopy_bloom", ecology.canopy_bloom)
 	var moisture_values: PackedFloat32Array = habitat_state.get("moisture", ecology.moisture)
 	var toxicity_values: PackedFloat32Array = habitat_state.get("toxicity", ecology.toxicity)
 	var drainage_values: PackedFloat32Array
@@ -1457,7 +1483,9 @@ func _local_habitat_evidence(center: Vector2i, radius: int, include_flowering_to
 			var local_forage: float = moss_values[index] + rhizome_values[index]
 			var local_cover: float = canopy_values[index] + shade_values[index]
 			var local_surface_water: float = surface_water_values[index]
-			var local_flowering: float = ground_bloom_values[index] + canopy_bloom_values[index]
+			# The first flying vector must be invited by the ground layer. Canopy
+			# flowering becomes another destination only after pollination wakes it.
+			var local_flowering: float = ground_bloom_values[index]
 			evidence["detritus"] += local_detritus * weight
 			evidence["forage"] += local_forage * weight
 			evidence["surface_water"] += local_surface_water * weight
@@ -1473,7 +1501,7 @@ func _local_habitat_evidence(center: Vector2i, radius: int, include_flowering_to
 				evidence["nearby_cover"] += local_cover * weight
 				cover_cells.append(cell)
 			evidence["drainage_flow"] += local_surface_water * drainage_values[index] * weight
-			if include_flowering_topology and local_flowering >= 0.025:
+			if include_flowering_topology and local_flowering >= 0.008:
 				evidence["flowering_sources"] += 1
 				flowering_cells.append(cell)
 			evidence["moisture"] += moisture_values[index] * weight
@@ -1553,11 +1581,11 @@ func _species_habitat_score(species: String, evidence: Dictionary) -> float:
 	var viability: float = maxf(0.0, 1.0 - float(evidence["toxicity"]))
 	match species:
 		"colony":
-			if float(evidence["dry_detritus"]) < 0.42:
+			if float(evidence["dry_detritus"]) < 0.08:
 				return -1.0
 			return float(evidence["dry_detritus"]) * viability
 		"vector":
-			if int(evidence["flowering_clusters"]) < 2 or int(evidence["flowering_separation"]) < 2 or float(evidence["flowering"]) < 0.1:
+			if int(evidence["flowering_clusters"]) < 2 or int(evidence["flowering_separation"]) < 2 or float(evidence["flowering"]) < 0.012:
 				return -1.0
 			return float(evidence["flowering"]) * viability + float(evidence["flowering_separation"]) * 0.025
 		"wetland_engineer":
@@ -1594,13 +1622,16 @@ func _best_predator_arrival_habitat() -> Dictionary:
 
 
 func _register_ecological_role(species: String, stable_id: String, habitat: Dictionary) -> void:
+	if stable_id == "grazer:1":
+		_awaken_first_grazer(habitat)
+		return
 	var cell: Vector2i = habitat["cell"]
 	if not animal_simulation.register_agent(species, stable_id, {"cell": cell, "hunger": 0.35, "body_biomass": 0.8}):
 		return
 	animal_roles_announced[stable_id] = true
 	var arrival_observations := {
 		"colony": "Eusocial hive — a fixed earthen mound forms beside dry Detritus; tiny workers begin tracing one route outward",
-		"vector": "Flying animal — repeated crossings begin between nearby blossoms",
+		"vector": "Flying animal — repeated crossings begin between separated ground-layer blossoms",
 		"wetland_engineer": "Large wetland animal — tracks gather beside shallow water and nearby plant growth",
 		"grazer": "Second grazer — another animal settles into a concentrated forage patch",
 		"predator": "Predator — fresh tracks converge on the grazers' range"
@@ -1691,21 +1722,6 @@ func _handle_weather_events(events: Array[Dictionary]) -> void:
 
 func _update_grazer(delta: float) -> void:
 	if not grazer_awake:
-		var dormant_state: Dictionary = ecology.summary()
-		if dormant_state["moss_cells"] >= 7 and dormant_state["fungus_cells"] >= 3 and dormant_state["fruiting_cells"] >= 2:
-			grazer_awake = true
-			animal_simulation.register_agent("grazer", "grazer:1", {"cell": grazer_cell, "hunger": 1.0})
-			grazer_wake_event_id = evidence.record_event(ecology.tick, "organism.grazer_awakened", "grazer:1", [], dormant_state)
-			_set_grazer_state("seeking")
-			grazer_root.scale = Vector3.ONE * 1.35
-			grazer_body.material_override = _material(Color("76d2bd"), 0.58, Color("237563"))
-			grazer_head.material_override = _material(Color("f2c36d"), 0.48, Color("8f571c"))
-			grazer_label.visible = true
-			grazer_glow.visible = true
-			_add_discovery("Grazer — wakes above biomass threshold; eats moss and returns nutrients")
-			_presence_focus("grazer", grazer_root.position)
-			_set_status("A stone-like shell unfolds into a small grazer. The flame moves beside it and repeats the same single pulse used at the moss.")
-			evidence.checkpoint(ecology.tick, "episode_boundary", _evidence_snapshot())
 		return
 	var authoritative: Dictionary = animal_simulation.agent_state("grazer:1")
 	if authoritative.is_empty() or not bool(authoritative["alive"]):
@@ -1718,6 +1734,32 @@ func _update_grazer(delta: float) -> void:
 	grazer_root.position = grazer_root.position.move_toward(grazer_target_position, GRAZER_MOVE_SPEED * delta)
 	if grazer_root.position.distance_to(grazer_target_position) > 0.01:
 		grazer_root.look_at(grazer_target_position, Vector3.UP)
+
+
+func _awaken_first_grazer(habitat: Dictionary) -> void:
+	var cell: Vector2i = habitat["cell"]
+	if not animal_simulation.register_agent("grazer", "grazer:1", {"cell": cell, "hunger": 1.0}):
+		return
+	grazer_awake = true
+	grazer_cell = cell
+	var world: Vector2 = ecology.world_position(cell.x, cell.y)
+	grazer_target_position = Vector3(world.x, ecology.terrain_height(cell) + 0.28, world.y)
+	grazer_root.position = grazer_target_position
+	grazer_wake_event_id = evidence.record_event(ecology.tick, "organism.grazer_awakened", "grazer:1", [], {
+		"cell": cell,
+		"habitat_score": habitat["score"],
+		"habitat_evidence": habitat["evidence"]
+	})
+	_set_grazer_state("seeking")
+	grazer_root.scale = Vector3.ONE * 1.35
+	grazer_body.material_override = _material(Color("76d2bd"), 0.58, Color("237563"))
+	grazer_head.material_override = _material(Color("f2c36d"), 0.48, Color("8f571c"))
+	grazer_label.visible = true
+	grazer_glow.visible = true
+	_add_discovery("Grazer — settles where concentrated forage meets established cover")
+	_presence_focus("grazer", grazer_root.position)
+	_set_status("A stone-like shell unfolds beside open forage and nearby cover. The flame moves beside it and repeats the same single pulse used at the moss.")
+	evidence.checkpoint(ecology.tick, "episode_boundary", _evidence_snapshot())
 
 
 func _set_grazer_state(next_state: String) -> void:
@@ -1754,8 +1796,8 @@ func _handle_authoritative_animal_events(events: Array[Dictionary]) -> void:
 				evidence.record_event(ecology.tick, "organism.plant_pollinated", event["subject"], [], facts)
 				if not animal_roles_announced.has("pollination_observed"):
 					animal_roles_announced["pollination_observed"] = true
-					_add_discovery("Plant pollination — flying vectors carry pollen between ground-cover flowers and canopy blossoms")
-					_set_status("The flying vector moves between two flowering plant patches. The scanner detects transferred pollen; no fungal tissue is involved.")
+					_add_discovery("Plant pollination — flying vectors connect separated blossoms, enabling rooted spread and dormant canopy awakening")
+					_set_status("The flying vector crosses between flowering plant patches. The scanner detects transferred pollen; rooted spread and dormant canopy now have a missing connection.")
 			"organism.fungal_spores_distributed":
 				var facts: Dictionary = event["facts"]
 				evidence.record_event(ecology.tick, "organism.fungal_spores_distributed", event["subject"], [], facts)
@@ -1833,6 +1875,7 @@ func _refresh_ecology_visuals() -> void:
 			color = color.lerp(Color("efb34f"), clamp(sample["fruiting"] * 4.0, 0.0, 0.98))
 			color = color.lerp(Color("67c88f"), clamp(sample["rhizome"] * 30.0, 0.0, 0.82))
 			color = color.lerp(Color("28b9b2"), clamp(sample["aquatic_producer"] * 50.0, 0.0, 0.75))
+			color = color.lerp(Color("ef8668"), clamp(sample["aquatic_consumer"] * 35.0, 0.0, 0.52))
 			color = color.lerp(Color("e2cf62"), clamp(sample["ground_bloom"] * 8.0, 0.0, 0.55))
 			color = color.lerp(Color("e790c4"), clamp(sample["canopy_bloom"] * 8.0, 0.0, 0.55))
 			color = color.lerp(Color("ad7b45"), clamp(sample["dam_material"] * 5.0, 0.0, 0.65))

@@ -14,6 +14,10 @@ func _run() -> void:
 	# before the astronaut began the first Field Experiment.
 	for ignored in range(480):
 		scene._update_ecology_grid(scene.ECOLOGY_STEP_SECONDS)
+	if scene.ecology.tick != 0:
+		printerr("FAIL: an idle opening advanced the dormant ecology before the first Field Experiment")
+		quit(1)
+		return
 
 	scene.astronaut.position = scene.emergency_cache.position
 	scene._update_nearby_interactions()
@@ -24,13 +28,14 @@ func _run() -> void:
 
 	for ignored in range(180):
 		scene._update_ecology_grid(scene.ECOLOGY_STEP_SECONDS)
-		scene._update_grazer(scene.ECOLOGY_STEP_SECONDS)
-		if scene.grazer_awake:
-			break
-
-	if not scene.grazer_awake:
-		printerr("FAIL: an idle opening made the sheltered intervention incapable of awakening the grazer: ", scene.ecology.summary())
+	var summary: Dictionary = scene.ecology.summary()
+	if float(summary["total_moss"]) <= 0.0 or int(summary["fungus_cells"]) < 1:
+		printerr("FAIL: an idle opening consumed the sheltered site's pioneer/decomposer response: ", summary)
 		quit(1)
 		return
-	print("PASS: an idle opening does not alter the dormant ecology; the sheltered intervention awakens the grazer")
+	if not scene.animal_simulation.agents.is_empty():
+		printerr("FAIL: the first sheltered intervention skipped early Succession and established an animal: ", scene.animal_simulation.agents)
+		quit(1)
+		return
+	print("PASS: an idle opening preserves dormant ecology; the first sheltered intervention awakens early life without skipping to animals")
 	quit(0)
