@@ -2,6 +2,8 @@
 
 _Research date: 2026-08-28. Sources are primary experimental, observational, or modeling studies. “Evidence” describes results on Earth; “Design implication” is an inference for First Rain, not a claim that an alien ecosystem must work identically._
 
+> **Prototype status, 2026-09-04:** The integrated experiment on branch `prototype/succession-order` at commit `32057c1` adopts one deliberately stronger playable rule from this research: standing-water producers create a sulfur precursor, aquatic consumers process it into volatile sulfur, and First Rain readiness requires that aquatic contribution alongside terrestrial vapor, biological particles, and a natural Atmospheric Window. This is prototype evidence, not a revision of the confidence judgments below or a claim that aquatic sulfur alone causes rain. Player comprehension remains unvalidated in [issue #27](https://github.com/mmullen200/first-rain/issues/27).
+
 ## Decision summary
 
 **First Rain should emerge from a convergence of restored ecological functions and a favorable natural atmospheric window. The Presence neither summons nor concentrates rain.**

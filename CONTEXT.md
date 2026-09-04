@@ -64,6 +64,38 @@ _Avoid_: Unit class, species tier
 The overlapping and reversible change in organisms and habitat conditions as life creates opportunities and constraints for other life.
 _Avoid_: Unlock ladder, biome level
 
+**Successional Dependency**:
+A local ecological relationship in which one organism or process requires habitat conditions or effects prepared by other Ecological Roles. It does not imply a basin-wide unlock, a species tier, or a ranking of evolutionary advancement.
+_Avoid_: Global unlock, evolution tier, tech tree
+
+**Microbial Crust**:
+A pioneer living surface film that occupies narrow damp bands and binds loose ground, while dense dry crust can also repel water.
+_Avoid_: Starter plant, passive soil upgrade
+
+**Rooted Mat**:
+A low rooted producer layer that builds on pioneer soil, competes for shallow water and nutrients, and creates the basin's first ground-level flowering habitat.
+_Avoid_: Grass tier, generic vegetation
+
+**Ground Flowering**:
+The reproductive phase of Rooted Mats whose separated patches create an opportunity for a Flying Reproductive Vector to connect them.
+_Avoid_: Flower resource, pollination meter
+
+**Flying Reproductive Vector**:
+An autonomous animal that transports reproductive material between separated flowering patches, connecting otherwise isolated plant populations.
+_Avoid_: Pollinator unit, flying unlock
+
+**Eusocial Colony**:
+A fixed nest and its worker population, which slowly carries small amounts of plant material back to the nest and redistributes fertility between the nest and its foraging ground.
+_Avoid_: Roaming swarm, single animal
+
+**Canopy-Former**:
+A slow higher producer layer that depends on reproductive connection and creates shade, litter, cover, water cycling, and atmospheric contributions.
+_Avoid_: Tall plant tier, scenery
+
+**Aquatic Sulfur Pathway**:
+The linked standing-water process in which aquatic producers create a sulfur precursor and aquatic consumers process it into a volatile atmospheric contribution. It is one necessary contribution to First Rain, not a sufficient cause or progress switch.
+_Avoid_: Rain meter, plankton rain switch
+
 **Ecological Mosaic**:
 The coexistence of pioneer, established, disturbed, and recovering habitats in different parts of the same region as local Succession follows different trajectories.
 _Avoid_: Global biome stage, region level

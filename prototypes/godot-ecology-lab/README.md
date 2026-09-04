@@ -1,5 +1,7 @@
 # Godot ecology rules lab
 
+> **Historical prototype status:** This issue #3 lab remains the isolated evidence for nutrient conservation and a small moss–fungus–grazer cycle. Its deliberately narrow sequence is not the current integrated Succession model. The current playable experiment and its verification commands are documented in the [first-interaction prototype README](../godot-first-interaction/README.md) and tracked in [issue #27](https://github.com/mmullen200/first-rain/issues/27).
+
 This throwaway lab answers one question for issue #3:
 
 > Can moss, fungus, and one grazer form a legible nutrient cycle that persists, moves material through space, and responds to disturbance without scripted progression?
