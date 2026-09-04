@@ -17,8 +17,8 @@ func _run() -> void:
 	root.add_child(scene)
 	await process_frame
 
-	# Every animal habitat exists at once. Ecological prerequisites, rather than
-	# scan order or shared abundance, must still establish one role at a time.
+	# Every animal habitat exists at once. Each role must establish from its own
+	# current local support rather than from a hard-coded predecessor.
 	var colony_patch := Vector2i(21, 13)
 	_seed_patch(scene, colony_patch, {"dead_biomass": 0.2}, 1)
 	var flower_patch := Vector2i(4, 12)
@@ -28,31 +28,15 @@ func _run() -> void:
 	_seed_patch(scene, grazer_patch, {"moss": 0.15, "rhizome": 0.15}, 1)
 	scene.ecology.add_shade(scene.ecology.world_position(grazer_patch.x + 2, grazer_patch.y), 0.8, 1.5)
 	var engineer_patch: Vector2i = scene.ecology.CHANNEL_CELL
-	_seed_patch(scene, engineer_patch, {"surface_water": 0.18, "rhizome": 0.14}, 1)
-
-	_advance_until_agent_count(scene, 1)
-	_assert(_living_species(scene) == ["colony"], "the eusocial colony should be the only first animal even when every later habitat already exists")
-	_advance_until_agent_count(scene, 2)
-	_assert(_living_species(scene) == ["colony", "vector"], "the flying reproductive vector should follow the colony")
-	_advance_search_attempts(scene)
-	_assert(_living_species(scene) == ["colony", "vector"], "physical shade should not let a grazer arrive before canopy establishes")
+	_seed_patch(scene, engineer_patch, {"surface_water": 0.18, "rhizome": 0.14, "aquatic_consumer": 0.12}, 1)
 	scene.ecology.add_resources(grazer_patch + Vector2i(2, 0), {"canopy": 0.22})
-	_advance_until_agent_count(scene, 3)
-	_assert(_living_species(scene) == ["colony", "grazer", "vector"], "the first grazer should follow flowering, pollination, and canopy")
-	_advance_until_agent_count(scene, 4)
-	_assert(_living_species(scene) == ["colony", "grazer", "grazer", "vector"], "a viable grazer population should establish before its predator")
-	_advance_search_attempts(scene)
-	_assert(_living_species(scene) == ["colony", "grazer", "grazer", "vector"], "a wet planted channel should not admit a Wetland Engineer before aquatic consumers establish")
-	_seed_patch(scene, engineer_patch, {"aquatic_consumer": 0.12}, 1)
-	_advance_until_agent_count(scene, 5)
-	_assert(_living_species(scene) == ["colony", "grazer", "grazer", "vector", "wetland_engineer"], "the Wetland Engineer should arrive after the grazer")
-	_advance_until_agent_count(scene, 6)
-	_assert(_living_species(scene) == ["colony", "grazer", "grazer", "predator", "vector", "wetland_engineer"], "the predator should be the final animal to establish")
+	_advance_search_attempts(scene, 80)
+	_assert(_living_species(scene) == ["colony", "grazer", "grazer", "predator", "vector", "wetland_engineer"], "simultaneously supported roles should all establish without a global checklist")
 
 	if failed:
 		quit(1)
 	else:
-		print("PASS: animal establishment proceeds from colony through vector, grazers, Wetland Engineer, and predator")
+		print("PASS: plant dependencies remain causal while animal roles emerge independently from local habitat support")
 		quit(0)
 
 
@@ -114,15 +98,8 @@ func _assert_canopy_waits_for_pollination() -> void:
 	_assert(ecology.resource_amount(cell, "canopy") > 0.0, "pollination should let suitable dormant canopy wake")
 
 
-func _advance_until_agent_count(scene, expected_count: int) -> void:
-	for ignored in range(40):
-		scene._seed_integrated_animals()
-		if scene.animal_simulation.agents.size() >= expected_count:
-			return
-
-
-func _advance_search_attempts(scene) -> void:
-	for ignored in range(40):
+func _advance_search_attempts(scene, attempts := 40) -> void:
+	for ignored in range(attempts):
 		scene._seed_integrated_animals()
 
 
@@ -130,7 +107,7 @@ func _living_species(scene) -> Array[String]:
 	var result: Array[String] = []
 	for stable_id in scene.animal_simulation.agents:
 		var agent: Dictionary = scene.animal_simulation.agent_state(stable_id)
-		if bool(agent["alive"]):
+		if bool(agent["alive"]) and bool(agent.get("present", true)):
 			result.append(String(agent["species"]))
 	result.sort()
 	return result

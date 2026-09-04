@@ -33,9 +33,15 @@ func _run() -> void:
 		printerr("FAIL: an idle opening consumed the sheltered site's pioneer/decomposer response: ", summary)
 		quit(1)
 		return
-	if not scene.animal_simulation.agents.is_empty():
-		printerr("FAIL: the first sheltered intervention skipped early Succession and established an animal: ", scene.animal_simulation.agents)
+	var present_species: Array[String] = []
+	for stable_id in scene.animal_simulation.agents:
+		var agent: Dictionary = scene.animal_simulation.agent_state(stable_id)
+		if bool(agent["alive"]) and bool(agent.get("present", true)):
+			present_species.append(String(agent["species"]))
+	present_species.sort()
+	if present_species not in [[], ["colony"]]:
+		printerr("FAIL: the first sheltered intervention admitted an animal without locally supported habitat: ", scene.animal_simulation.agents)
 		quit(1)
 		return
-	print("PASS: an idle opening preserves dormant ecology; the first sheltered intervention awakens early life without skipping to animals")
+	print("PASS: an idle opening preserves dormant ecology; the first intervention admits only animals supported by its current local habitat")
 	quit(0)

@@ -22,6 +22,16 @@ const VISIBLE_WATER_THRESHOLD := 0.04
 # Forty-five hunger points marks a meal. At 12× displayed field time this
 # takes eight in-world hours, supporting roughly three meals per field day.
 const HUNGER_RATE := 0.01875
+const ARRIVAL_SUPPORT_OBSERVATIONS := 2
+const DEPARTURE_GRACE_TICKS := 48
+const ANIMAL_SETTLEMENTS := {
+	"colony:1": "colony",
+	"vector:1": "vector",
+	"grazer:1": "grazer",
+	"grazer:2": "grazer",
+	"engineer:1": "wetland_engineer",
+	"predator:1": "predator"
+}
 const EcologyGridModel = preload("res://ecology_grid.gd")
 const EvidenceRecorder = preload("res://evidence_recorder.gd")
 const AnimalSimulation = preload("res://animal_simulation.gd")
@@ -139,6 +149,8 @@ var habitat_search_cursor := 0
 var habitat_search_scores: Dictionary = {}
 var habitat_search_best: Dictionary = {}
 var habitat_search_snapshot: Dictionary = {}
+var arrival_habitat_support: Dictionary = {}
+var unsupported_residency_ticks: Dictionary = {}
 var first_rain_announced := false
 
 var disturbance_state := "quiet"
@@ -712,7 +724,7 @@ func _build_interface() -> void:
 
 	var title := Label.new()
 	title.position = Vector2(24, 18)
-	title.text = "FIRST RAIN  /  ECOLOGICAL SUCCESSION PROTOTYPE"
+	title.text = "FIRST RAIN  /  REVERSIBLE HABITAT PROTOTYPE"
 	title.add_theme_font_size_override("font_size", 15)
 	title.add_theme_color_override("font_color", Color("e9b36e"))
 	canvas.add_child(title)
@@ -1314,49 +1326,104 @@ func _update_ecology_grid(delta: float) -> void:
 
 
 func _seed_integrated_animals() -> void:
-	# Establish one ecological role at a time. Habitat still determines where an
-	# animal settles, but a prepared late-stage habitat cannot skip the earlier
-	# relationships that make the Succession legible.
-	var arrival: Array = []
-	var succession: Dictionary = ecology.summary()
-	if not animal_simulation.agents.has("colony:1"):
-		if float(succession["total_ground_bloom"]) < 0.012:
-			_reset_habitat_search()
-			return
-		arrival = ["colony", "colony:1"]
-	elif not animal_simulation.agents.has("vector:1"):
-		arrival = ["vector", "vector:1"]
-	elif not animal_simulation.agents.has("grazer:1"):
-		if int(succession["canopy_cells"]) < 1:
-			_reset_habitat_search()
-			return
-		arrival = ["grazer", "grazer:1"]
-	elif not animal_simulation.agents.has("grazer:2"):
-		arrival = ["grazer", "grazer:2"]
-	elif not animal_simulation.agents.has("engineer:1"):
-		if int(succession["aquatic_consumer_cells"]) < 1:
-			_reset_habitat_search()
-			return
-		arrival = ["wetland_engineer", "engineer:1"]
-	elif not animal_simulation.agents.has("predator:1"):
-		arrival = ["predator", "predator:1"]
-	if arrival.is_empty():
+	_update_resident_habitat_support()
+	var candidates: Dictionary = {}
+	var species_to_search: Array[String] = []
+	for stable_id in ANIMAL_SETTLEMENTS:
+		var species := String(ANIMAL_SETTLEMENTS[stable_id])
+		var agent: Dictionary = animal_simulation.agent_state(stable_id)
+		if not agent.is_empty() and (not bool(agent["alive"]) or bool(agent.get("present", true))):
+			arrival_habitat_support.erase(stable_id)
+			continue
+		candidates[stable_id] = species
+		if species not in species_to_search:
+			species_to_search.append(species)
+	if candidates.is_empty():
 		_reset_habitat_search()
 		return
-	var species := String(arrival[0])
-	var stable_id := String(arrival[1])
-	var habitats := _continue_arrival_habitat_search([species])
+	var habitats := _continue_arrival_habitat_search(species_to_search)
 	if habitats.is_empty():
 		return
-	var habitat: Dictionary = habitats.get(species, {})
-	if not habitat.is_empty():
-		_register_ecological_role(species, stable_id, habitat)
+	for stable_id in candidates:
+		var species := String(candidates[stable_id])
+		var habitat: Dictionary = habitats.get(species, {})
+		if habitat.is_empty():
+			arrival_habitat_support.erase(stable_id)
+			continue
+		var previous: Dictionary = arrival_habitat_support.get(stable_id, {})
+		var observations := 1
+		if not previous.is_empty() and _cell_distance(previous["cell"], habitat["cell"]) <= 1:
+			observations = int(previous["observations"]) + 1
+		arrival_habitat_support[stable_id] = {
+			"cell": habitat["cell"],
+			"observations": observations,
+			"habitat": habitat
+		}
+		if observations >= ARRIVAL_SUPPORT_OBSERVATIONS:
+			_register_ecological_role(species, stable_id, habitat)
+			arrival_habitat_support.erase(stable_id)
+
+
+func _update_resident_habitat_support() -> void:
+	var habitat_snapshot: Dictionary = ecology.full_snapshot()
+	habitat_snapshot["drainage_affinity"] = _drainage_affinity_snapshot()
+	for stable_id in animal_simulation.agents:
+		var agent: Dictionary = animal_simulation.agent_state(stable_id)
+		if agent.is_empty() or not bool(agent["alive"]) or not bool(agent.get("present", true)):
+			unsupported_residency_ticks.erase(stable_id)
+			continue
+		var species := String(agent["species"])
+		var habitat_cell: Vector2i = agent.get("habitat_cell", agent["cell"])
+		var habitat := _habitat_at_cell(species, habitat_cell, habitat_snapshot)
+		if not habitat.is_empty():
+			unsupported_residency_ticks[stable_id] = 0
+			continue
+		var unsupported_ticks := int(unsupported_residency_ticks.get(stable_id, 0)) + 1
+		unsupported_residency_ticks[stable_id] = unsupported_ticks
+		if unsupported_ticks >= DEPARTURE_GRACE_TICKS:
+			_depart_ecological_role(stable_id, species, habitat_cell)
+
+
+func _habitat_at_cell(species: String, cell: Vector2i, habitat_snapshot: Dictionary = {}) -> Dictionary:
+	if species == "predator":
+		return _predator_habitat_at(cell)
+	var snapshot := habitat_snapshot
+	if snapshot.is_empty():
+		snapshot = ecology.full_snapshot()
+		snapshot["drainage_affinity"] = _drainage_affinity_snapshot()
+	var radius := 3 if species == "vector" else 2
+	var local_evidence := _local_habitat_evidence(cell, radius, species == "vector", snapshot)
+	var score := _species_habitat_score(species, local_evidence)
+	if score < 0.0:
+		return {}
+	return {"cell": cell, "score": score, "evidence": local_evidence}
+
+
+func _depart_ecological_role(stable_id: String, species: String, habitat_cell: Vector2i) -> void:
+	var resident: Dictionary = animal_simulation.agent_state(stable_id)
+	if species == "colony" and String(resident.get("worker_phase", "idle")) != "idle":
+		# Let the exposed worker finish returning its conserved load before the
+		# colony withdraws from the basin.
+		unsupported_residency_ticks[stable_id] = DEPARTURE_GRACE_TICKS - 1
+		return
+	if not animal_simulation.set_agent_presence(stable_id, false):
+		return
+	unsupported_residency_ticks.erase(stable_id)
+	arrival_habitat_support.erase(stable_id)
+	var names := {
+		"colony": "The worker trails thin and the hive falls quiet after its dry Detritus patch fails to recover.",
+		"vector": "The repeated crossings stop after the nearby flowering patches fade.",
+		"grazer": "Tracks leave the forage edge after food and cover no longer hold together here.",
+		"wetland_engineer": "The wetland animal leaves after flowing water, aquatic consumers, and building plants cease overlapping.",
+		"predator": "The predator's tracks leave the basin after the local grazer range collapses."
+	}
+	_set_status(names.get(species, "Animal activity leaves after its local habitat collapses."))
+	_add_discovery("Animal departure — local habitat can lose a resident; settlement is not a permanent unlock")
+	evidence.record_event(ecology.tick, "organism.%s_departed" % species, stable_id, [], {"cell": habitat_cell, "cause": "local_habitat_collapse"})
 
 
 func _continue_arrival_habitat_search(species: Array[String]) -> Dictionary:
 	const CELLS_PER_ECOLOGY_TICK := 24
-	if species.size() == 1 and species[0] == "predator":
-		return {"predator": _best_predator_arrival_habitat()}
 	if habitat_search_species != species or habitat_search_snapshot.is_empty():
 		habitat_search_species = species.duplicate()
 		habitat_search_cursor = 0
@@ -1446,6 +1513,7 @@ func _local_habitat_evidence(center: Vector2i, radius: int, include_flowering_to
 		"nearby_cover": 0.0,
 		"forage_cover_edges": 0,
 		"surface_water": 0.0,
+		"aquatic_consumers": 0.0,
 		"drainage_flow": 0.0,
 		"plant_material": 0.0,
 		"flowering": 0.0,
@@ -1463,8 +1531,8 @@ func _local_habitat_evidence(center: Vector2i, radius: int, include_flowering_to
 	var moss_values: PackedFloat32Array = habitat_state.get("moss", ecology.moss)
 	var rhizome_values: PackedFloat32Array = habitat_state.get("rhizome", ecology.rhizome)
 	var canopy_values: PackedFloat32Array = habitat_state.get("canopy", ecology.canopy)
-	var shade_values: PackedFloat32Array = habitat_state.get("shade", ecology.shade)
 	var surface_water_values: PackedFloat32Array = habitat_state.get("surface_water", ecology.surface_water)
+	var aquatic_consumer_values: PackedFloat32Array = habitat_state.get("aquatic_consumer", ecology.aquatic_consumer)
 	var ground_bloom_values: PackedFloat32Array = habitat_state.get("ground_bloom", ecology.ground_bloom)
 	var moisture_values: PackedFloat32Array = habitat_state.get("moisture", ecology.moisture)
 	var toxicity_values: PackedFloat32Array = habitat_state.get("toxicity", ecology.toxicity)
@@ -1481,7 +1549,7 @@ func _local_habitat_evidence(center: Vector2i, radius: int, include_flowering_to
 			var weight := 1.0 / float(distance + 1)
 			var local_detritus: float = dead_biomass_values[index]
 			var local_forage: float = moss_values[index] + rhizome_values[index]
-			var local_cover: float = canopy_values[index] + shade_values[index]
+			var local_cover: float = canopy_values[index]
 			var local_surface_water: float = surface_water_values[index]
 			# The first flying vector must be invited by the ground layer. Canopy
 			# flowering becomes another destination only after pollination wakes it.
@@ -1489,6 +1557,7 @@ func _local_habitat_evidence(center: Vector2i, radius: int, include_flowering_to
 			evidence["detritus"] += local_detritus * weight
 			evidence["forage"] += local_forage * weight
 			evidence["surface_water"] += local_surface_water * weight
+			evidence["aquatic_consumers"] += aquatic_consumer_values[index] * weight
 			evidence["plant_material"] += (moss_values[index] + rhizome_values[index] + canopy_values[index]) * weight
 			if include_flowering_topology:
 				evidence["flowering"] += local_flowering * weight
@@ -1589,9 +1658,9 @@ func _species_habitat_score(species: String, evidence: Dictionary) -> float:
 				return -1.0
 			return float(evidence["flowering"]) * viability + float(evidence["flowering_separation"]) * 0.025
 		"wetland_engineer":
-			if float(evidence["drainage_flow"]) < 0.12 or float(evidence["plant_material"]) < 0.32:
+			if float(evidence["drainage_flow"]) < 0.12 or float(evidence["plant_material"]) < 0.32 or float(evidence["aquatic_consumers"]) < 0.04:
 				return -1.0
-			return minf(float(evidence["drainage_flow"]), float(evidence["plant_material"])) * viability
+			return minf(float(evidence["drainage_flow"]), minf(float(evidence["plant_material"]), float(evidence["aquatic_consumers"]) * 4.0)) * viability
 		"grazer":
 			if float(evidence["open_forage"]) < 0.65 or float(evidence["nearby_cover"]) < 0.1 or int(evidence["forage_cover_edges"]) < 1:
 				return -1.0
@@ -1603,22 +1672,48 @@ func _best_predator_arrival_habitat() -> Dictionary:
 	var prey_cells: Array[Vector2i] = []
 	for stable_id in animal_simulation.agents:
 		var agent: Dictionary = animal_simulation.agent_state(stable_id)
-		if not agent.is_empty() and bool(agent["alive"]) and String(agent["species"]) == "grazer":
-			prey_cells.append(agent["cell"])
-	if prey_cells.size() < 2:
-		return {}
+		if not agent.is_empty() and bool(agent["alive"]) and bool(agent.get("present", true)) and String(agent["species"]) == "grazer":
+			prey_cells.append(agent.get("habitat_cell", agent["cell"]))
 	var best_cell := Vector2i.ZERO
 	var best_score := -1.0
 	for y in range(ecology.HEIGHT):
 		for x in range(ecology.WIDTH):
 			var cell := Vector2i(x, y)
 			var score := 0.0
+			var local_grazers := 0
 			for prey_cell in prey_cells:
-				score += 1.0 / float(absi(prey_cell.x - cell.x) + absi(prey_cell.y - cell.y) + 1)
+				var distance := _cell_distance(prey_cell, cell)
+				if distance <= 4:
+					local_grazers += 1
+					score += 1.0 / float(distance + 1)
+			if local_grazers < 2:
+				continue
 			if score > best_score:
 				best_score = score
 				best_cell = cell
-	return {"cell": best_cell, "score": best_score, "evidence": {"living_grazers": prey_cells.size()}}
+	if best_score < 0.0:
+		return {}
+	return {"cell": best_cell, "score": best_score, "evidence": {"nearby_grazers": 2}}
+
+
+func _predator_habitat_at(cell: Vector2i) -> Dictionary:
+	var nearby_grazers := 0
+	var score := 0.0
+	for stable_id in animal_simulation.agents:
+		var agent: Dictionary = animal_simulation.agent_state(stable_id)
+		if agent.is_empty() or not bool(agent["alive"]) or not bool(agent.get("present", true)) or String(agent["species"]) != "grazer":
+			continue
+		var distance := _cell_distance(cell, agent.get("habitat_cell", agent["cell"]))
+		if distance <= 4:
+			nearby_grazers += 1
+			score += 1.0 / float(distance + 1)
+	if nearby_grazers < 2:
+		return {}
+	return {"cell": cell, "score": score, "evidence": {"nearby_grazers": nearby_grazers}}
+
+
+func _cell_distance(a: Vector2i, b: Vector2i) -> int:
+	return maxi(absi(a.x - b.x), absi(a.y - b.y))
 
 
 func _register_ecological_role(species: String, stable_id: String, habitat: Dictionary) -> void:
@@ -1626,8 +1721,14 @@ func _register_ecological_role(species: String, stable_id: String, habitat: Dict
 		_awaken_first_grazer(habitat)
 		return
 	var cell: Vector2i = habitat["cell"]
-	if not animal_simulation.register_agent(species, stable_id, {"cell": cell, "hunger": 0.35, "body_biomass": 0.8}):
-		return
+	var returning: bool = animal_simulation.agents.has(stable_id)
+	if returning:
+		if not animal_simulation.set_agent_presence(stable_id, true, cell):
+			return
+	else:
+		if not animal_simulation.register_agent(species, stable_id, {"cell": cell, "habitat_cell": cell, "hunger": 0.35, "body_biomass": 0.8}):
+			return
+	unsupported_residency_ticks[stable_id] = 0
 	animal_roles_announced[stable_id] = true
 	var arrival_observations := {
 		"colony": "Eusocial hive — a fixed earthen mound forms beside dry Detritus; tiny workers begin tracing one route outward",
@@ -1636,8 +1737,11 @@ func _register_ecological_role(species: String, stable_id: String, habitat: Dict
 		"grazer": "Second grazer — another animal settles into a concentrated forage patch",
 		"predator": "Predator — fresh tracks converge on the grazers' range"
 	}
-	_add_discovery(arrival_observations.get(species, "New animal activity appears in a changed habitat"))
-	evidence.record_event(ecology.tick, "organism.%s_established" % species, stable_id, [], {
+	var observation := String(arrival_observations.get(species, "New animal activity appears in a changed habitat"))
+	_add_discovery(observation)
+	if returning:
+		_set_status("Local habitat recovers. " + observation)
+	evidence.record_event(ecology.tick, "organism.%s_%s" % [species, "returned" if returning else "established"], stable_id, [], {
 		"cell": cell,
 		"habitat_score": habitat["score"],
 		"habitat_evidence": habitat["evidence"]
@@ -1650,7 +1754,7 @@ func _update_ecological_animal_markers() -> void:
 	for stable_id in animal_markers:
 		var marker: Node3D = animal_markers[stable_id]
 		var agent: Dictionary = animal_simulation.agent_state(stable_id)
-		if agent.is_empty() or not bool(agent["alive"]):
+		if agent.is_empty() or not bool(agent["alive"]) or not bool(agent.get("present", true)):
 			marker.visible = false
 			continue
 		marker.visible = true
@@ -1695,7 +1799,7 @@ func _update_colony_worker_visual() -> void:
 			colony_ant_stream_root.visible = false
 		return
 	var colony: Dictionary = animal_simulation.agent_state("colony:1")
-	if colony.is_empty() or not bool(colony["alive"]):
+	if colony.is_empty() or not bool(colony["alive"]) or not bool(colony.get("present", true)):
 		colony_ant_stream_root.visible = false
 		return
 	_update_colony_worker_stream(colony)
@@ -1727,6 +1831,11 @@ func _update_grazer(delta: float) -> void:
 	if authoritative.is_empty() or not bool(authoritative["alive"]):
 		_set_grazer_state("dead")
 		return
+	if not bool(authoritative.get("present", true)):
+		grazer_root.visible = false
+		_set_grazer_state("departed")
+		return
+	grazer_root.visible = true
 	grazer_cell = authoritative["cell"]
 	_set_grazer_state(authoritative["state"])
 	var target_world: Vector2 = ecology.world_position(grazer_cell.x, grazer_cell.y)
@@ -1738,14 +1847,21 @@ func _update_grazer(delta: float) -> void:
 
 func _awaken_first_grazer(habitat: Dictionary) -> void:
 	var cell: Vector2i = habitat["cell"]
-	if not animal_simulation.register_agent("grazer", "grazer:1", {"cell": cell, "hunger": 1.0}):
-		return
+	var returning: bool = animal_simulation.agents.has("grazer:1")
+	if returning:
+		if not animal_simulation.set_agent_presence("grazer:1", true, cell):
+			return
+	else:
+		if not animal_simulation.register_agent("grazer", "grazer:1", {"cell": cell, "habitat_cell": cell, "hunger": 1.0}):
+			return
+	unsupported_residency_ticks["grazer:1"] = 0
 	grazer_awake = true
+	grazer_root.visible = true
 	grazer_cell = cell
 	var world: Vector2 = ecology.world_position(cell.x, cell.y)
 	grazer_target_position = Vector3(world.x, ecology.terrain_height(cell) + 0.28, world.y)
 	grazer_root.position = grazer_target_position
-	grazer_wake_event_id = evidence.record_event(ecology.tick, "organism.grazer_awakened", "grazer:1", [], {
+	grazer_wake_event_id = evidence.record_event(ecology.tick, "organism.grazer_%s" % ("returned" if returning else "awakened"), "grazer:1", [], {
 		"cell": cell,
 		"habitat_score": habitat["score"],
 		"habitat_evidence": habitat["evidence"]
@@ -1757,8 +1873,11 @@ func _awaken_first_grazer(habitat: Dictionary) -> void:
 	grazer_label.visible = true
 	grazer_glow.visible = true
 	_add_discovery("Grazer — settles where concentrated forage meets established cover")
-	_presence_focus("grazer", grazer_root.position)
-	_set_status("A stone-like shell unfolds beside open forage and nearby cover. The flame moves beside it and repeats the same single pulse used at the moss.")
+	if returning:
+		_set_status("Forage and nearby cover recover. Grazer tracks return to the same kind of local edge that supported them before.")
+	else:
+		_presence_focus("grazer", grazer_root.position)
+		_set_status("A stone-like shell unfolds beside open forage and nearby cover. The flame moves beside it and repeats the same single pulse used at the moss.")
 	evidence.checkpoint(ecology.tick, "episode_boundary", _evidence_snapshot())
 
 
@@ -2613,7 +2732,7 @@ func _nearby_signal_target() -> Dictionary:
 		return {"id": "refuge", "position": refuge_position}
 	if nearest_patch != "":
 		return {"id": nearest_patch, "position": patches[nearest_patch]["node"].global_position}
-	if grazer_awake and _flat_distance(astronaut.position, grazer_root.position) < 1.8:
+	if grazer_awake and grazer_root.visible and _flat_distance(astronaut.position, grazer_root.position) < 1.8:
 		return {"id": "grazer", "position": grazer_root.position}
 	return {}
 

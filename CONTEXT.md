@@ -68,6 +68,10 @@ _Avoid_: Unlock ladder, biome level
 A local ecological relationship in which one organism or process requires habitat conditions or effects prepared by other Ecological Roles. It does not imply a basin-wide unlock, a species tier, or a ranking of evolutionary advancement.
 _Avoid_: Global unlock, evolution tier, tech tree
 
+**Habitat Support**:
+The current local combination of food, shelter, chemistry, terrain, and other organisms that can sustain an Ecological Role in one place. Habitat Support can strengthen, collapse, and recover, so presence is evidence rather than a permanent unlock.
+_Avoid_: Prerequisite box, species unlock, basin-wide eligibility
+
 **Microbial Crust**:
 A pioneer living surface film that occupies narrow damp bands and binds loose ground, while dense dry crust can also repel water.
 _Avoid_: Starter plant, passive soil upgrade

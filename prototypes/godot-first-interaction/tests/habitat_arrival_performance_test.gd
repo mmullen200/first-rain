@@ -12,12 +12,13 @@ func _run() -> void:
 	var scene = load("res://main.tscn").instantiate()
 	root.add_child(scene)
 	await process_frame
-	# Satisfy the first animal's ecological prerequisite so this benchmark times
-	# the distributed habitat scan rather than the cheap precondition guard.
+	# Seed more than one candidate habitat so this benchmark times the shared
+	# distributed scan used by independent habitat-supported arrivals.
 	scene.ecology.add_resources(Vector2i(4, 12), {"ground_bloom": 0.16})
 	for y in range(12, 15):
 		for x in range(20, 23):
 			scene.ecology.add_resources(Vector2i(x, y), {"dead_biomass": 0.2})
+	scene.animal_simulation.register_agent("colony", "colony:1", {"cell": Vector2i(21, 13), "habitat_cell": Vector2i(21, 13)})
 	for ignored in range(2):
 		scene._seed_integrated_animals()
 	var started := Time.get_ticks_usec()

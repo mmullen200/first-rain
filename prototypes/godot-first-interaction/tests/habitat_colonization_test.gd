@@ -61,7 +61,7 @@ func _run() -> void:
 
 	scene.grazer_awake = true
 	scene.animal_simulation.register_agent("grazer", "grazer:1", {"cell": grazer_patch})
-	for ignored in range(100):
+	for ignored in range(160):
 		scene._seed_integrated_animals()
 	_assert(scene.animal_simulation.agents.has("colony:1"), "qualifying local habitat should establish the colony")
 	_assert(scene.animal_simulation.agents.has("vector:1"), "separated flowering patches should establish a reproductive vector")

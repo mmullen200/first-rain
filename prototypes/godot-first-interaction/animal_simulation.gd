@@ -47,6 +47,7 @@ func register_agent(species: String, stable_id: String, initial_state := {}) -> 
 		"id": stable_id,
 		"species": species,
 		"cell": bounded_cell,
+		"habitat_cell": initial_state.get("habitat_cell", bounded_cell),
 		"home_cell": initial_state.get("home_cell", bounded_cell),
 		"worker_cell": initial_state.get("worker_cell", bounded_cell),
 		"worker_target": initial_state.get("worker_target", bounded_cell),
@@ -54,6 +55,7 @@ func register_agent(species: String, stable_id: String, initial_state := {}) -> 
 		"worker_load_resource": String(initial_state.get("worker_load_resource", "")),
 		"worker_load": float(initial_state.get("worker_load", 0.0)),
 		"alive": true,
+		"present": bool(initial_state.get("present", true)),
 		"state": initial_activity,
 		"hunger": float(initial_state.get("hunger", 1.0)),
 		"body_biomass": float(initial_state.get("body_biomass", 1.0)),
@@ -78,10 +80,49 @@ func register_agent(species: String, stable_id: String, initial_state := {}) -> 
 	return true
 
 
+func set_agent_presence(stable_id: String, present: bool, habitat_cell := Vector2i(-1, -1)) -> bool:
+	if not agents.has(stable_id):
+		return false
+	var agent: Dictionary = agents[stable_id]
+	if not bool(agent["alive"]) or bool(agent.get("present", true)) == present:
+		return false
+	if present:
+		var destination: Vector2i = agent.get("habitat_cell", agent["cell"])
+		if habitat_cell.x >= 0 and habitat_cell.y >= 0:
+			destination = _bounded_cell(habitat_cell)
+		agent["cell"] = destination
+		agent["habitat_cell"] = destination
+		agent["state"] = {
+			"grazer": "seeking",
+			"predator": "hunting",
+			"colony": "foraging",
+			"vector": "searching",
+			"wetland_engineer": "gathering"
+		}.get(String(agent["species"]), "seeking")
+		if String(agent["species"]) == "colony":
+			agent["home_cell"] = destination
+			agent["worker_cell"] = destination
+			agent["worker_target"] = destination
+			agent["worker_phase"] = "idle"
+		agent["present"] = true
+		agents[stable_id] = agent
+		_emit("organism.returned", stable_id, {"species": agent["species"], "cell": destination})
+		return true
+	agent["present"] = false
+	agent["state"] = "departed"
+	if String(agent["species"]) == "colony":
+		agent["worker_cell"] = agent["home_cell"]
+		agent["worker_target"] = agent["home_cell"]
+		agent["worker_phase"] = "idle"
+	agents[stable_id] = agent
+	_emit("organism.departed", stable_id, {"species": agent["species"], "cell": agent["habitat_cell"]})
+	return true
+
+
 func submit_intervention(intervention: Dictionary) -> bool:
 	var kind := String(intervention.get("type", ""))
 	var agent_id := String(intervention.get("agent_id", ""))
-	if not agents.has(agent_id) or kind not in ["relocate", "deter", "injure"]:
+	if not agents.has(agent_id) or not bool(agents[agent_id].get("present", true)) or kind not in ["relocate", "deter", "injure"]:
 		return false
 	var accepted := intervention.duplicate(true)
 	accepted["sequence"] = _pending_interventions.size()
@@ -99,7 +140,7 @@ func step() -> Array[Dictionary]:
 	var intentions: Array[Dictionary] = []
 	for agent_id in ids:
 		var agent: Dictionary = agents[agent_id]
-		if bool(agent["alive"]):
+		if bool(agent["alive"]) and bool(agent.get("present", true)):
 			intentions.append(_choose_intention(agent))
 	for intention in intentions:
 		_resolve_intention(intention)
@@ -157,6 +198,7 @@ func _resolve_interventions() -> void:
 		match String(intervention["type"]):
 			"relocate":
 				agent["cell"] = _bounded_cell(intervention.get("cell", agent["cell"]))
+				agent["habitat_cell"] = agent["cell"]
 				if String(agent["species"]) == "colony":
 					agent["home_cell"] = agent["cell"]
 					agent["worker_cell"] = agent["cell"]
@@ -228,8 +270,9 @@ func _choose_grazer_intention(agent: Dictionary) -> Dictionary:
 		agents[agent_id] = agent
 		return {"type": "wait", "agent_id": agent_id}
 	if float(agent["hunger"]) >= 0.65:
-		var moss_cell := _strongest_resource_cell("moss")
-		var rhizome_cell := _strongest_resource_cell("rhizome")
+		var habitat_cell: Vector2i = agent.get("habitat_cell", agent["cell"])
+		var moss_cell := _strongest_resource_cell_near("moss", habitat_cell, 4)
+		var rhizome_cell := _strongest_resource_cell_near("rhizome", habitat_cell, 4)
 		var target := rhizome_cell if ecology.resource_amount(rhizome_cell, "rhizome") > ecology.resource_amount(moss_cell, "moss") else moss_cell
 		return {"type": "move", "agent_id": agent_id, "cell": _step_toward(agent["cell"], target)}
 	return {"type": "move", "agent_id": agent_id, "cell": _roam_cell(agent)}
@@ -280,8 +323,8 @@ func _choose_colony_intention(agent: Dictionary) -> Dictionary:
 	var detritus: float = ecology.resource_amount(home_cell, "dead_biomass")
 	if detritus >= 0.025:
 		return {"type": "colony_recycle", "agent_id": agent_id, "amount": 0.06}
-	var moss_target := _strongest_resource_cell("moss")
-	var rhizome_target := _strongest_resource_cell("rhizome")
+	var moss_target := _strongest_resource_cell_near("moss", home_cell, 4)
+	var rhizome_target := _strongest_resource_cell_near("rhizome", home_cell, 4)
 	var moss_amount: float = ecology.resource_amount(moss_target, "moss")
 	var rhizome_amount: float = ecology.resource_amount(rhizome_target, "rhizome")
 	var resource := "rhizome" if rhizome_amount > moss_amount else "moss"
@@ -295,6 +338,7 @@ func _choose_colony_intention(agent: Dictionary) -> Dictionary:
 
 func _choose_vector_intention(agent: Dictionary) -> Dictionary:
 	var agent_id := String(agent["id"])
+	var habitat_cell: Vector2i = agent.get("habitat_cell", agent["cell"])
 	if int(agent["move_cooldown"]) > 0:
 		agent["move_cooldown"] = int(agent["move_cooldown"]) - 1
 		agents[agent_id] = agent
@@ -302,31 +346,32 @@ func _choose_vector_intention(agent: Dictionary) -> Dictionary:
 	if float(agent["pollen_load"]) > 0.02:
 		if ecology.resource_amount(agent["cell"], "ground_bloom") + ecology.resource_amount(agent["cell"], "canopy_bloom") > 0.02:
 			return {"type": "pollinate", "agent_id": agent_id, "amount": minf(0.08, float(agent["pollen_load"]))}
-		var ground_target: Vector2i = _strongest_resource_cell("ground_bloom")
-		var canopy_target: Vector2i = _strongest_resource_cell("canopy_bloom")
+		var ground_target := _strongest_resource_cell_near("ground_bloom", habitat_cell, 4)
+		var canopy_target := _strongest_resource_cell_near("canopy_bloom", habitat_cell, 4)
 		var pollen_target: Vector2i = canopy_target if ecology.resource_amount(canopy_target, "canopy_bloom") >= ecology.resource_amount(ground_target, "ground_bloom") else ground_target
 		return {"type": "move", "agent_id": agent_id, "cell": _step_toward(agent["cell"], pollen_target)}
 	if float(agent["spore_load"]) > 0.02:
 		var local_refuge: float = ecology.resource_amount(agent["cell"], "dead_biomass") * ecology.resource_amount(agent["cell"], "moisture")
 		if local_refuge > 0.015:
 			return {"type": "disperse_spores", "agent_id": agent_id, "amount": minf(0.08, float(agent["spore_load"]))}
-		return {"type": "move", "agent_id": agent_id, "cell": _step_toward(agent["cell"], _strongest_resource_cell("dead_biomass"))}
+		return {"type": "move", "agent_id": agent_id, "cell": _step_toward(agent["cell"], _strongest_resource_cell_near("dead_biomass", habitat_cell, 4))}
 	var flower_signal: float = ecology.resource_amount(agent["cell"], "ground_bloom") + ecology.resource_amount(agent["cell"], "canopy_bloom")
 	if flower_signal > 0.02:
 		var nectar_signal := flower_signal
 		return {"type": "collect_pollen", "agent_id": agent_id, "amount": minf(0.08, nectar_signal * 0.25)}
 	if ecology.resource_amount(agent["cell"], "fruiting") > 0.05:
 		return {"type": "collect_spores", "agent_id": agent_id, "amount": minf(0.08, ecology.resource_amount(agent["cell"], "fruiting") * 0.18)}
-	var ground_cell: Vector2i = _strongest_resource_cell("ground_bloom")
-	var canopy_cell: Vector2i = _strongest_resource_cell("canopy_bloom")
+	var ground_cell := _strongest_resource_cell_near("ground_bloom", habitat_cell, 4)
+	var canopy_cell := _strongest_resource_cell_near("canopy_bloom", habitat_cell, 4)
 	var target: Vector2i = ground_cell if ecology.resource_amount(ground_cell, "ground_bloom") >= ecology.resource_amount(canopy_cell, "canopy_bloom") else canopy_cell
 	if ecology.resource_amount(target, "ground_bloom") + ecology.resource_amount(target, "canopy_bloom") <= 0.0:
-		target = _strongest_resource_cell("fruiting")
+		target = _strongest_resource_cell_near("fruiting", habitat_cell, 4)
 	return {"type": "move", "agent_id": agent_id, "cell": _step_toward(agent["cell"], target)}
 
 
 func _choose_engineer_intention(agent: Dictionary) -> Dictionary:
 	var agent_id := String(agent["id"])
+	var habitat_cell: Vector2i = agent.get("habitat_cell", agent["cell"])
 	if int(agent["move_cooldown"]) > 0:
 		agent["move_cooldown"] = int(agent["move_cooldown"]) - 1
 		agents[agent_id] = agent
@@ -342,8 +387,8 @@ func _choose_engineer_intention(agent: Dictionary) -> Dictionary:
 	var building_source: String = "dead_biomass" if ecology.resource_amount(agent["cell"], "dead_biomass") >= ecology.resource_amount(agent["cell"], "rhizome") else "rhizome"
 	if ecology.resource_amount(agent["cell"], building_source) >= 0.025:
 		return {"type": "gather", "agent_id": agent_id, "resource": building_source, "amount": 0.07}
-	var dead_cell: Vector2i = _strongest_resource_cell("dead_biomass")
-	var root_cell: Vector2i = _strongest_resource_cell("rhizome")
+	var dead_cell := _strongest_resource_cell_near("dead_biomass", habitat_cell, 3)
+	var root_cell := _strongest_resource_cell_near("rhizome", habitat_cell, 3)
 	var target: Vector2i = dead_cell if ecology.resource_amount(dead_cell, "dead_biomass") >= ecology.resource_amount(root_cell, "rhizome") else root_cell
 	return {"type": "move", "agent_id": agent_id, "cell": _step_toward(agent["cell"], target)}
 
@@ -564,7 +609,7 @@ func _deposit_carried(agent_id: String, source_resource: String, target_resource
 
 
 func _predate(predator_id: String, prey_id: String, requested: float) -> void:
-	if not agents.has(prey_id) or not bool(agents[prey_id]["alive"]):
+	if not agents.has(prey_id) or not bool(agents[prey_id]["alive"]) or not bool(agents[prey_id].get("present", true)):
 		return
 	var predator: Dictionary = agents[predator_id]
 	var prey: Dictionary = agents[prey_id]
@@ -590,7 +635,7 @@ func _reproduce(parent_id: String, mate_id: String) -> void:
 		return
 	var parent: Dictionary = agents[parent_id]
 	var mate: Dictionary = agents[mate_id]
-	if not bool(parent["alive"]) or not bool(mate["alive"]) or parent["species"] != mate["species"]:
+	if not bool(parent["alive"]) or not bool(parent.get("present", true)) or not bool(mate["alive"]) or not bool(mate.get("present", true)) or parent["species"] != mate["species"]:
 		return
 	if float(parent["reproductive_readiness"]) < 1.0 or float(mate["reproductive_readiness"]) < 1.0:
 		return
@@ -626,7 +671,7 @@ func _ready_mate_id(agent: Dictionary) -> String:
 		if candidate_id == agent["id"]:
 			continue
 		var candidate: Dictionary = agents[candidate_id]
-		if bool(candidate["alive"]) and candidate["species"] == agent["species"] and float(candidate["reproductive_readiness"]) >= 1.0 and _cell_distance(agent["cell"], candidate["cell"]) <= 1:
+		if bool(candidate["alive"]) and bool(candidate.get("present", true)) and candidate["species"] == agent["species"] and float(candidate["reproductive_readiness"]) >= 1.0 and _cell_distance(agent["cell"], candidate["cell"]) <= 1:
 			return candidate_id
 	return ""
 
@@ -639,11 +684,11 @@ func _deposit_to_environment(cell: Vector2i, resource: String, amount: float, so
 	return deposited
 
 
-func _strongest_resource_cell(resource: String) -> Vector2i:
-	var strongest := Vector2i.ZERO
+func _strongest_resource_cell_near(resource: String, center: Vector2i, radius: int) -> Vector2i:
+	var strongest := _bounded_cell(center)
 	var strongest_amount := -1.0
-	for y in range(ecology.HEIGHT):
-		for x in range(ecology.WIDTH):
+	for y in range(maxi(0, center.y - radius), mini(ecology.HEIGHT - 1, center.y + radius) + 1):
+		for x in range(maxi(0, center.x - radius), mini(ecology.WIDTH - 1, center.x + radius) + 1):
 			var cell := Vector2i(x, y)
 			var amount: float = ecology.resource_amount(cell, resource)
 			if amount > strongest_amount:
@@ -659,7 +704,7 @@ func _nearest_living_species(origin: Vector2i, species: String) -> String:
 	ids.sort()
 	for agent_id in ids:
 		var candidate: Dictionary = agents[agent_id]
-		if not bool(candidate["alive"]) or candidate["species"] != species:
+		if not bool(candidate["alive"]) or not bool(candidate.get("present", true)) or candidate["species"] != species:
 			continue
 		var distance := _cell_distance(origin, candidate["cell"])
 		if distance < nearest_distance:
