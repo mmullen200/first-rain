@@ -22,7 +22,14 @@ const VISIBLE_WATER_THRESHOLD := 0.04
 # Forty-five hunger points marks a meal. At 12× displayed field time this
 # takes eight in-world hours, supporting roughly three meals per field day.
 const HUNGER_RATE := 0.01875
-const ARRIVAL_SUPPORT_OBSERVATIONS := 2
+const ARRIVAL_SUPPORT_OBSERVATIONS := {
+	"colony": 8,
+	"vector": 4,
+	"grazer": 5,
+	"wetland_engineer": 6,
+	"predator": 2
+}
+const COLONY_PROSPECTING_OBSERVATIONS := 2
 const DEPARTURE_GRACE_TICKS := 48
 const ANIMAL_SETTLEMENTS := {
 	"colony:1": "colony",
@@ -144,6 +151,9 @@ var animal_markers: Dictionary = {}
 var animal_roles_announced: Dictionary = {}
 var colony_ant_stream_root: Node3D
 var colony_ant_markers: Array[MeshInstance3D] = []
+var colony_prospect_root: Node3D
+var colony_prospect_markers: Array[MeshInstance3D] = []
+var colony_prospect_label: Label3D
 var habitat_search_species: Array[String] = []
 var habitat_search_cursor := 0
 var habitat_search_scores: Dictionary = {}
@@ -164,6 +174,8 @@ var hunger_label: Label
 var weather_label: Label
 var prompt_label: Label
 var status_label: Label
+var status_hold_timer := 0.0
+var pending_status := ""
 var scanner_card: PanelContainer
 var scanner_title: Label
 var scanner_readout: Label
@@ -201,6 +213,7 @@ func _physics_process(delta: float) -> void:
 		_update_evidence_debugger()
 		return
 	field_time += delta
+	_update_status_hold(delta)
 	_move_astronaut(delta)
 	_update_camera()
 	_update_nearby_interactions()
@@ -210,6 +223,7 @@ func _physics_process(delta: float) -> void:
 	_update_ecology_grid(delta)
 	_update_grazer(delta)
 	_update_colony_worker_visual()
+	_update_colony_prospect_visual()
 	_update_disturbance(delta)
 	_update_presence()
 	_update_presence_signals(delta)
@@ -692,6 +706,28 @@ func _build_ecological_animal_markers() -> void:
 		ant.material_override = _material(Color("e4a85b"), 0.42, Color("75401f"))
 		colony_ant_stream_root.add_child(ant)
 		colony_ant_markers.append(ant)
+	colony_prospect_root = Node3D.new()
+	colony_prospect_root.name = "ColonyProspecting"
+	colony_prospect_root.visible = false
+	add_child(colony_prospect_root)
+	for scout_index in range(3):
+		var scout := MeshInstance3D.new()
+		var scout_mesh := SphereMesh.new()
+		scout_mesh.radius = 0.055
+		scout_mesh.height = 0.09
+		scout.mesh = scout_mesh
+		scout.scale = Vector3(1.4, 0.55, 0.75)
+		scout.material_override = _material(Color("f0b866"), 0.38, Color("8a4e21"))
+		colony_prospect_root.add_child(scout)
+		colony_prospect_markers.append(scout)
+	colony_prospect_label = Label3D.new()
+	colony_prospect_label.text = "SCOUT TRAIL / NO NEST"
+	colony_prospect_label.font_size = 25
+	colony_prospect_label.pixel_size = 0.0042
+	colony_prospect_label.modulate = Color("efc17d")
+	colony_prospect_label.outline_size = 7
+	colony_prospect_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	colony_prospect_root.add_child(colony_prospect_label)
 
 
 func _build_disturbance() -> void:
@@ -1348,20 +1384,68 @@ func _seed_integrated_animals() -> void:
 		var species := String(candidates[stable_id])
 		var habitat: Dictionary = habitats.get(species, {})
 		if habitat.is_empty():
+			if species == "colony":
+				_end_colony_prospecting(stable_id)
 			arrival_habitat_support.erase(stable_id)
 			continue
 		var previous: Dictionary = arrival_habitat_support.get(stable_id, {})
 		var observations := 1
-		if not previous.is_empty() and _cell_distance(previous["cell"], habitat["cell"]) <= 1:
+		var same_site := not previous.is_empty() and _cell_distance(previous["cell"], habitat["cell"]) <= 1
+		if same_site:
 			observations = int(previous["observations"]) + 1
+		elif species == "colony":
+			_end_colony_prospecting(stable_id)
 		arrival_habitat_support[stable_id] = {
 			"cell": habitat["cell"],
 			"observations": observations,
 			"habitat": habitat
 		}
-		if observations >= ARRIVAL_SUPPORT_OBSERVATIONS:
+		if species == "colony" and observations >= COLONY_PROSPECTING_OBSERVATIONS:
+			_begin_colony_prospecting(stable_id, habitat, observations)
+		var required_observations := int(ARRIVAL_SUPPORT_OBSERVATIONS.get(species, 4))
+		if observations >= required_observations:
 			_register_ecological_role(species, stable_id, habitat)
 			arrival_habitat_support.erase(stable_id)
+			if species == "colony":
+				_hide_colony_prospecting()
+
+
+func _begin_colony_prospecting(stable_id: String, habitat: Dictionary, observations: int) -> void:
+	if observations == 5:
+		_set_status("Scout traffic thickens around the same patch. Loose grains are shifting, but there is still no mound.")
+		evidence.record_event(ecology.tick, "organism.colony_site_disturbed", stable_id, [], {
+			"cell": habitat["cell"],
+			"observations": observations
+		})
+		return
+	if observations != COLONY_PROSPECTING_OBSERVATIONS:
+		return
+	animal_roles_announced["colony_prospecting"] = true
+	_add_discovery("Eusocial prospecting — isolated workers repeatedly inspect dry Detritus; no nest is established yet")
+	_set_status("Isolated insects keep returning to the same dry Detritus patch. The scanner marks repeated traffic, but there is no nest yet.")
+	evidence.record_event(ecology.tick, "organism.colony_prospecting", stable_id, [], {
+		"cell": habitat["cell"],
+		"habitat_score": habitat["score"],
+		"observations": observations
+	})
+
+
+func _end_colony_prospecting(stable_id: String) -> void:
+	var previous: Dictionary = arrival_habitat_support.get(stable_id, {})
+	if previous.is_empty() or int(previous.get("observations", 0)) < COLONY_PROSPECTING_OBSERVATIONS:
+		return
+	_hide_colony_prospecting()
+	animal_roles_announced.erase("colony_prospecting")
+	_set_status("The isolated scout traffic fades after the dry Detritus patch stops holding. No anthill was built.")
+	evidence.record_event(ecology.tick, "organism.colony_prospecting_ended", stable_id, [], {
+		"cell": previous["cell"],
+		"cause": "candidate_habitat_lost"
+	})
+
+
+func _hide_colony_prospecting() -> void:
+	if colony_prospect_root != null:
+		colony_prospect_root.visible = false
 
 
 func _update_resident_habitat_support() -> void:
@@ -1731,7 +1815,7 @@ func _register_ecological_role(species: String, stable_id: String, habitat: Dict
 	unsupported_residency_ticks[stable_id] = 0
 	animal_roles_announced[stable_id] = true
 	var arrival_observations := {
-		"colony": "Eusocial hive — a fixed earthen mound forms beside dry Detritus; tiny workers begin tracing one route outward",
+		"colony": "After repeated scout visits, a fixed earthen mound finally forms beside dry Detritus; tiny workers begin tracing one route outward",
 		"vector": "Flying animal — repeated crossings begin between separated ground-layer blossoms",
 		"wetland_engineer": "Large wetland animal — tracks gather beside shallow water and nearby plant growth",
 		"grazer": "Second grazer — another animal settles into a concentrated forage patch",
@@ -1741,6 +1825,8 @@ func _register_ecological_role(species: String, stable_id: String, habitat: Dict
 	_add_discovery(observation)
 	if returning:
 		_set_status("Local habitat recovers. " + observation)
+	else:
+		_set_status(observation)
 	evidence.record_event(ecology.tick, "organism.%s_%s" % [species, "returned" if returning else "established"], stable_id, [], {
 		"cell": cell,
 		"habitat_score": habitat["score"],
@@ -1766,6 +1852,56 @@ func _update_ecological_animal_markers() -> void:
 		label.text = String(label.text).split(" / ")[0] + " / " + String(agent["state"]).to_upper()
 		if stable_id == "colony:1":
 			_update_colony_worker_stream(agent)
+	_update_colony_prospect_visual()
+
+
+func _update_colony_prospect_visual() -> void:
+	if colony_prospect_root == null:
+		return
+	var colony: Dictionary = animal_simulation.agent_state("colony:1")
+	if not colony.is_empty() and bool(colony.get("present", true)):
+		colony_prospect_root.visible = false
+		return
+	var prospect: Dictionary = arrival_habitat_support.get("colony:1", {})
+	var observations := int(prospect.get("observations", 0))
+	if prospect.is_empty() or observations < COLONY_PROSPECTING_OBSERVATIONS:
+		colony_prospect_root.visible = false
+		return
+	colony_prospect_root.visible = true
+	var target_cell: Vector2i = prospect["cell"]
+	var start_cell := _nearest_basin_edge_cell(target_cell)
+	var start_world: Vector2 = ecology.world_position(start_cell.x, start_cell.y)
+	var target_world: Vector2 = ecology.world_position(target_cell.x, target_cell.y)
+	var visible_scouts: int = mini(colony_prospect_markers.size(), 1 + floori(float(observations) / 3.0))
+	var cycle := fmod(float(Time.get_ticks_msec()) / 7600.0, 1.0)
+	for scout_index in range(colony_prospect_markers.size()):
+		var scout := colony_prospect_markers[scout_index]
+		scout.visible = scout_index < visible_scouts
+		if not scout.visible:
+			continue
+		var progress := fmod(cycle + float(scout_index) / float(maxi(1, visible_scouts)), 1.0)
+		var trail_point := start_world.lerp(target_world, progress)
+		var trail_cell: Vector2i = ecology.world_to_cell(trail_point)
+		scout.position = Vector3(trail_point.x, ecology.terrain_height(trail_cell) + 0.16, trail_point.y)
+	colony_prospect_label.text = "GROUND DISTURBED / NO MOUND" if observations >= 5 else "SCOUT TRAIL / NO NEST"
+	colony_prospect_label.position = Vector3(target_world.x, ecology.terrain_height(target_cell) + 0.58, target_world.y)
+
+
+func _nearest_basin_edge_cell(cell: Vector2i) -> Vector2i:
+	var candidates := [
+		Vector2i(0, cell.y),
+		Vector2i(ecology.WIDTH - 1, cell.y),
+		Vector2i(cell.x, 0),
+		Vector2i(cell.x, ecology.HEIGHT - 1)
+	]
+	var nearest: Vector2i = candidates[0]
+	var nearest_distance := _cell_distance(cell, nearest)
+	for candidate in candidates.slice(1):
+		var distance := _cell_distance(cell, candidate)
+		if distance < nearest_distance:
+			nearest = candidate
+			nearest_distance = distance
+	return nearest
 
 
 func _update_colony_worker_stream(agent: Dictionary) -> void:
@@ -2110,10 +2246,10 @@ func _water_nearby_patch() -> void:
 		evidence.checkpoint(ecology.tick, "player_intervention", _evidence_snapshot())
 		if refuge_signal_acknowledged:
 			_begin_presence_signal("invitation", refuge_position, astronaut.position)
-			_set_status("Water sinks into the depression and collects above the sealed substrate as a provisional reservoir. The flame answers around both participants.")
+			_set_status("Water sinks into the depression and collects above the sealed substrate as a provisional reservoir. The flame answers around both participants.", 2.6)
 		else:
 			_begin_presence_signal("focus", refuge_position)
-			_set_status("Water collects in the terrain-bound depression as a provisional reservoir. The flame repeats its focus pulse at the changing cells.")
+			_set_status("Water collects in the terrain-bound depression as a provisional reservoir. The flame repeats its focus pulse at the changing cells.", 2.6)
 		return
 	if nearest_patch == "":
 		_set_status("Water must be committed at a specific patch, not poured from a distance.")
@@ -2140,14 +2276,17 @@ func _water_nearby_patch() -> void:
 	var watered_cell: Vector2i = ecology.world_to_cell(Vector2(patch_position.x, patch_position.z))
 	last_intervention_event_id = evidence.record_event(ecology.tick, "intervention.water_added", "cell:%d,%d" % [watered_cell.x, watered_cell.y], [command_id], {"site": nearest_patch, "remaining_doses": water_doses, "recovery": established})
 	evidence.checkpoint(ecology.tick, "player_intervention", _evidence_snapshot())
+	if scanner_recovered:
+		scanner_title.text = "FIELD SCANNER  /  WATER RESPONSE"
+		scanner_readout.text = "LOCAL RESPONSE\n\nMOISTURE     rising\nDORMANT LIFE signal detected\nLIVING MOSS  not yet confirmed\n\nObserve the surface or rescan after it changes."
 	if established:
-		_set_status("Water darkens the storm-dried habitat. Its recovery now depends on the life, shelter, and nutrients that survived.")
+		_set_status("Water darkens the storm-dried habitat. The scanner detects a local moisture response; recovery still depends on what survived.", 2.6)
 	else:
 		_set_patch_color(nearest_patch, Color("3e6653"), Color("18372d"))
 	if not established and patch["shade"]:
-		_set_status("The film darkens with a dry crackle. Water remains pooled between its cells.")
+		_set_status("The film darkens. The scanner detects dormant threads taking up moisture, but no living moss is confirmed yet.", 2.6)
 	elif not established:
-		_set_status("The film darkens—but water beads, hisses, and starts flashing away in the heat.")
+		_set_status("The film darkens and its dormant-life trace reacts—but heat is already stripping the moisture away.", 2.6)
 
 
 func _interact() -> void:
@@ -2935,9 +3074,24 @@ func _material(color: Color, roughness: float, emission := Color(0.0, 0.0, 0.0, 
 	return material
 
 
-func _set_status(message: String) -> void:
+func _set_status(message: String, hold_seconds := 0.0) -> void:
 	if status_label != null:
+		if status_hold_timer > 0.0 and hold_seconds <= 0.0:
+			pending_status = message
+			return
 		status_label.text = message
+		if hold_seconds > 0.0:
+			status_hold_timer = hold_seconds
+			pending_status = ""
+
+
+func _update_status_hold(delta: float) -> void:
+	if status_hold_timer <= 0.0:
+		return
+	status_hold_timer = maxf(0.0, status_hold_timer - delta)
+	if status_hold_timer <= 0.0 and not pending_status.is_empty():
+		status_label.text = pending_status
+		pending_status = ""
 
 
 func _near_thriving_moss() -> bool:

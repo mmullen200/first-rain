@@ -30,7 +30,7 @@ func _run() -> void:
 	var engineer_patch: Vector2i = scene.ecology.CHANNEL_CELL
 	_seed_patch(scene, engineer_patch, {"surface_water": 0.18, "rhizome": 0.14, "aquatic_consumer": 0.12}, 1)
 	scene.ecology.add_resources(grazer_patch + Vector2i(2, 0), {"canopy": 0.22})
-	_advance_search_attempts(scene, 80)
+	_advance_search_attempts(scene, 260)
 	_assert(_living_species(scene) == ["colony", "grazer", "grazer", "predator", "vector", "wetland_engineer"], "simultaneously supported roles should all establish without a global checklist")
 
 	if failed:
