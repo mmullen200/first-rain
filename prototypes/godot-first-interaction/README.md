@@ -101,13 +101,13 @@ This prototype keeps the records in memory and exposes a textual observer adapte
 
 `animal_simulation.gd` is a pure-data prototype module for issue #21. Its small interface owns stable-ID registration, queued astronaut interventions, deterministic ticks, factual domain events, versioned full snapshots, and restoration. Species choose intentions behind that seam; the ecological grid accepts common material-transfer operations; presentation nodes are not authoritative.
 
-The integrated proof uses grazers, a predator, a eusocial colony, a flying reproductive vector, and a Wetland Engineer through the same resolution path. Grazers can reproduce by transferring parental biomass into a stable-ID juvenile. A eusocial colony establishes one fixed hive: a slowly advancing worker stream removes small moss or rhizome loads, returns them to the hive as processable plant matter, and recycles that Detritus into nutrients instead of moving the colony itself. The vector carries pollen only between flowering ground-cover and canopy plants, while fungal fruiting bodies use separately named spore dispersal into wet detritus; the engineer converts gathered biomass into dams that retain water while obstructing drainage; and the predator limits grazer pressure while remaining a possible combat threat.
+The integrated proof uses grazers, a predator, a eusocial colony, a flying reproductive vector, and a Wetland Engineer through the same resolution path. Grazers can reproduce by transferring parental biomass into a stable-ID juvenile. A Eusocial Colony establishes one fixed nest. Twenty-four individually simulated workers explore with persistent random headings, sense only adjacent food and local scent, and carry small moss or Rooted Mat loads home along remembered routes. Successful return trips reinforce a decaying colony-specific pheromone field; other workers preferentially follow marked paths, while four scouts continue exploring. Exhausted sources stop reinforcing their trails. Returned plant matter enters the nest’s Detritus cycle and is recycled into nutrients. The vector carries pollen only between flowering ground-cover and canopy plants, while fungal fruiting bodies use separately named spore dispersal into wet detritus; the engineer converts gathered biomass into dams that retain water while obstructing drainage; and the predator limits grazer pressure while remaining a possible combat threat.
 
 Animal settlement uses local habitat shape instead of fixed destinations, a shared measure of lushness, or a progression checklist. Every role independently scans bounded neighborhoods for current support: fairly dry Detritus for colonies, separated ground-flowering clusters for reproductive vectors, an edge between concentrated open forage and living canopy cover for grazers, flowing water with nearby aquatic consumers and plant material for Wetland Engineers, and a local range shared by multiple grazers for predators. A uniform lush patch does not qualify every species, and canopy or aquatic life elsewhere in the basin cannot satisfy a distant animal.
 
 Qualifying habitat must persist across repeated observations before settlement, with slower persistence requirements for animals whose arrival should carry more weight. A colony needs about forty-four seconds of uninterrupted candidate habitat in the current accelerated fixture. After roughly eleven seconds, isolated scouts begin entering from the nearest basin edge; sustained traffic later disturbs the candidate ground; only then does the fixed anthill appear. If conditions fail during prospecting, the scout trail fades and no nest remains. This is observable ecological anticipation, not a countdown or basin-wide unlock.
 
-Each resident remains associated with its local range; mobile foraging is bounded around it. If support stays below the same habitat threshold through a grace period, the animal leaves for the Regional Ecology without dying. Recovery can support its later return. The fixed Eusocial Colony hive follows the same rule while present: the nest stays in one place and only its slow worker trail moves.
+Each resident remains associated with its local range; mobile foraging is bounded around it. If support stays below the same habitat threshold through a grace period, the animal leaves for the Regional Ecology without dying. Recovery can support its later return. The fixed Eusocial Colony hive follows the same rule while present: the nest stays in one place while workers forage. Sustained habitat loss recalls all workers, stops new gathering and waits for their loads to return before withdrawal. Renewed support cancels recall.
 
 This remains a provisional colonization slice using a small fixed roster. Colony scouts now visibly enter from the basin rim before settlement; other animals still appear directly at a selected destination. Resident attraction or conflict and fully resource-supported population size remain separate playable questions.
 
@@ -137,6 +137,22 @@ The Drainage Spine is initially dry. A real water input can produce a temporary 
 
 All landform blocks, labels, colors, route spacing, and transport rates are throwaway fixtures. The playtest asks whether landmark navigation, paired-site comparison, route choice, cross-zone equipment movement, and ecological transfer make the basin feel like one causal place.
 
+## Colony foraging question (#29)
+
+Branch: `prototype/colony-pheromone-foraging`. Can the player recognize scattered exploration becoming a recruited food route, then dispersing after that source is depleted?
+
+The normal opening includes the new worker simulation. To start beside an already established nest and two separated living patches in the same Crash Basin:
+
+```sh
+/Applications/Godot.app/Contents/MacOS/Godot --path prototypes/godot-first-interaction -- --colony-foraging
+```
+
+This optional starting fixture seeds finite plants and dry Detritus once and gives the Astronaut the opened cache and Field Scanner. Ordinary ecology, weather, survival, habitat departure and toolkit controls continue running. **R** restarts the same fixture. Use **WASD** to observe from nearby, **T** to move a robust clump, **Space** to water, and **J** to pause. Carriers show green plant fragments; every visible worker corresponds to authoritative worker state. There is no ordinary-play scent overlay or assigned food target. Pre-settlement scouts remain the existing anticipation visual; this experiment concerns established-colony workers.
+
+Worker count, six-cell range, three-tick movement cadence, load size and scent decay are disposable. The field decays on each fixed tick without diffusion; return paths erase loops, and a minority of scouts ignore scent. Workers sense a shared beginning-of-tick scent field, then collect finite food in stable order. Worker identities, route memory, cargo and scent are included in animal snapshot version 2. Prior version-1 animal snapshots are rejected. F9 events record worker-specific gathering, recruitment and delivery.
+
+**Playtest gate:** without an observer overlay, the player identifies discovery, increased traffic to a food patch, and dispersal after food loss from the workers and carried fragments. Plant growth and weather can also change food availability in the living fixture; headless controlled-food checks isolate pheromone behavior. Automated verification is implemented evidence; human comprehension and fun remain unvalidated.
+
 ## Regression check
 
 The captured idle-opening failure can be replayed headlessly:
@@ -156,6 +172,7 @@ The captured idle-opening failure can be replayed headlessly:
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/ecological_roles_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/habitat_colonization_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/colony_hive_test.gd
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/colony_pheromone_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/habitat_arrival_performance_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/procedural_weather_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/playable_progression_test.gd

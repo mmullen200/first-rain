@@ -22,8 +22,9 @@ func _init() -> void:
 		var state: Dictionary = simulation.agent_state("colony:1")
 		home_stayed_fixed = home_stayed_fixed and state.get("home_cell", Vector2i(-1, -1)) == hive_cell
 		hive_marker_stayed_fixed = hive_marker_stayed_fixed and state["cell"] == hive_cell
-		if state.get("worker_cell", hive_cell) != hive_cell:
-			worker_left_hive = true
+		for worker in state["workers"]:
+			if worker["cell"] != hive_cell:
+				worker_left_hive = true
 	_assert(home_stayed_fixed, "the colony should retain one fixed hive cell")
 	_assert(hive_marker_stayed_fixed, "the colony marker should remain at its hive instead of roaming")
 	_assert(worker_left_hive, "the hive should send a worker toward plant matter")

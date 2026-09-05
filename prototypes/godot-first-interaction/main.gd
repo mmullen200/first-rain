@@ -203,8 +203,36 @@ func _ready() -> void:
 	_build_interface()
 	_build_evidence_debugger()
 	evidence = EvidenceRecorder.new()
+	if "--colony-foraging" in OS.get_cmdline_user_args():
+		_seed_colony_foraging_fixture()
 	evidence.begin_run(1, _evidence_snapshot())
-	_set_status("The crash has stopped. The ship is dead, but an emergency cache still blinks beneath the broken wing.")
+	if "--colony-foraging" in OS.get_cmdline_user_args():
+		_open_emergency_cache()
+	_set_status("A fixed mound stands between separated living patches." if "--colony-foraging" in OS.get_cmdline_user_args() else "The crash has stopped. The ship is dead, but an emergency cache still blinks beneath the broken wing.")
+
+
+# Optional starting fixture, using the ordinary living ecosystem and controls.
+func _seed_colony_foraging_fixture() -> void:
+	var home := Vector2i(4, 9)
+	for y in range(8, 11):
+		for x in range(3, 6):
+			var cell := Vector2i(x, y)
+			ecology.add_resources(cell, {"dead_biomass": 0.4})
+			ecology.moisture[y * ecology.WIDTH + x] = 0.16
+	for cell in [Vector2i(6, 9), Vector2i(4, 11)]:
+		var index: int = cell.y * ecology.WIDTH + cell.x
+		ecology.add_resources(cell, {"moss": 0.24, "rhizome": 0.18, "nutrients": 0.25})
+		ecology.moisture[index] = 0.55
+		ecology.temperature[index] = 0.4
+		ecology.toxicity[index] = 0.05
+	animal_simulation.register_agent("colony", "colony:1", {"cell": home})
+	ecology_started = true
+	var world: Vector2 = ecology.world_position(home.x, home.y + 1)
+	astronaut.position = Vector3(world.x, ecology.terrain_height(home + Vector2i(0, 1)) + 0.02, world.y)
+	camera.position = astronaut.position + Vector3(8.8, 10.8, 10.5)
+	camera.look_at(astronaut.position)
+	_refresh_ecology_visuals()
+	_update_ecological_animal_markers()
 
 
 func _physics_process(delta: float) -> void:
@@ -696,14 +724,22 @@ func _build_ecological_animal_markers() -> void:
 	colony_ant_stream_root.name = "ColonyWorkerStream"
 	colony_ant_stream_root.visible = false
 	add_child(colony_ant_stream_root)
-	for worker_index in range(7):
+	for worker_index in range(AnimalSimulation.COLONY_WORKER_COUNT):
 		var ant := MeshInstance3D.new()
 		var ant_mesh := SphereMesh.new()
-		ant_mesh.radius = 0.045
-		ant_mesh.height = 0.075
+		ant_mesh.radius = 0.075
+		ant_mesh.height = 0.10
 		ant.mesh = ant_mesh
 		ant.scale = Vector3(1.35, 0.55, 0.75)
 		ant.material_override = _material(Color("e4a85b"), 0.42, Color("75401f"))
+		var fragment := MeshInstance3D.new()
+		var fragment_mesh := BoxMesh.new()
+		fragment_mesh.size = Vector3(0.08, 0.05, 0.11)
+		fragment.mesh = fragment_mesh
+		fragment.position = Vector3(0.045, 0.07, 0.0)
+		fragment.material_override = _material(Color("a6df66"), 0.5)
+		fragment.visible = false
+		ant.add_child(fragment)
 		colony_ant_stream_root.add_child(ant)
 		colony_ant_markers.append(ant)
 	colony_prospect_root = Node3D.new()
@@ -760,7 +796,7 @@ func _build_interface() -> void:
 
 	var title := Label.new()
 	title.position = Vector2(24, 18)
-	title.text = "FIRST RAIN  /  REVERSIBLE HABITAT PROTOTYPE"
+	title.text = "FIRST RAIN  /  COLONY FORAGING PROTOTYPE"
 	title.add_theme_font_size_override("font_size", 15)
 	title.add_theme_color_override("font_color", Color("e9b36e"))
 	canvas.add_child(title)
@@ -1461,6 +1497,8 @@ func _update_resident_habitat_support() -> void:
 		var habitat := _habitat_at_cell(species, habitat_cell, habitat_snapshot)
 		if not habitat.is_empty():
 			unsupported_residency_ticks[stable_id] = 0
+			if species == "colony":
+				animal_simulation.recall_colony(stable_id, false)
 			continue
 		var unsupported_ticks := int(unsupported_residency_ticks.get(stable_id, 0)) + 1
 		unsupported_residency_ticks[stable_id] = unsupported_ticks
@@ -1484,10 +1522,8 @@ func _habitat_at_cell(species: String, cell: Vector2i, habitat_snapshot: Diction
 
 
 func _depart_ecological_role(stable_id: String, species: String, habitat_cell: Vector2i) -> void:
-	var resident: Dictionary = animal_simulation.agent_state(stable_id)
-	if species == "colony" and String(resident.get("worker_phase", "idle")) != "idle":
-		# Let the exposed worker finish returning its conserved load before the
-		# colony withdraws from the basin.
+	if species == "colony" and not animal_simulation.recall_colony(stable_id, true):
+		# Recall every worker and finish conserved loads before withdrawing.
 		unsupported_residency_ticks[stable_id] = DEPARTURE_GRACE_TICKS - 1
 		return
 	if not animal_simulation.set_agent_presence(stable_id, false):
@@ -1907,26 +1943,28 @@ func _nearest_basin_edge_cell(cell: Vector2i) -> Vector2i:
 func _update_colony_worker_stream(agent: Dictionary) -> void:
 	if colony_ant_stream_root == null:
 		return
-	var home_cell: Vector2i = agent.get("home_cell", agent["cell"])
-	var worker_cell: Vector2i = agent.get("worker_cell", home_cell)
-	var phase := String(agent.get("worker_phase", "idle"))
-	colony_ant_stream_root.visible = phase != "idle" or worker_cell != home_cell
-	if not colony_ant_stream_root.visible:
-		return
-	var home_world: Vector2 = ecology.world_position(home_cell.x, home_cell.y)
-	var worker_world: Vector2 = ecology.world_position(worker_cell.x, worker_cell.y)
-	var direction := worker_world - home_world
-	var lateral := Vector2(-direction.y, direction.x).normalized() * 0.08 if direction.length() > 0.01 else Vector2.ZERO
-	var flow_offset := fmod(float(Time.get_ticks_msec()) / 4200.0, 1.0)
-	for worker_index in range(colony_ant_markers.size()):
-		var ant := colony_ant_markers[worker_index]
-		var progress := fmod(flow_offset + float(worker_index) / float(colony_ant_markers.size()), 1.0)
-		if phase == "returning":
-			progress = 1.0 - progress
-		var trail_point := home_world.lerp(worker_world, progress) + lateral * (0.5 if worker_index % 2 == 0 else -0.5)
-		var trail_cell: Vector2i = ecology.world_to_cell(trail_point)
-		var target := Vector3(trail_point.x, ecology.terrain_height(trail_cell) + 0.16, trail_point.y)
-		ant.position = target
+	var workers: Array = agent.get("workers", [])
+	colony_ant_stream_root.visible = not workers.is_empty()
+	for index in range(colony_ant_markers.size()):
+		var ant := colony_ant_markers[index]
+		ant.visible = index < workers.size()
+		if not ant.visible:
+			continue
+		var worker: Dictionary = workers[index]
+		var cell: Vector2i = worker["cell"]
+		var previous: Vector2i = worker["previous_cell"]
+		var progress := clampf((float(AnimalSimulation.COLONY_STEP_TICKS - 1 - int(worker["cooldown"])) + ecology_step_accumulator / ECOLOGY_STEP_SECONDS) / float(AnimalSimulation.COLONY_STEP_TICKS), 0.0, 1.0)
+		var start: Vector2 = ecology.world_position(previous.x, previous.y)
+		var finish: Vector2 = ecology.world_position(cell.x, cell.y)
+		var point := start.lerp(finish, progress)
+		# Small individual offsets make shared paths legible without inventing movement.
+		point += Vector2(sin(float(index) * 2.4), cos(float(index) * 2.4)) * 0.075
+		var height := lerpf(ecology.terrain_height(previous), ecology.terrain_height(cell), progress)
+		height = maxf(height, ecology.terrain_height(ecology.world_to_cell(point)))
+		ant.position = Vector3(point.x, height + 0.16, point.y)
+		var heading: Vector2i = worker["heading"]
+		ant.rotation.y = -atan2(float(heading.y), float(heading.x))
+		ant.get_child(0).visible = float(worker["load"]) > 0.0
 
 
 func _update_colony_worker_visual() -> void:
@@ -2060,6 +2098,8 @@ func _handle_authoritative_animal_events(events: Array[Dictionary]) -> void:
 					animal_roles_announced["spore_dispersal_observed"] = true
 					_add_discovery("Fungal spore dispersal — animals carry spores from fruiting bodies into wet detritus; this is not pollination")
 					_set_status("A vector leaves a fungal fruiting body dusted with spores, then sheds them over wet dead matter. The scanner records dispersal, not pollination.")
+			"organism.colony_trail_followed", "organism.colony_plant_gathered":
+				evidence.record_event(ecology.tick, event["taxonomy"], event["subject"], [], event["facts"])
 			"organism.colony_plant_returned":
 				var facts: Dictionary = event["facts"]
 				evidence.record_event(ecology.tick, "organism.colony_plant_returned", event["subject"], [], facts)
