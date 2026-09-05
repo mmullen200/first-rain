@@ -1953,7 +1953,8 @@ func _update_colony_worker_stream(agent: Dictionary) -> void:
 		var worker: Dictionary = workers[index]
 		var cell: Vector2i = worker["cell"]
 		var previous: Vector2i = worker["previous_cell"]
-		var progress := clampf((float(AnimalSimulation.COLONY_STEP_TICKS - 1 - int(worker["cooldown"])) + ecology_step_accumulator / ECOLOGY_STEP_SECONDS) / float(AnimalSimulation.COLONY_STEP_TICKS), 0.0, 1.0)
+		var move_ticks := int(worker["move_ticks"])
+		var progress := clampf((float(move_ticks - 1 - int(worker["cooldown"])) + ecology_step_accumulator / ECOLOGY_STEP_SECONDS) / float(move_ticks), 0.0, 1.0)
 		var start: Vector2 = ecology.world_position(previous.x, previous.y)
 		var finish: Vector2 = ecology.world_position(cell.x, cell.y)
 		var point := start.lerp(finish, progress)

@@ -40,7 +40,8 @@ func _run_foraging(fixture_seed: int) -> void:
 	var food := home + Vector2i(4, 0)
 	ecology.add_resources(food, {"rhizome": 0.3})
 	var replay_checked := false
-	for ignored in range(1100):
+	# Slower physical travel needs a longer bounded collection window.
+	for ignored in range(4000):
 		simulation.step()
 		colony = simulation.agent_state("colony:1")
 		if not replay_checked and not colony["pheromones"].is_empty():
@@ -74,11 +75,11 @@ func _run_foraging(fixture_seed: int) -> void:
 		carrying += float(worker["load"])
 	_assert(is_equal_approx(gathered, returned + carrying), "every gathered load must be carried or delivered")
 	_assert(is_equal_approx(0.3, gathered + ecology.resource_amount(food, "rhizome")), "food removal must equal worker collection")
-	for ignored in range(400):
+	for ignored in range(800):
 		simulation.step()
 	_assert(simulation.agent_state("colony:1")["pheromones"].is_empty(), "depleted food trails must fade completely without reinforcement")
 	_assert(not simulation.recall_colony("colony:1", true), "scattered workers should need time to return")
-	for ignored in range(120):
+	for ignored in range(1100):
 		simulation.step()
 	_assert(simulation.recall_colony("colony:1", true), "recall must terminate once all workers and loads are home")
 	_assert(simulation.set_agent_presence("colony:1", false), "recalled colony must depart")

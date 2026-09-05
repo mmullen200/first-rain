@@ -7,9 +7,10 @@ extends RefCounted
 # observe snapshots/events. Species choose intentions internally; presentation
 # nodes never decide ecological outcomes.
 
-const SNAPSHOT_VERSION := 2
+const SNAPSHOT_VERSION := 3
 const COLONY_WORKER_COUNT := 24
-const COLONY_STEP_TICKS := 3
+const COLONY_STEP_TICKS := 18
+const COLONY_REST_TICKS := 3
 const COLONY_RANGE := 6
 const COLONY_LOAD := 0.003
 const DIRECTIONS := [
@@ -454,7 +455,7 @@ func _reset_colony_workers(agent: Dictionary) -> void:
 			"cell": home, "previous_cell": home, "heading": DIRECTIONS[index % 8],
 			"phase": "returning" if load > 0.0 else "searching", "load": load,
 			"resource": String(old_workers[index]["resource"]) if index < old_workers.size() else "",
-			"path": [home], "cooldown": index % COLONY_STEP_TICKS,
+			"path": [home], "cooldown": index % COLONY_STEP_TICKS, "move_ticks": COLONY_STEP_TICKS,
 			"scout": index % 6 == 0, "following": false})
 	agent["workers"] = workers
 	agent["pheromones"] = {}
@@ -479,7 +480,7 @@ func _step_colony(agent_id: String) -> void:
 	var home: Vector2i = agent["home_cell"]
 	var scent: Dictionary = agent["pheromones"]
 	for cell in scent.keys():
-		scent[cell] = float(scent[cell]) * 0.975
+		scent[cell] = float(scent[cell]) * 0.99
 		if float(scent[cell]) < 0.01:
 			scent.erase(cell)
 	# All workers sense the same beginning-of-tick field.
@@ -490,11 +491,13 @@ func _step_colony(agent_id: String) -> void:
 			worker["cooldown"] -= 1
 			continue
 		worker["previous_cell"] = worker["cell"]
-		worker["cooldown"] = COLONY_STEP_TICKS - 1
+		worker["move_ticks"] = COLONY_REST_TICKS
+		worker["cooldown"] = COLONY_REST_TICKS - 1
 		var cell: Vector2i = worker["cell"]
 		var path: Array = worker["path"]
-		if bool(agent["recalling"]):
-			worker["phase"] = "returning"
+		if bool(agent["recalling"]) and worker["phase"] != "returning":
+			_begin_colony_return(worker, home)
+			path = worker["path"]
 		if worker["phase"] == "returning":
 			if float(worker["load"]) > 0.0:
 				scent[cell] = minf(4.0, float(scent.get(cell, 0.0)) + 0.6)
@@ -517,27 +520,25 @@ func _step_colony(agent_id: String) -> void:
 				continue
 			if path.size() > 1:
 				path.pop_back()
-				worker["cell"] = path.back()
-				worker["heading"] = worker["cell"] - cell
+				_move_colony_worker(worker, path.back())
 			continue
 		var resource := "rhizome" if ecology.resource_amount(cell, "rhizome") > ecology.resource_amount(cell, "moss") else "moss"
 		if cell != home and ecology.resource_amount(cell, resource) >= COLONY_LOAD:
 			var gathered: float = ecology.consume_resource(cell, resource, COLONY_LOAD)
 			worker["load"] = gathered
 			worker["resource"] = resource
-			worker["phase"] = "returning"
+			_begin_colony_return(worker, home)
 			_check_transfer(gathered, float(worker["load"]), "%s_plant_to_worker" % worker["id"])
 			_emit("organism.colony_plant_gathered", agent_id, {"worker_id": worker["id"], "cell": cell, "resource": resource, "amount": gathered, "home_cell": home, "followed_trail": worker["following"]})
 			continue
 		if path.size() >= 36:
-			worker["phase"] = "returning"
+			_begin_colony_return(worker, home)
 			continue
 		var destination := _colony_search_step(worker, home, sensed_scent)
 		if destination == cell:
-			worker["phase"] = "returning"
+			_begin_colony_return(worker, home)
 			continue
-		worker["heading"] = destination - cell
-		worker["cell"] = destination
+		_move_colony_worker(worker, destination)
 		# Erase loops so return memory remains a connected route to this nest.
 		var visited := path.find(destination)
 		if visited >= 0:
@@ -558,6 +559,35 @@ func _step_colony(agent_id: String) -> void:
 		_colony_recycle(agent_id, 0.06)
 
 
+func _move_colony_worker(worker: Dictionary, destination: Vector2i) -> void:
+	var origin: Vector2i = worker["cell"]
+	worker["heading"] = destination - origin
+	worker["cell"] = destination
+	# The same ground speed applies to cardinal and longer diagonal segments.
+	worker["move_ticks"] = ceili(Vector2(destination - origin).length() * COLONY_STEP_TICKS)
+	worker["cooldown"] = int(worker["move_ticks"]) - 1
+
+
+func _begin_colony_return(worker: Dictionary, home: Vector2i) -> void:
+	worker["phase"] = "returning"
+	var cell: Vector2i = worker["cell"]
+	var steps := _cell_distance(home, cell)
+	var direct_path: Array[Vector2i] = [home]
+	# Nest location is known. Food location is still discovered only locally.
+	# Keep the remembered route if a direct crossing hits unsuitable ground.
+	for index in range(1, steps + 1):
+		var point := Vector2(home).lerp(Vector2(cell), float(index) / float(steps))
+		var candidate := Vector2i(roundi(point.x), roundi(point.y))
+		var previous: Vector2i = direct_path.back()
+		if not _cell_is_viable(candidate):
+			return
+		if candidate.x != previous.x and candidate.y != previous.y:
+			if not _cell_is_viable(Vector2i(candidate.x, previous.y)) or not _cell_is_viable(Vector2i(previous.x, candidate.y)):
+				return
+		direct_path.append(candidate)
+	worker["path"] = direct_path
+
+
 func _colony_search_step(worker: Dictionary, home: Vector2i, scent: Dictionary) -> Vector2i:
 	var cell: Vector2i = worker["cell"]
 	var heading: Vector2i = worker["heading"]
@@ -568,14 +598,14 @@ func _colony_search_step(worker: Dictionary, home: Vector2i, scent: Dictionary) 
 		var candidate: Vector2i = cell + direction
 		if not _cell_is_viable(candidate) or _cell_distance(candidate, home) > COLONY_RANGE:
 			continue
-		var alignment := Vector2(direction).normalized().dot(Vector2(heading).normalized())
+		var alignment := Vector2(direction).normalized().dot(Vector2(heading).normalized()) if cell != home else 0.0
 		var weight := 1.0 + maxf(0.0, alignment) * 5.0
 		if alignment < -0.5:
 			weight *= 0.025
 		if worker["path"].has(candidate):
 			weight *= 0.05
 		if not bool(worker["scout"]):
-			weight *= 1.0 + pow(float(scent.get(candidate, 0.0)) * 5.0, 2.0)
+			weight *= 1.0 + pow(float(scent.get(candidate, 0.0)) * 12.0, 2.0)
 		# Only immediately adjacent food is sensed, never a range-wide target.
 		if candidate != home and maxf(ecology.resource_amount(candidate, "moss"), ecology.resource_amount(candidate, "rhizome")) >= COLONY_LOAD:
 			weight *= 20.0
