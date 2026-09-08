@@ -155,6 +155,26 @@ The first playtest found the workers too fast and their loaded search-route deto
 
 **Playtest gate:** without an observer overlay, the player identifies discovery, increased traffic to a food patch, and dispersal after food loss from the workers and carried fragments. Plant growth and weather can also change food availability in the living fixture; headless controlled-food checks isolate pheromone behavior. Automated verification is implemented evidence; human comprehension and fun remain unvalidated.
 
+## Predator ecology question (#31)
+
+Branch: `prototype/predator-ecology`. Can the player recognize failed hunts changing grazing behavior, scavenging connecting the predator to Detritus, and separate territorial ranges?
+
+```sh
+/Applications/Godot.app/Contents/MacOS/Godot --path prototypes/godot-first-interaction -- --predator-ecology
+```
+
+This optional fixture starts beside two separated predators, four grazers, open forage beside canopy, and finite dark remains. The normal opening uses the same predator rules. **WASD/arrows** move, **J** pauses for the Basin Survey, **F** scans, **T** transplants, **Space** waters and **R** restarts the fixture. There are no added combat or animal-command keys.
+
+- Each in-range hunt makes one deterministic random draw. Chance is `0.2 + predator_cover × 0.2 − (1 − prey_cover) × 0.1`, with living canopy and Rooted Mat structure supplying cover. Open ground gives 10% success; full cover at both positions gives 40%. These are accelerated alien prototype values, not real wolf/lion success estimates. A success transfers up to the existing 0.16 body biomass; it is only lethal when the prey has that little biomass left.
+- Every attempt costs 0.24 energy, adds 0.9 grazer fear, and imposes 48 ecology ticks of recovery (about eight seconds). Frightened grazers interrupt feeding, flee away along viable preferably open cells, and gradually calm down. A miss removes no prey biomass. Attempts, chances, rolls and costs are recorded in F9 evidence and animal snapshots.
+- Hungry predators preferentially scavenge nearby finite `dead_biomass`, spend time digesting, then return the tracked nutrient quantity to soil. This prototype treats generic Detritus as edible; a separate carcass/soft-versus-woody substrate distinction is deferred. Energy and hunger are abstract physiological state, while transferred material is conserved.
+- Each present predator reserves a square four-cell-radius range. Ranges cannot overlap; registration, return and relocation enforce ownership, and prey selection and movement stay within the resident's range. Death/departure frees the range. Two immigration slots allow separated predators in ordinary play when both sites qualify; neither can share the same supported patch. New settlement still requires local grazers, while existing residents can remain supported by sufficient local Detritus. Predator breeding/dispersing juveniles are deferred rather than using the generic adjacent-pair birth shortcut.
+- Red/mauve tracks record each predator's actual recent positions, with no omniscient territory overlay. State labels show recovery, digestion and retreat, and nearby hunt/scavenging observations describe the encounter. Existing plant growth, weather and habitat departure continue; the fixture does not replenish food or freeze the ecosystem.
+
+**Playtest gate:** without F9, identify a missed hunt and the grazer's retreat/interrupted feeding, observe feeding on dark remains without an attack, and explain the separated predator ranges from their activity. Automated success is not human validation. Territorial rejection, transfer budgets and paired terrain trials are tested headlessly because observation alone cannot prove those invariants.
+
+Animal snapshot version is now 4; older versions are rejected. The previously captured colony branch remains primary evidence for that earlier experiment.
+
 ## Regression check
 
 The captured idle-opening failure can be replayed headlessly:
@@ -170,6 +190,7 @@ The captured idle-opening failure can be replayed headlessly:
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/survival_pacing_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/rewater_after_disturbance_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/animal_simulation_test.gd
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/predator_ecology_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/integrated_succession_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/ecological_roles_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/habitat_colonization_test.gd

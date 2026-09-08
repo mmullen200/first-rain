@@ -2,6 +2,7 @@ extends SceneTree
 
 const EcologyGrid = preload("res://ecology_grid.gd")
 const AnimalSimulation = preload("res://animal_simulation.gd")
+var failed := false
 
 
 func _init() -> void:
@@ -27,12 +28,15 @@ func _init() -> void:
 	_assert(replay.snapshot() == expected, "stable-ID agents did not replay deterministically from a full snapshot")
 
 	var grazer_cell: Vector2i = simulation.agent_state("grazer:1")["cell"]
+	# Isolate a first encounter from accumulated edible Detritus. Successful
+	# and failed transfer outcomes are covered by predator_ecology_test.
+	ecology.dead_biomass.fill(0.0)
 	_assert(simulation.register_agent("predator", "predator:1", {"cell": grazer_cell, "hunger": 1.0}), "predator registration failed")
 	for ignored in range(10):
 		simulation.step()
-		if _has_event(simulation.event_history, "organism.predation"):
+		if _has_event(simulation.event_history, "organism.hunt_attempted"):
 			break
-	_assert(_has_event(simulation.event_history, "organism.predation"), "predator and grazer did not resolve through the shared animal authority")
+	_assert(_has_event(simulation.event_history, "organism.hunt_attempted"), "predator and grazer did not resolve through the shared animal authority")
 	_assert(simulation.conservation_violations.is_empty(), "predation violated material conservation")
 
 	_assert(simulation.submit_intervention({"type": "deter", "agent_id": "predator:1", "pressure": 0.8}), "valid astronaut intervention was rejected")
@@ -59,8 +63,9 @@ func _init() -> void:
 	_assert(shaded_replay.restore(shaded_snapshot), "snapshot with placed ecological infrastructure did not restore")
 	_assert(shaded_replay.snapshot() == shaded_snapshot, "full snapshot omitted placed ecological infrastructure state")
 
-	print("PASS: authoritative animal simulation resolves two species, environment transfers, interventions, snapshots, replay, events, and conservation")
-	quit(0)
+	if not failed:
+		print("PASS: authoritative animal simulation resolves two species, environment transfers, interventions, snapshots, replay, events, and conservation")
+	quit(1 if failed else 0)
 
 
 func _has_event(events: Array[Dictionary], taxonomy: String) -> bool:
@@ -74,4 +79,4 @@ func _assert(condition: bool, message: String) -> void:
 	if condition:
 		return
 	printerr("FAIL: " + message)
-	quit(1)
+	failed = true

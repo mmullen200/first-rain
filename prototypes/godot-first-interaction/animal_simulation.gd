@@ -7,7 +7,10 @@ extends RefCounted
 # observe snapshots/events. Species choose intentions internally; presentation
 # nodes never decide ecological outcomes.
 
-const SNAPSHOT_VERSION := 3
+const SNAPSHOT_VERSION := 4
+const PREDATOR_TERRITORY_RADIUS := 4
+const HUNT_RECOVERY_TICKS := 48
+const HUNT_ENERGY_COST := 0.24
 const COLONY_WORKER_COUNT := 24
 const COLONY_STEP_TICKS := 18
 const COLONY_REST_TICKS := 3
@@ -48,6 +51,10 @@ func register_agent(species: String, stable_id: String, initial_state := {}) -> 
 	}.get(species, "seeking"))
 	var cell: Vector2i = initial_state.get("cell", Vector2i.ZERO)
 	var bounded_cell := _bounded_cell(cell)
+	var habitat_cell: Vector2i = _bounded_cell(initial_state.get("habitat_cell", bounded_cell))
+	if species == "predator" and bool(initial_state.get("present", true)):
+		if not predator_territory_available(habitat_cell, stable_id) or _cell_distance(bounded_cell, habitat_cell) > PREDATOR_TERRITORY_RADIUS:
+			return false
 	var agent := {
 		"id": stable_id,
 		"species": species,
@@ -68,6 +75,10 @@ func register_agent(species: String, stable_id: String, initial_state := {}) -> 
 		"heading_steps": int(initial_state.get("heading_steps", 4)),
 		"move_cooldown": int(initial_state.get("move_cooldown", 0)),
 		"fear": float(initial_state.get("fear", 0.0)),
+		"threat_cell": initial_state.get("threat_cell", bounded_cell),
+		"energy": float(initial_state.get("energy", 1.0)),
+		"hunt_cooldown": int(initial_state.get("hunt_cooldown", 0)),
+		"hunt_rng": int(initial_state.get("hunt_rng", 1 + posmod(seed + stable_id.hash(), 2147483646))),
 		"reproductive_readiness": float(initial_state.get("reproductive_readiness", 0.0)),
 		"generation": int(initial_state.get("generation", 0)),
 		"parents": initial_state.get("parents", []).duplicate(),
@@ -77,8 +88,11 @@ func register_agent(species: String, stable_id: String, initial_state := {}) -> 
 	}
 	if species == "colony":
 		_reset_colony_workers(agent)
+	agent["habitat_cell"] = habitat_cell
 	agents[stable_id] = agent
 	_emit("organism.registered", stable_id, {"species": species, "cell": agent["cell"]})
+	if species == "predator" and bool(agent["present"]):
+		_emit("organism.territory_claimed", stable_id, {"cell": habitat_cell, "radius": PREDATOR_TERRITORY_RADIUS})
 	return true
 
 
@@ -92,6 +106,8 @@ func set_agent_presence(stable_id: String, present: bool, habitat_cell := Vector
 		var destination: Vector2i = agent.get("habitat_cell", agent["cell"])
 		if habitat_cell.x >= 0 and habitat_cell.y >= 0:
 			destination = _bounded_cell(habitat_cell)
+		if agent["species"] == "predator" and not predator_territory_available(destination, stable_id):
+			return false
 		agent["cell"] = destination
 		agent["habitat_cell"] = destination
 		agent["state"] = {
@@ -107,11 +123,15 @@ func set_agent_presence(stable_id: String, present: bool, habitat_cell := Vector
 		agent["present"] = true
 		agents[stable_id] = agent
 		_emit("organism.returned", stable_id, {"species": agent["species"], "cell": destination})
+		if agent["species"] == "predator":
+			_emit("organism.territory_claimed", stable_id, {"cell": destination, "radius": PREDATOR_TERRITORY_RADIUS})
 		return true
 	agent["present"] = false
 	agent["state"] = "departed"
 	agents[stable_id] = agent
 	_emit("organism.departed", stable_id, {"species": agent["species"], "cell": agent["habitat_cell"]})
+	if agent["species"] == "predator":
+		_emit("organism.territory_released", stable_id, {"cell": agent["habitat_cell"]})
 	return true
 
 
@@ -193,6 +213,10 @@ func _resolve_interventions() -> void:
 		var agent: Dictionary = agents[agent_id]
 		match String(intervention["type"]):
 			"relocate":
+				var destination: Vector2i = _bounded_cell(intervention.get("cell", agent["cell"]))
+				if agent["species"] == "predator" and not predator_territory_available(destination, agent_id):
+					_emit("intervention.relocation_blocked", agent_id, {"cell": destination, "reason": "occupied territory"})
+					continue
 				agent["cell"] = _bounded_cell(intervention.get("cell", agent["cell"]))
 				agent["habitat_cell"] = agent["cell"]
 				if String(agent["species"]) == "colony":
@@ -212,11 +236,16 @@ func _resolve_interventions() -> void:
 					agent["alive"] = false
 					agent["state"] = "dead"
 					_emit("organism.died", agent_id, {"cause": "injury"})
+					if agent["species"] == "predator":
+						_emit("organism.territory_released", agent_id, {"cell": agent["habitat_cell"]})
 		agents[agent_id] = agent
 	_pending_interventions.clear()
 
 
 func _choose_intention(agent: Dictionary) -> Dictionary:
+	# Solitary territorial adults have no generic adjacent-pair birth shortcut.
+	if agent["species"] == "predator":
+		return _choose_predator_intention(agent)
 	var readiness: float = float(agent["reproductive_readiness"])
 	if float(agent["hunger"]) < 0.35 and float(agent["body_biomass"]) > 0.55 and float(agent["fear"]) < 0.3:
 		readiness = minf(1.0, readiness + 0.025)
@@ -245,7 +274,14 @@ func _choose_intention(agent: Dictionary) -> Dictionary:
 func _choose_grazer_intention(agent: Dictionary) -> Dictionary:
 	var agent_id := String(agent["id"])
 	agent["hunger"] = minf(1.0, float(agent["hunger"]) + 0.08)
-	agent["fear"] = maxf(0.0, float(agent["fear"]) - 0.08)
+	agent["fear"] = maxf(0.0, float(agent["fear"]) - 0.025)
+	if float(agent["fear"]) > 0.25:
+		agent["move_cooldown"] = maxi(0, int(agent["move_cooldown"]) - 1)
+		agent["state"] = "fleeing"
+		agents[agent_id] = agent
+		if int(agent["move_cooldown"]) == 0:
+			return {"type": "move", "agent_id": agent_id, "cell": _grazer_escape_cell(agent)}
+		return {"type": "wait", "agent_id": agent_id}
 	if int(agent["digestion_ticks"]) > 0:
 		agent["digestion_ticks"] = int(agent["digestion_ticks"]) - 1
 		agent["move_cooldown"] = maxi(0, int(agent["move_cooldown"]) - 1)
@@ -274,22 +310,122 @@ func _choose_grazer_intention(agent: Dictionary) -> Dictionary:
 
 func _choose_predator_intention(agent: Dictionary) -> Dictionary:
 	var agent_id := String(agent["id"])
-	agent["hunger"] = minf(1.0, float(agent["hunger"]) + 0.07)
+	agent["hunger"] = minf(1.0, float(agent["hunger"]) + 0.004)
 	agent["fear"] = maxf(0.0, float(agent["fear"]) - 0.05)
-	agents[agent_id] = agent
-	var prey_id := _nearest_living_species(agent["cell"], "grazer")
-	if prey_id.is_empty():
-		return {"type": "move", "agent_id": agent_id, "cell": _roam_cell(agent)}
-	var prey: Dictionary = agents[prey_id]
-	if float(agent["fear"]) > 0.45:
-		return {"type": "move", "agent_id": agent_id, "cell": _step_away(agent["cell"], prey["cell"])}
-	if float(agent["hunger"]) >= 0.4 and _cell_distance(agent["cell"], prey["cell"]) <= 1:
-		return {"type": "predate", "agent_id": agent_id, "prey_id": prey_id, "amount": 0.16}
-	if int(agent["move_cooldown"]) > 0:
-		agent["move_cooldown"] = int(agent["move_cooldown"]) - 1
+	agent["hunt_cooldown"] = maxi(0, int(agent["hunt_cooldown"]) - 1)
+	agent["move_cooldown"] = maxi(0, int(agent["move_cooldown"]) - 1)
+	var resting: bool = int(agent["hunt_cooldown"]) > 0 or float(agent["energy"]) < HUNT_ENERGY_COST
+	if resting or float(agent["hunger"]) < 0.4:
+		agent["energy"] = minf(1.0, float(agent["energy"]) + 0.006)
+	if int(agent["digestion_ticks"]) > 0:
+		agent["digestion_ticks"] = int(agent["digestion_ticks"]) - 1
+		agent["state"] = "digesting"
 		agents[agent_id] = agent
 		return {"type": "wait", "agent_id": agent_id}
-	return {"type": "move", "agent_id": agent_id, "cell": _step_toward(agent["cell"], prey["cell"])}
+	# Return the tracked nutrient currency after digestion, never create it.
+	for resource in ["animal_biomass", "dead_biomass"]:
+		if float(agent["carried_material"].get(resource, 0.0)) > 0.000001:
+			agents[agent_id] = agent
+			return {"type": "deposit", "agent_id": agent_id, "source_resource": resource, "resource": "nutrients"}
+	agent["state"] = "recovering" if resting else "patrolling"
+	agents[agent_id] = agent
+	if resting or float(agent["fear"]) > 0.45:
+		return {"type": "wait", "agent_id": agent_id}
+	if int(agent["move_cooldown"]) > 0:
+		return {"type": "wait", "agent_id": agent_id}
+	if float(agent["hunger"]) >= 0.4:
+		var food_cell := _predator_detritus_cell(agent)
+		if food_cell.x >= 0:
+			if food_cell == agent["cell"]:
+				return {"type": "consume", "agent_id": agent_id, "resource": "dead_biomass", "amount": 0.12}
+			return {"type": "move", "agent_id": agent_id, "cell": _predator_step(agent, food_cell)}
+		var prey_id := _predator_prey_id(agent)
+		if not prey_id.is_empty():
+			var prey: Dictionary = agents[prey_id]
+			if _cell_distance(agent["cell"], prey["cell"]) <= 1:
+				return {"type": "predate", "agent_id": agent_id, "prey_id": prey_id, "amount": 0.16}
+			return {"type": "move", "agent_id": agent_id, "cell": _predator_step(agent, prey["cell"])}
+	return {"type": "move", "agent_id": agent_id, "cell": _predator_step(agent, _roam_cell(agent))}
+
+
+func predator_territory_available(center: Vector2i, excluding_id := "") -> bool:
+	for agent_id in agents:
+		var other: Dictionary = agents[agent_id]
+		if agent_id == excluding_id or other["species"] != "predator" or not bool(other["alive"]) or not bool(other["present"]):
+			continue
+		if _cell_distance(center, other["habitat_cell"]) <= PREDATOR_TERRITORY_RADIUS * 2:
+			return false
+	return true
+
+
+func _in_predator_territory(agent: Dictionary, cell: Vector2i) -> bool:
+	return _cell_is_viable(cell) and _cell_distance(agent["habitat_cell"], cell) <= PREDATOR_TERRITORY_RADIUS
+
+
+func _predator_step(agent: Dictionary, target: Vector2i) -> Vector2i:
+	var cell: Vector2i = agent["cell"]
+	var next := _step_toward(cell, target)
+	if _in_predator_territory(agent, next) and next != cell:
+		return next
+	return _step_toward(cell, agent["habitat_cell"])
+
+
+func _predator_prey_id(agent: Dictionary) -> String:
+	var result := ""
+	var distance := 5
+	var ids := agents.keys()
+	ids.sort()
+	for candidate_id in ids:
+		var prey: Dictionary = agents[candidate_id]
+		if prey["species"] != "grazer" or not bool(prey["alive"]) or not bool(prey["present"]) or not _in_predator_territory(agent, prey["cell"]):
+			continue
+		var candidate_distance := _cell_distance(agent["cell"], prey["cell"])
+		if candidate_distance < distance:
+			distance = candidate_distance
+			result = candidate_id
+	return result
+
+
+func _predator_detritus_cell(agent: Dictionary) -> Vector2i:
+	var result := Vector2i(-1, -1)
+	var best := 0.015
+	var origin: Vector2i = agent["cell"]
+	for y in range(origin.y - 2, origin.y + 3):
+		for x in range(origin.x - 2, origin.x + 3):
+			var cell := Vector2i(x, y)
+			if not _in_predator_territory(agent, cell):
+				continue
+			var amount: float = ecology.resource_amount(cell, "dead_biomass")
+			var score: float = amount / float(1 + _cell_distance(origin, cell))
+			if score > best:
+				best = score
+				result = cell
+	return result
+
+
+func _grazer_escape_cell(agent: Dictionary) -> Vector2i:
+	var origin: Vector2i = agent["cell"]
+	var threat: Vector2i = agent["threat_cell"]
+	var result := origin
+	var best := -INF
+	for direction in DIRECTIONS:
+		var cell: Vector2i = origin + direction
+		if not _cell_is_viable(cell):
+			continue
+		# Open escape routes reduce this ambusher's advantage.
+		var score: float = Vector2(cell).distance_to(Vector2(threat)) - _hunting_cover(cell) * 0.5
+		if score > best:
+			best = score
+			result = cell
+	return result
+
+
+func _hunting_cover(cell: Vector2i) -> float:
+	return clampf(ecology.resource_amount(cell, "canopy") + ecology.resource_amount(cell, "rhizome") * 0.4, 0.0, 1.0)
+
+
+func hunt_success_chance(predator_cell: Vector2i, prey_cell: Vector2i) -> float:
+	return clampf(0.2 + _hunting_cover(predator_cell) * 0.2 - (1.0 - _hunting_cover(prey_cell)) * 0.1, 0.05, 0.45)
 
 
 func _choose_colony_intention(agent: Dictionary) -> Dictionary:
@@ -388,11 +524,19 @@ func _move_agent(agent_id: String, destination: Vector2i) -> void:
 	var agent: Dictionary = agents[agent_id]
 	var origin: Vector2i = agent["cell"]
 	var bounded := _bounded_cell(destination)
+	if agent["species"] == "predator" and not _in_predator_territory(agent, bounded):
+		return
 	agent["cell"] = bounded
 	var moving_states := {"grazer": "roaming", "predator": "hunting", "colony": "foraging", "vector": "flying", "wetland_engineer": "hauling"}
 	agent["state"] = moving_states.get(agent["species"], "moving")
 	var pacing := {"grazer": 15, "predator": 8, "colony": 10, "vector": 2, "wetland_engineer": 11}
 	agent["move_cooldown"] = pacing.get(agent["species"], 6)
+	if agent["species"] == "grazer" and float(agent["fear"]) > 0.25:
+		agent["state"] = "fleeing"
+		agent["move_cooldown"] = 5
+	if agent["species"] == "predator":
+		agent["energy"] = maxf(0.0, float(agent["energy"]) - (0.008 if bounded != origin else 0.0))
+		agent["state"] = "patrolling" if float(agent["hunger"]) < 0.4 else "searching"
 	agents[agent_id] = agent
 	if origin != bounded:
 		_emit("organism.moved", agent_id, {"from": origin, "to": bounded})
@@ -408,10 +552,16 @@ func _consume_environment(agent_id: String, resource: String, requested: float) 
 	agent["digesting_resource"] = resource
 	agent["last_feeding_cell"] = agent["cell"]
 	agent["state"] = "digesting"
+	if agent["species"] == "predator":
+		agent["digestion_ticks"] = 32
+		agent["energy"] = minf(1.0, float(agent["energy"]) + consumed * 2.0)
+		agent["state"] = "scavenging"
 	agents[agent_id] = agent
 	_check_transfer(consumed, float(agent["carried_material"][resource]) - carried_before, "environment_to_%s" % agent_id)
 	if consumed > 0.0:
 		_emit("organism.%s_consumed" % resource, agent_id, {"cell": agent["cell"], "amount": consumed})
+		if agent["species"] == "predator":
+			_emit("organism.scavenged", agent_id, {"cell": agent["cell"], "amount": consumed})
 
 
 func _gather_material(agent_id: String, resource: String, requested: float) -> void:
@@ -680,15 +830,42 @@ func _deposit_carried(agent_id: String, source_resource: String, target_resource
 
 
 func _predate(predator_id: String, prey_id: String, requested: float) -> void:
-	if not agents.has(prey_id) or not bool(agents[prey_id]["alive"]) or not bool(agents[prey_id].get("present", true)):
+	if not agents.has(predator_id) or not agents.has(prey_id) or requested <= 0.0:
 		return
 	var predator: Dictionary = agents[predator_id]
 	var prey: Dictionary = agents[prey_id]
+	if predator["species"] != "predator" or prey["species"] != "grazer" or not bool(predator["alive"]) or not bool(predator["present"]) or not bool(prey["alive"]) or not bool(prey["present"]):
+		return
+	if not _in_predator_territory(predator, prey["cell"]) or _cell_distance(predator["cell"], prey["cell"]) > 1:
+		return
+	if int(predator["hunt_cooldown"]) > 0 or float(predator["energy"]) < HUNT_ENERGY_COST or float(predator["hunger"]) < 0.4:
+		return
+	var chance := hunt_success_chance(predator["cell"], prey["cell"])
+	# A per-animal integer stream is stable across replay and independent of
+	# unrelated agents' decision order. Never roll every rendered frame.
+	var next_rng: int = (int(predator["hunt_rng"]) * 48271) % 2147483647
+	predator["hunt_rng"] = next_rng
+	var roll := float(next_rng) / 2147483647.0
+	var success := roll < chance
+	predator["energy"] = maxf(0.0, float(predator["energy"]) - HUNT_ENERGY_COST)
+	predator["hunt_cooldown"] = HUNT_RECOVERY_TICKS
+	predator["state"] = "recovering"
+	prey["fear"] = minf(1.0, float(prey["fear"]) + 0.9)
+	prey["threat_cell"] = predator["cell"]
+	prey["move_cooldown"] = 0
+	prey["state"] = "fleeing"
+	agents[predator_id] = predator
+	agents[prey_id] = prey
+	_emit("organism.hunt_attempted", predator_id, {"prey_id": prey_id, "cell": predator["cell"], "prey_cell": prey["cell"], "success": success, "lethal": success and float(prey["body_biomass"]) <= requested, "chance": chance, "roll": roll, "energy_cost": HUNT_ENERGY_COST})
+	if not success:
+		return
 	var removed := minf(float(prey["body_biomass"]), requested)
 	var carried_before := float(predator["carried_material"].get("animal_biomass", 0.0))
 	prey["body_biomass"] = float(prey["body_biomass"]) - removed
 	predator["carried_material"]["animal_biomass"] = carried_before + removed
 	predator["hunger"] = maxf(0.0, float(predator["hunger"]) - removed * 4.0)
+	predator["energy"] = minf(1.0, float(predator["energy"]) + removed * 2.0)
+	predator["digestion_ticks"] = 32
 	predator["state"] = "feeding"
 	agents[predator_id] = predator
 	agents[prey_id] = prey
@@ -707,6 +884,8 @@ func _reproduce(parent_id: String, mate_id: String) -> void:
 	var parent: Dictionary = agents[parent_id]
 	var mate: Dictionary = agents[mate_id]
 	if not bool(parent["alive"]) or not bool(parent.get("present", true)) or not bool(mate["alive"]) or not bool(mate.get("present", true)) or parent["species"] != mate["species"]:
+		return
+	if parent["species"] == "predator":
 		return
 	if float(parent["reproductive_readiness"]) < 1.0 or float(mate["reproductive_readiness"]) < 1.0:
 		return

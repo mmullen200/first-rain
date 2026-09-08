@@ -37,7 +37,8 @@ const ANIMAL_SETTLEMENTS := {
 	"grazer:1": "grazer",
 	"grazer:2": "grazer",
 	"engineer:1": "wetland_engineer",
-	"predator:1": "predator"
+	"predator:1": "predator",
+	"predator:2": "predator"
 }
 const EcologyGridModel = preload("res://ecology_grid.gd")
 const EvidenceRecorder = preload("res://evidence_recorder.gd")
@@ -148,6 +149,7 @@ var grazer_step_timer := 0.0
 var grazer_state := "dormant"
 var grazer_manure_announced := false
 var animal_markers: Dictionary = {}
+var predator_tracks: Dictionary = {}
 var animal_roles_announced: Dictionary = {}
 var colony_ant_stream_root: Node3D
 var colony_ant_markers: Array[MeshInstance3D] = []
@@ -205,10 +207,14 @@ func _ready() -> void:
 	evidence = EvidenceRecorder.new()
 	if "--colony-foraging" in OS.get_cmdline_user_args():
 		_seed_colony_foraging_fixture()
+	if "--predator-ecology" in OS.get_cmdline_user_args():
+		_seed_predator_fixture()
 	evidence.begin_run(1, _evidence_snapshot())
-	if "--colony-foraging" in OS.get_cmdline_user_args():
+	if "--colony-foraging" in OS.get_cmdline_user_args() or "--predator-ecology" in OS.get_cmdline_user_args():
 		_open_emergency_cache()
 	_set_status("A fixed mound stands between separated living patches." if "--colony-foraging" in OS.get_cmdline_user_args() else "The crash has stopped. The ship is dead, but an emergency cache still blinks beneath the broken wing.")
+	if "--predator-ecology" in OS.get_cmdline_user_args():
+		_set_status("Red tracks cross the feeding ground. Farther east, another predator noses through dark remains.", 5.0)
 
 
 # Optional starting fixture, using the ordinary living ecosystem and controls.
@@ -229,6 +235,40 @@ func _seed_colony_foraging_fixture() -> void:
 	ecology_started = true
 	var world: Vector2 = ecology.world_position(home.x, home.y + 1)
 	astronaut.position = Vector3(world.x, ecology.terrain_height(home + Vector2i(0, 1)) + 0.02, world.y)
+	camera.position = astronaut.position + Vector3(8.8, 10.8, 10.5)
+	camera.look_at(astronaut.position)
+	_refresh_ecology_visuals()
+	_update_ecological_animal_markers()
+
+
+func _seed_predator_fixture() -> void:
+	for center in [Vector2i(6, 9), Vector2i(17, 9)]:
+		for y in range(center.y - 2, center.y + 3):
+			for x in range(center.x - 2, center.x + 3):
+				var index: int = y * ecology.WIDTH + x
+				ecology.moisture[index] = 0.65
+				ecology.temperature[index] = 0.38
+				ecology.toxicity[index] = 0.02
+				ecology.add_resources(Vector2i(x, y), {"moss": 0.4, "nutrients": 0.4})
+			ecology.add_resources(Vector2i(center.x - 2, y), {"canopy": 0.55})
+		var offset := 0 if center.x == 6 else 2
+		for index in range(2):
+			animal_simulation.register_agent("grazer", "grazer:%d" % (offset + index + 1), {"cell": center + Vector2i(1, index), "habitat_cell": center, "body_biomass": 1.0})
+		animal_simulation.register_agent("predator", "predator:%d" % (1 if center.x == 6 else 2), {"cell": center, "hunt_rng": 12345, "hunger": 1.0})
+	# Finite starting remains; ordinary turnover/decomposition continue afterward.
+	ecology.add_resources(Vector2i(3, 9), {"dead_biomass": 0.6})
+	ecology.add_resources(Vector2i(17, 9), {"dead_biomass": 0.6})
+	ecology_started = true
+	grazer_awake = true
+	grazer_label.visible = true
+	grazer_glow.visible = true
+	grazer_body.material_override = _material(Color("76d2bd"), 0.58, Color("237563"))
+	grazer_head.material_override = _material(Color("f2c36d"), 0.48, Color("8f571c"))
+	var grazer_world: Vector2 = ecology.world_position(7, 9)
+	grazer_root.position = Vector3(grazer_world.x, ecology.terrain_height(Vector2i(7, 9)) + 0.28, grazer_world.y)
+	var cell := Vector2i(10, 11)
+	var world: Vector2 = ecology.world_position(cell.x, cell.y)
+	astronaut.position = Vector3(world.x, ecology.terrain_height(cell) + 0.02, world.y)
 	camera.position = astronaut.position + Vector3(8.8, 10.8, 10.5)
 	camera.look_at(astronaut.position)
 	_refresh_ecology_visuals()
@@ -684,10 +724,13 @@ func _build_grazer() -> void:
 func _build_ecological_animal_markers() -> void:
 	var specifications := {
 		"grazer:2": ["GRAZER / JUVENILE", Color("8edbc3")],
+		"grazer:3": ["GRAZER", Color("8edbc3")],
+		"grazer:4": ["GRAZER", Color("8edbc3")],
 		"colony:1": ["EUSOCIAL HIVE", Color("dc9a52")],
 		"vector:1": ["FLYING VECTOR", Color("e9d36a")],
 		"engineer:1": ["WETLAND ENGINEER", Color("5da7c9")],
-		"predator:1": ["PREDATOR", Color("d76767")]
+		"predator:1": ["PREDATOR", Color("d76767")],
+		"predator:2": ["PREDATOR", Color("bd7da5")]
 	}
 	for stable_id in specifications:
 		var specification: Array = specifications[stable_id]
@@ -796,7 +839,7 @@ func _build_interface() -> void:
 
 	var title := Label.new()
 	title.position = Vector2(24, 18)
-	title.text = "FIRST RAIN  /  COLONY FORAGING PROTOTYPE"
+	title.text = "FIRST RAIN  /  PREDATOR ECOLOGY PROTOTYPE"
 	title.add_theme_font_size_override("font_size", 15)
 	title.add_theme_color_override("font_color", Color("e9b36e"))
 	canvas.add_child(title)
@@ -1799,6 +1842,8 @@ func _best_predator_arrival_habitat() -> Dictionary:
 	for y in range(ecology.HEIGHT):
 		for x in range(ecology.WIDTH):
 			var cell := Vector2i(x, y)
+			if not animal_simulation.predator_territory_available(cell):
+				continue
 			var score := 0.0
 			var local_grazers := 0
 			for prey_cell in prey_cells:
@@ -1827,9 +1872,13 @@ func _predator_habitat_at(cell: Vector2i) -> Dictionary:
 		if distance <= 4:
 			nearby_grazers += 1
 			score += 1.0 / float(distance + 1)
-	if nearby_grazers < 2:
+	var detritus := 0.0
+	for y in range(maxi(0, cell.y - 4), mini(ecology.HEIGHT, cell.y + 5)):
+		for x in range(maxi(0, cell.x - 4), mini(ecology.WIDTH, cell.x + 5)):
+			detritus += ecology.resource_amount(Vector2i(x, y), "dead_biomass")
+	if nearby_grazers < 2 and detritus < 0.3:
 		return {}
-	return {"cell": cell, "score": score, "evidence": {"nearby_grazers": nearby_grazers}}
+	return {"cell": cell, "score": score + detritus, "evidence": {"nearby_grazers": nearby_grazers, "detritus": detritus}}
 
 
 func _cell_distance(a: Vector2i, b: Vector2i) -> int:
@@ -1879,16 +1928,44 @@ func _update_ecological_animal_markers() -> void:
 		if agent.is_empty() or not bool(agent["alive"]) or not bool(agent.get("present", true)):
 			marker.visible = false
 			continue
+		var was_visible := marker.visible
 		marker.visible = true
 		var cell: Vector2i = agent.get("home_cell", agent["cell"]) if String(agent["species"]) == "colony" else agent["cell"]
 		var world: Vector2 = ecology.world_position(cell.x, cell.y)
 		var height := 0.62 if String(agent["species"]) == "vector" else 0.25
-		marker.position = marker.position.lerp(Vector3(world.x, ecology.terrain_height(cell) + height, world.y), 0.45)
+		var target := Vector3(world.x, ecology.terrain_height(cell) + height, world.y)
+		marker.position = marker.position.lerp(target, 0.45) if was_visible else target
 		var label: Label3D = marker.get_child(1)
 		label.text = String(label.text).split(" / ")[0] + " / " + String(agent["state"]).to_upper()
+		if agent["species"] == "predator":
+			_update_predator_tracks(stable_id, agent)
+			var body: MeshInstance3D = marker.get_child(0)
+			body.scale = Vector3(1.5, 0.6, 1.0) if int(agent["hunt_cooldown"]) > AnimalSimulation.HUNT_RECOVERY_TICKS - 4 else Vector3.ONE
 		if stable_id == "colony:1":
 			_update_colony_worker_stream(agent)
 	_update_colony_prospect_visual()
+
+
+func _update_predator_tracks(stable_id: String, agent: Dictionary) -> void:
+	var trail: Array = predator_tracks.get(stable_id, [])
+	var cell: Vector2i = agent["cell"]
+	if not trail.is_empty() and trail.back().get_meta("cell") == cell:
+		return
+	var track := MeshInstance3D.new()
+	var mesh := SphereMesh.new()
+	mesh.radius = 0.085
+	mesh.height = 0.03
+	track.mesh = mesh
+	track.scale = Vector3(1.6, 1.0, 0.75)
+	track.material_override = _material(Color("a66a64") if stable_id == "predator:1" else Color("826484"), 0.9)
+	var world: Vector2 = ecology.world_position(cell.x, cell.y)
+	track.position = Vector3(world.x, ecology.terrain_height(cell) + 0.06, world.y)
+	track.set_meta("cell", cell)
+	add_child(track)
+	trail.append(track)
+	if trail.size() > 12:
+		trail.pop_front().queue_free()
+	predator_tracks[stable_id] = trail
 
 
 func _update_colony_prospect_visual() -> void:
@@ -2069,6 +2146,24 @@ func _set_grazer_state(next_state: String) -> void:
 func _handle_authoritative_animal_events(events: Array[Dictionary]) -> void:
 	for event in events:
 		match String(event["taxonomy"]):
+			"organism.hunt_attempted":
+				var facts: Dictionary = event["facts"]
+				evidence.record_event(ecology.tick, event["taxonomy"], event["subject"], [], facts)
+				var cell: Vector2i = facts["cell"]
+				var world: Vector2 = ecology.world_position(cell.x, cell.y)
+				if Vector2(astronaut.position.x, astronaut.position.z).distance_to(world) < 10.0:
+					var observation := "The predator lunges and misses. The grazer bolts while the hunter catches its breath."
+					if facts["success"]:
+						observation = "The predator brings down the grazer and feeds." if facts["lethal"] else "The predator catches the grazer; the injured animal bolts."
+					_set_status(observation, 3.5)
+			"organism.scavenged":
+				evidence.record_event(ecology.tick, event["taxonomy"], event["subject"], [], event["facts"])
+				var cell: Vector2i = event["facts"]["cell"]
+				var world: Vector2 = ecology.world_position(cell.x, cell.y)
+				if Vector2(astronaut.position.x, astronaut.position.z).distance_to(world) < 10.0:
+					_set_status("The predator lowers its head to dark remains, feeding without a chase.", 3.0)
+			"organism.predation", "organism.territory_claimed", "organism.territory_released", "intervention.relocation_blocked":
+				evidence.record_event(ecology.tick, event["taxonomy"], event["subject"], [], event["facts"])
 			"organism.moss_consumed", "organism.rhizome_consumed":
 				var facts: Dictionary = event["facts"]
 				var cell: Vector2i = facts["cell"]
