@@ -175,6 +175,18 @@ This optional fixture starts beside two separated predators, four grazers, open 
 
 Animal snapshot version is now 4; older versions are rejected. The previously captured colony branch remains primary evidence for that earlier experiment.
 
+## Juvenile movement and parental care (#32)
+
+Branch: `prototype/juvenile-grazer`. The `-- --predator-ecology` starting scene now contains two adult/juvenile pairs. Its title is **GRAZER FAMILY PROTOTYPE**. The second ordinary grazer is also an explicitly parent-linked juvenile, and new grazer offspring retain their parent IDs and get visible markers.
+
+Grazer markers now move every physics frame rather than jumping 45% toward their destination on each ecology tick. Adults retain slow ordinary movement; a juvenile catching up travels faster, and both adults and juveniles visibly accelerate when fleeing. Pause freezes visual movement too. The simulation still chooses cells; presentation does not choose ecological destinations.
+
+A young juvenile tries to stay within one cell of its adult and feeds locally within that range. Separation takes priority over another bite. It senses its parent only within four cells; after losing contact it approaches the last observed position, retains that memory for 120 ecology ticks, then searches within three cells of that place. An absent or dead parent does not refresh memory. Threat escape takes priority over following, and calm juveniles try to reunite. This is a chosen parental-care strategy for the alien grazer, not a universal herbivore rule.
+
+Dependence relaxes to two cells halfway through 1,800 well-fed, low-fear developmental ticks, then switches to independent adult behavior. This compressed behavioral maturation changes presentation size without creating body biomass; a full resource-supported growth model remains separate work. Juveniles cannot use the adult reproduction shortcut. Family identity, developmental time and last-seen memory are captured in animal snapshot version 5; older snapshots are rejected.
+
+**Playtest gate:** identify smooth juvenile travel, near-adult feeding and catch-up, and separation/reunion following a threat. **R** restarts the paired scene, **WASD/arrows** move and **J** pauses. All prior toolkit controls remain available. These behavior and rendering checks are implemented evidence; the family behavior still needs human playtesting.
+
 ## Regression check
 
 The captured idle-opening failure can be replayed headlessly:
@@ -191,6 +203,7 @@ The captured idle-opening failure can be replayed headlessly:
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/rewater_after_disturbance_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/animal_simulation_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/predator_ecology_test.gd
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/juvenile_grazer_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/integrated_succession_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/ecological_roles_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/habitat_colonization_test.gd

@@ -253,7 +253,8 @@ func _seed_predator_fixture() -> void:
 			ecology.add_resources(Vector2i(center.x - 2, y), {"canopy": 0.55})
 		var offset := 0 if center.x == 6 else 2
 		for index in range(2):
-			animal_simulation.register_agent("grazer", "grazer:%d" % (offset + index + 1), {"cell": center + Vector2i(1, index), "habitat_cell": center, "body_biomass": 1.0})
+			var parent_id := "grazer:%d" % (offset + 1)
+			animal_simulation.register_agent("grazer", "grazer:%d" % (offset + index + 1), {"cell": center + Vector2i(1, index), "habitat_cell": center, "body_biomass": 1.0 if index == 0 else 0.4, "juvenile": index == 1, "parents": [] if index == 0 else [parent_id], "parent_id": "" if index == 0 else parent_id})
 		animal_simulation.register_agent("predator", "predator:%d" % (1 if center.x == 6 else 2), {"cell": center, "hunt_rng": 12345, "hunger": 1.0})
 	# Finite starting remains; ordinary turnover/decomposition continue afterward.
 	ecology.add_resources(Vector2i(3, 9), {"dead_biomass": 0.6})
@@ -290,6 +291,7 @@ func _physics_process(delta: float) -> void:
 	_update_ecology(delta)
 	_update_ecology_grid(delta)
 	_update_grazer(delta)
+	_update_grazer_markers(delta)
 	_update_colony_worker_visual()
 	_update_colony_prospect_visual()
 	_update_disturbance(delta)
@@ -839,7 +841,7 @@ func _build_interface() -> void:
 
 	var title := Label.new()
 	title.position = Vector2(24, 18)
-	title.text = "FIRST RAIN  /  PREDATOR ECOLOGY PROTOTYPE"
+	title.text = "FIRST RAIN  /  GRAZER FAMILY PROTOTYPE"
 	title.add_theme_font_size_override("font_size", 15)
 	title.add_theme_color_override("font_color", Color("e9b36e"))
 	canvas.add_child(title)
@@ -1895,7 +1897,10 @@ func _register_ecological_role(species: String, stable_id: String, habitat: Dict
 		if not animal_simulation.set_agent_presence(stable_id, true, cell):
 			return
 	else:
-		if not animal_simulation.register_agent(species, stable_id, {"cell": cell, "habitat_cell": cell, "hunger": 0.35, "body_biomass": 0.8}):
+		var initial := {"cell": cell, "habitat_cell": cell, "hunger": 0.35, "body_biomass": 0.8}
+		if stable_id == "grazer:2" and animal_simulation.agents.has("grazer:1"):
+			initial.merge({"juvenile": true, "parents": ["grazer:1"], "parent_id": "grazer:1", "body_biomass": 0.4}, true)
+		if not animal_simulation.register_agent(species, stable_id, initial):
 			return
 	unsupported_residency_ticks[stable_id] = 0
 	animal_roles_announced[stable_id] = true
@@ -1920,6 +1925,9 @@ func _register_ecological_role(species: String, stable_id: String, habitat: Dict
 
 
 func _update_ecological_animal_markers() -> void:
+	for id in animal_simulation.agents:
+		if id != "grazer:1" and not animal_markers.has(id) and animal_simulation.agents[id]["species"] == "grazer":
+			_add_grazer_marker(id)
 	if colony_ant_stream_root != null:
 		colony_ant_stream_root.visible = false
 	for stable_id in animal_markers:
@@ -1934,9 +1942,16 @@ func _update_ecological_animal_markers() -> void:
 		var world: Vector2 = ecology.world_position(cell.x, cell.y)
 		var height := 0.62 if String(agent["species"]) == "vector" else 0.25
 		var target := Vector3(world.x, ecology.terrain_height(cell) + height, world.y)
-		marker.position = marker.position.lerp(target, 0.45) if was_visible else target
+		if not was_visible:
+			marker.position = target
+		elif agent["species"] != "grazer":
+			marker.position = marker.position.lerp(target, 0.45)
 		var label: Label3D = marker.get_child(1)
 		label.text = String(label.text).split(" / ")[0] + " / " + String(agent["state"]).to_upper()
+		if agent["species"] == "grazer":
+			label.text = ("JUVENILE" if bool(agent.get("juvenile", false)) else "GRAZER") + " / " + String(agent["state"]).to_upper()
+			var maturity := clampf(float(agent.get("development_ticks", 0)) / AnimalSimulation.JUVENILE_MATURATION_TICKS, 0.0, 1.0)
+			marker.get_child(0).scale = Vector3.ONE * (lerpf(0.65, 1.0, maturity) if bool(agent.get("juvenile", false)) else 1.0)
 		if agent["species"] == "predator":
 			_update_predator_tracks(stable_id, agent)
 			var body: MeshInstance3D = marker.get_child(0)
@@ -1944,6 +1959,42 @@ func _update_ecological_animal_markers() -> void:
 		if stable_id == "colony:1":
 			_update_colony_worker_stream(agent)
 	_update_colony_prospect_visual()
+
+
+func _add_grazer_marker(id: String) -> void:
+	var marker := Node3D.new()
+	marker.visible = false
+	var body := MeshInstance3D.new()
+	var mesh := SphereMesh.new()
+	mesh.radius = 0.2
+	mesh.height = 0.36
+	body.mesh = mesh
+	body.material_override = _material(Color("8edbc3"), 0.58)
+	marker.add_child(body)
+	var label := Label3D.new()
+	label.text = "GRAZER"
+	label.position.y = 0.58
+	label.font_size = 26
+	label.pixel_size = 0.0042
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	marker.add_child(label)
+	add_child(marker)
+	animal_markers[id] = marker
+
+
+func _update_grazer_markers(delta: float) -> void:
+	for id in animal_markers:
+		var agent: Dictionary = animal_simulation.agent_state(id)
+		var marker: Node3D = animal_markers[id]
+		if agent.is_empty() or agent["species"] != "grazer" or not bool(agent["alive"]) or not bool(agent["present"]) or not marker.visible:
+			continue
+		var cell: Vector2i = agent["cell"]
+		var world: Vector2 = ecology.world_position(cell.x, cell.y)
+		var target := Vector3(world.x, ecology.terrain_height(cell) + 0.25, world.y)
+		var speed := 1.8 if agent["state"] == "fleeing" else (0.85 if agent["state"] == "following parent" else GRAZER_MOVE_SPEED)
+		marker.position = marker.position.move_toward(target, speed * delta)
+		var underfoot: Vector2i = ecology.world_to_cell(Vector2(marker.position.x, marker.position.z))
+		marker.position.y = maxf(marker.position.y, ecology.terrain_height(underfoot) + 0.25)
 
 
 func _update_predator_tracks(stable_id: String, agent: Dictionary) -> void:
@@ -2092,7 +2143,8 @@ func _update_grazer(delta: float) -> void:
 	_set_grazer_state(authoritative["state"])
 	var target_world: Vector2 = ecology.world_position(grazer_cell.x, grazer_cell.y)
 	grazer_target_position = Vector3(target_world.x, ecology.terrain_height(grazer_cell) + 0.28, target_world.y)
-	grazer_root.position = grazer_root.position.move_toward(grazer_target_position, GRAZER_MOVE_SPEED * delta)
+	var speed := 1.8 if authoritative["state"] == "fleeing" else GRAZER_MOVE_SPEED
+	grazer_root.position = grazer_root.position.move_toward(grazer_target_position, speed * delta)
 	if grazer_root.position.distance_to(grazer_target_position) > 0.01:
 		grazer_root.look_at(grazer_target_position, Vector3.UP)
 
@@ -2146,6 +2198,8 @@ func _set_grazer_state(next_state: String) -> void:
 func _handle_authoritative_animal_events(events: Array[Dictionary]) -> void:
 	for event in events:
 		match String(event["taxonomy"]):
+			"organism.grazer_matured":
+				evidence.record_event(ecology.tick, event["taxonomy"], event["subject"], [], event["facts"])
 			"organism.hunt_attempted":
 				var facts: Dictionary = event["facts"]
 				evidence.record_event(ecology.tick, event["taxonomy"], event["subject"], [], facts)

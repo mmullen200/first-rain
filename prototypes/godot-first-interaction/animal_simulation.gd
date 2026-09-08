@@ -7,7 +7,10 @@ extends RefCounted
 # observe snapshots/events. Species choose intentions internally; presentation
 # nodes never decide ecological outcomes.
 
-const SNAPSHOT_VERSION := 4
+const SNAPSHOT_VERSION := 5
+const JUVENILE_MATURATION_TICKS := 1800
+const PARENT_SENSE_RADIUS := 4
+const PARENT_MEMORY_TICKS := 120
 const PREDATOR_TERRITORY_RADIUS := 4
 const HUNT_RECOVERY_TICKS := 48
 const HUNT_ENERGY_COST := 0.24
@@ -82,12 +85,19 @@ func register_agent(species: String, stable_id: String, initial_state := {}) -> 
 		"reproductive_readiness": float(initial_state.get("reproductive_readiness", 0.0)),
 		"generation": int(initial_state.get("generation", 0)),
 		"parents": initial_state.get("parents", []).duplicate(),
+		"juvenile": bool(initial_state.get("juvenile", species == "grazer" and not initial_state.get("parents", []).is_empty())),
+		"development_ticks": int(initial_state.get("development_ticks", 0)),
+		"parent_id": String(initial_state.get("parent_id", "")),
+		"parent_last_seen": initial_state.get("parent_last_seen", bounded_cell),
+		"parent_memory_ticks": int(initial_state.get("parent_memory_ticks", 0)),
 		"brood": float(initial_state.get("brood", 0.0)),
 		"pollen_load": float(initial_state.get("pollen_load", 0.0)),
 		"spore_load": float(initial_state.get("spore_load", 0.0))
 	}
 	if species == "colony":
 		_reset_colony_workers(agent)
+	if species == "grazer" and bool(agent["juvenile"]) and agent["parent_id"].is_empty() and not agent["parents"].is_empty():
+		agent["parent_id"] = String(agent["parents"][0])
 	agent["habitat_cell"] = habitat_cell
 	agents[stable_id] = agent
 	_emit("organism.registered", stable_id, {"species": species, "cell": agent["cell"]})
@@ -246,6 +256,8 @@ func _choose_intention(agent: Dictionary) -> Dictionary:
 	# Solitary territorial adults have no generic adjacent-pair birth shortcut.
 	if agent["species"] == "predator":
 		return _choose_predator_intention(agent)
+	if agent["species"] == "grazer" and bool(agent.get("juvenile", false)):
+		return _choose_grazer_intention(agent)
 	var readiness: float = float(agent["reproductive_readiness"])
 	if float(agent["hunger"]) < 0.35 and float(agent["body_biomass"]) > 0.55 and float(agent["fear"]) < 0.3:
 		readiness = minf(1.0, readiness + 0.025)
@@ -275,6 +287,8 @@ func _choose_grazer_intention(agent: Dictionary) -> Dictionary:
 	var agent_id := String(agent["id"])
 	agent["hunger"] = minf(1.0, float(agent["hunger"]) + 0.08)
 	agent["fear"] = maxf(0.0, float(agent["fear"]) - 0.025)
+	if bool(agent.get("juvenile", false)):
+		_observe_parent(agent)
 	if float(agent["fear"]) > 0.25:
 		agent["move_cooldown"] = maxi(0, int(agent["move_cooldown"]) - 1)
 		agent["state"] = "fleeing"
@@ -282,6 +296,8 @@ func _choose_grazer_intention(agent: Dictionary) -> Dictionary:
 		if int(agent["move_cooldown"]) == 0:
 			return {"type": "move", "agent_id": agent_id, "cell": _grazer_escape_cell(agent)}
 		return {"type": "wait", "agent_id": agent_id}
+	if bool(agent.get("juvenile", false)):
+		return _choose_juvenile_intention(agent)
 	if int(agent["digestion_ticks"]) > 0:
 		agent["digestion_ticks"] = int(agent["digestion_ticks"]) - 1
 		agent["move_cooldown"] = maxi(0, int(agent["move_cooldown"]) - 1)
@@ -306,6 +322,88 @@ func _choose_grazer_intention(agent: Dictionary) -> Dictionary:
 		var target := rhizome_cell if ecology.resource_amount(rhizome_cell, "rhizome") > ecology.resource_amount(moss_cell, "moss") else moss_cell
 		return {"type": "move", "agent_id": agent_id, "cell": _step_toward(agent["cell"], target)}
 	return {"type": "move", "agent_id": agent_id, "cell": _roam_cell(agent)}
+
+
+func _observe_parent(agent: Dictionary) -> void:
+	agent["parent_memory_ticks"] = maxi(0, int(agent["parent_memory_ticks"]) - 1)
+	var parent_id := String(agent["parent_id"])
+	if agents.has(parent_id):
+		var parent: Dictionary = agents[parent_id]
+		if parent["species"] == "grazer" and bool(parent["alive"]) and bool(parent["present"]) and _cell_distance(agent["cell"], parent["cell"]) <= PARENT_SENSE_RADIUS:
+			agent["parent_last_seen"] = parent["cell"]
+			agent["parent_memory_ticks"] = PARENT_MEMORY_TICKS
+			agent["habitat_cell"] = parent["habitat_cell"]
+	# Development pauses under persistent hunger or fear. This is compressed
+	# behavioral maturation, not a completed body-growth/nutrition model.
+	if float(agent["hunger"]) < 0.8 and float(agent["fear"]) <= 0.25:
+		agent["development_ticks"] = int(agent["development_ticks"]) + 1
+	if int(agent["development_ticks"]) >= JUVENILE_MATURATION_TICKS:
+		agent["juvenile"] = false
+		_emit("organism.grazer_matured", agent["id"], {"parents": agent["parents"]})
+	agents[agent["id"]] = agent
+
+
+func _choose_juvenile_intention(agent: Dictionary) -> Dictionary:
+	var id := String(agent["id"])
+	var cell: Vector2i = agent["cell"]
+	var anchor: Vector2i = agent["parent_last_seen"]
+	var memory := int(agent["parent_memory_ticks"])
+	var radius := 1 if int(agent["development_ticks"]) < JUVENILE_MATURATION_TICKS / 2 else 2
+	agent["move_cooldown"] = maxi(0, int(agent["move_cooldown"]) - 1)
+	agent["digestion_ticks"] = maxi(0, int(agent["digestion_ticks"]) - 1)
+	# Catching up takes priority over another bite; immediate danger was
+	# resolved above. Only local perception refreshes this remembered point.
+	if memory > 0 and _cell_distance(cell, anchor) > radius:
+		agent["state"] = "following parent"
+		agents[id] = agent
+		if int(agent["move_cooldown"]) > 0:
+			return {"type": "wait", "agent_id": id}
+		return {"type": "move", "agent_id": id, "cell": _juvenile_step(cell, anchor)}
+	var digesting := String(agent["digesting_resource"])
+	if not digesting.is_empty() and float(agent["carried_material"].get(digesting, 0.0)) > 0.0:
+		agent["state"] = "digesting"
+		agents[id] = agent
+		if int(agent["digestion_ticks"]) == 0:
+			return {"type": "deposit", "agent_id": id, "source_resource": digesting, "resource": "dead_biomass"}
+		return {"type": "wait", "agent_id": id}
+	var resource := "rhizome" if ecology.resource_amount(cell, "rhizome") > ecology.resource_amount(cell, "moss") else "moss"
+	if float(agent["hunger"]) >= 0.65 and ecology.resource_amount(cell, resource) >= 0.02:
+		agents[id] = agent
+		return {"type": "consume", "agent_id": id, "resource": resource, "amount": 0.06}
+	agent["state"] = "near parent" if memory > 0 else "searching for parent"
+	agents[id] = agent
+	if int(agent["move_cooldown"]) > 0:
+		return {"type": "wait", "agent_id": id}
+	var target := cell
+	var best := 0.02
+	for direction in DIRECTIONS:
+		var next: Vector2i = cell + direction
+		if not _cell_is_viable(next) or (memory > 0 and _cell_distance(next, anchor) > radius):
+			continue
+		if (memory > 0 and next == anchor) or (memory == 0 and _cell_distance(next, anchor) > 3):
+			continue
+		var food: float = maxf(ecology.resource_amount(next, "moss"), ecology.resource_amount(next, "rhizome"))
+		if food > best:
+			best = food
+			target = next
+	if target == cell and memory == 0:
+		# Bounded local searching cannot reveal a distant parent's position.
+		target = _roam_cell(agent)
+		if _cell_distance(target, anchor) > 3:
+			target = _juvenile_step(cell, anchor)
+	return {"type": "move", "agent_id": id, "cell": target} if target != cell else {"type": "wait", "agent_id": id}
+
+
+func _juvenile_step(origin: Vector2i, target: Vector2i) -> Vector2i:
+	var result := origin
+	var best := Vector2(origin).distance_to(Vector2(target))
+	for direction in DIRECTIONS:
+		var cell: Vector2i = origin + direction
+		var distance := Vector2(cell).distance_to(Vector2(target))
+		if _cell_is_viable(cell) and distance < best:
+			best = distance
+			result = cell
+	return result
 
 
 func _choose_predator_intention(agent: Dictionary) -> Dictionary:
@@ -531,6 +629,11 @@ func _move_agent(agent_id: String, destination: Vector2i) -> void:
 	agent["state"] = moving_states.get(agent["species"], "moving")
 	var pacing := {"grazer": 15, "predator": 8, "colony": 10, "vector": 2, "wetland_engineer": 11}
 	agent["move_cooldown"] = pacing.get(agent["species"], 6)
+	if agent["species"] == "grazer" and bool(agent.get("juvenile", false)):
+		agent["state"] = "following parent" if int(agent["parent_memory_ticks"]) > 0 and _cell_distance(bounded, agent["parent_last_seen"]) > 1 else "near parent"
+		if int(agent["parent_memory_ticks"]) == 0:
+			agent["state"] = "searching for parent"
+		agent["move_cooldown"] = 6
 	if agent["species"] == "grazer" and float(agent["fear"]) > 0.25:
 		agent["state"] = "fleeing"
 		agent["move_cooldown"] = 5
@@ -887,6 +990,8 @@ func _reproduce(parent_id: String, mate_id: String) -> void:
 		return
 	if parent["species"] == "predator":
 		return
+	if bool(parent.get("juvenile", false)) or bool(mate.get("juvenile", false)):
+		return
 	if float(parent["reproductive_readiness"]) < 1.0 or float(mate["reproductive_readiness"]) < 1.0:
 		return
 	if _cell_distance(parent["cell"], mate["cell"]) > 1:
@@ -908,7 +1013,9 @@ func _reproduce(parent_id: String, mate_id: String) -> void:
 		"body_biomass": contribution * 2.0,
 		"reproductive_readiness": 0.0,
 		"generation": maxi(int(parent["generation"]), int(mate["generation"])) + 1,
-		"parents": [parent_id, mate_id]
+		"parents": [parent_id, mate_id],
+		"parent_id": parent_id, "juvenile": parent["species"] == "grazer",
+		"parent_last_seen": parent["cell"], "parent_memory_ticks": PARENT_MEMORY_TICKS
 	}
 	register_agent(parent["species"], child_id, child_state)
 	_emit("organism.reproduced", child_id, {"parents": [parent_id, mate_id], "species": parent["species"], "body_biomass": contribution * 2.0})
