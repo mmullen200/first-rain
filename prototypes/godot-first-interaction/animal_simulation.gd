@@ -7,7 +7,7 @@ extends RefCounted
 # observe snapshots/events. Species choose intentions internally; presentation
 # nodes never decide ecological outcomes.
 
-const SNAPSHOT_VERSION := 5
+const SNAPSHOT_VERSION := 6
 const JUVENILE_MATURATION_TICKS := 1800
 const PARENT_SENSE_RADIUS := 4
 const PARENT_MEMORY_TICKS := 120
@@ -92,6 +92,12 @@ func register_agent(species: String, stable_id: String, initial_state := {}) -> 
 		"parent_memory_ticks": int(initial_state.get("parent_memory_ticks", 0)),
 		"brood": float(initial_state.get("brood", 0.0)),
 		"pollen_load": float(initial_state.get("pollen_load", 0.0)),
+		"pollen_donor": initial_state.get("pollen_donor", Vector2i(-1, -1)),
+		"pollen_kind": String(initial_state.get("pollen_kind", "")),
+		"pollen_age": 0,
+		"flower_memory": {},
+		"last_flower": Vector2i(-1, -1),
+		"last_visit_tick": -1000,
 		"spore_load": float(initial_state.get("spore_load", 0.0))
 	}
 	if species == "colony":
@@ -160,6 +166,8 @@ func step() -> Array[Dictionary]:
 	var event_start := event_history.size()
 	tick += 1
 	ecology.step()
+	for seed_event in ecology.seed_events:
+		_emit(seed_event["taxonomy"], "plant:%s" % str(seed_event["cell"]), seed_event)
 	_resolve_interventions()
 	var ids := agents.keys()
 	ids.sort()
@@ -533,34 +541,62 @@ func _choose_colony_intention(agent: Dictionary) -> Dictionary:
 func _choose_vector_intention(agent: Dictionary) -> Dictionary:
 	var agent_id := String(agent["id"])
 	var habitat_cell: Vector2i = agent.get("habitat_cell", agent["cell"])
+	var cell: Vector2i = agent["cell"]
+	agent["hunger"] = minf(1.0, float(agent["hunger"]) + 0.006)
+	agent["pollen_age"] += 1
+	if agent["pollen_age"] > 180:
+		agent["pollen_load"] = 0.0
+	var memory: Dictionary = agent["flower_memory"]
+	for remembered in memory.keys():
+		if tick - int(memory[remembered]["seen"]) > 180:
+			memory.erase(remembered)
+	# Only the surrounding two-cell neighborhood updates knowledge.
+	for y in range(maxi(0, cell.y - 2), mini(ecology.HEIGHT, cell.y + 3)):
+		for x in range(maxi(0, cell.x - 2), mini(ecology.WIDTH, cell.x + 3)):
+			var candidate := Vector2i(x, y)
+			if _cell_distance(candidate, habitat_cell) > 4:
+				continue
+			if ecology.flower_kind(candidate).is_empty():
+				memory.erase(candidate)
+			else:
+				memory[candidate] = {"reward": ecology.flower_reward(candidate), "seen": tick}
+	agent["flower_memory"] = memory
+	agents[agent_id] = agent
 	if int(agent["move_cooldown"]) > 0:
 		agent["move_cooldown"] = int(agent["move_cooldown"]) - 1
 		agents[agent_id] = agent
 		return {"type": "wait", "agent_id": agent_id}
-	if float(agent["pollen_load"]) > 0.02:
-		if ecology.resource_amount(agent["cell"], "ground_bloom") + ecology.resource_amount(agent["cell"], "canopy_bloom") > 0.02:
-			return {"type": "pollinate", "agent_id": agent_id, "amount": minf(0.08, float(agent["pollen_load"]))}
-		var ground_target := _strongest_resource_cell_near("ground_bloom", habitat_cell, 4)
-		var canopy_target := _strongest_resource_cell_near("canopy_bloom", habitat_cell, 4)
-		var pollen_target: Vector2i = canopy_target if ecology.resource_amount(canopy_target, "canopy_bloom") >= ecology.resource_amount(ground_target, "ground_bloom") else ground_target
-		return {"type": "move", "agent_id": agent_id, "cell": _step_toward(agent["cell"], pollen_target)}
+	if float(agent["hunger"]) < 0.2:
+		agent["state"] = "resting"
+		agents[agent_id] = agent
+		return {"type": "wait", "agent_id": agent_id}
+	if ecology.flower_reward(cell) >= 0.003 and (cell != agent["last_flower"] or tick - int(agent["last_visit_tick"]) >= 60):
+		return {"type": "visit_flower", "agent_id": agent_id}
+	var target := cell
+	var best := 0.0
+	for candidate in memory:
+		if candidate == cell or (candidate == agent["last_flower"] and tick - int(agent["last_visit_tick"]) < 60):
+			continue
+		var score := float(memory[candidate]["reward"]) / (1.0 + _cell_distance(cell, candidate) * 0.2)
+		if score > best:
+			best = score
+			target = candidate
+	if best >= 0.002:
+		return {"type": "move", "agent_id": agent_id, "cell": _step_toward(cell, target)}
 	if float(agent["spore_load"]) > 0.02:
-		var local_refuge: float = ecology.resource_amount(agent["cell"], "dead_biomass") * ecology.resource_amount(agent["cell"], "moisture")
+		var local_refuge: float = ecology.resource_amount(cell, "dead_biomass") * ecology.resource_amount(cell, "moisture")
 		if local_refuge > 0.015:
 			return {"type": "disperse_spores", "agent_id": agent_id, "amount": minf(0.08, float(agent["spore_load"]))}
-		return {"type": "move", "agent_id": agent_id, "cell": _step_toward(agent["cell"], _strongest_resource_cell_near("dead_biomass", habitat_cell, 4))}
-	var flower_signal: float = ecology.resource_amount(agent["cell"], "ground_bloom") + ecology.resource_amount(agent["cell"], "canopy_bloom")
-	if flower_signal > 0.02:
-		var nectar_signal := flower_signal
-		return {"type": "collect_pollen", "agent_id": agent_id, "amount": minf(0.08, nectar_signal * 0.25)}
-	if ecology.resource_amount(agent["cell"], "fruiting") > 0.05:
-		return {"type": "collect_spores", "agent_id": agent_id, "amount": minf(0.08, ecology.resource_amount(agent["cell"], "fruiting") * 0.18)}
-	var ground_cell := _strongest_resource_cell_near("ground_bloom", habitat_cell, 4)
-	var canopy_cell := _strongest_resource_cell_near("canopy_bloom", habitat_cell, 4)
-	var target: Vector2i = ground_cell if ecology.resource_amount(ground_cell, "ground_bloom") >= ecology.resource_amount(canopy_cell, "canopy_bloom") else canopy_cell
-	if ecology.resource_amount(target, "ground_bloom") + ecology.resource_amount(target, "canopy_bloom") <= 0.0:
-		target = _strongest_resource_cell_near("fruiting", habitat_cell, 4)
-	return {"type": "move", "agent_id": agent_id, "cell": _step_toward(agent["cell"], target)}
+		return {"type": "move", "agent_id": agent_id, "cell": _step_toward(cell, _strongest_resource_cell_near("dead_biomass", habitat_cell, 4))}
+	if ecology.resource_amount(cell, "fruiting") > 0.05:
+		return {"type": "collect_spores", "agent_id": agent_id, "amount": minf(0.08, ecology.resource_amount(cell, "fruiting") * 0.18)}
+	# No remote flower lookup: maintain a heading and explore within the home range.
+	var offset := posmod(seed + tick / 12 + agent_id.hash(), DIRECTIONS.size())
+	for turn in range(DIRECTIONS.size()):
+		var candidate: Vector2i = cell + DIRECTIONS[(offset + turn) % DIRECTIONS.size()]
+		if candidate == _bounded_cell(candidate) and _cell_distance(candidate, habitat_cell) <= 4:
+			return {"type": "move", "agent_id": agent_id, "cell": candidate}
+	return {"type": "wait", "agent_id": agent_id}
 
 
 func _choose_engineer_intention(agent: Dictionary) -> Dictionary:
@@ -604,6 +640,8 @@ func _resolve_intention(intention: Dictionary) -> void:
 			_deposit_carried(agent_id, String(intention["source_resource"]), String(intention["resource"]))
 		"colony_tick":
 			_step_colony(agent_id)
+		"visit_flower":
+			_visit_flower(agent_id)
 		"collect_pollen":
 			_collect_pollen(agent_id, float(intention["amount"]))
 		"pollinate":
@@ -627,8 +665,10 @@ func _move_agent(agent_id: String, destination: Vector2i) -> void:
 	agent["cell"] = bounded
 	var moving_states := {"grazer": "roaming", "predator": "hunting", "colony": "foraging", "vector": "flying", "wetland_engineer": "hauling"}
 	agent["state"] = moving_states.get(agent["species"], "moving")
-	var pacing := {"grazer": 15, "predator": 8, "colony": 10, "vector": 2, "wetland_engineer": 11}
+	var pacing := {"grazer": 15, "predator": 8, "colony": 10, "vector": 6, "wetland_engineer": 11}
 	agent["move_cooldown"] = pacing.get(agent["species"], 6)
+	if agent["species"] == "vector":
+		agent["move_cooldown"] = ceili(Vector2(bounded - origin).length() * 6.0)
 	if agent["species"] == "grazer" and bool(agent.get("juvenile", false)):
 		agent["state"] = "following parent" if int(agent["parent_memory_ticks"]) > 0 and _cell_distance(bounded, agent["parent_last_seen"]) > 1 else "near parent"
 		if int(agent["parent_memory_ticks"]) == 0:
@@ -877,24 +917,50 @@ func _colony_search_step(worker: Dictionary, home: Vector2i, scent: Dictionary) 
 	return candidates.back()
 
 
+func _visit_flower(agent_id: String) -> void:
+	var agent: Dictionary = agents[agent_id]
+	var cell: Vector2i = agent["cell"]
+	var kind: String = ecology.flower_kind(cell)
+	var nectar: float = ecology.take_nectar(cell, 0.025)
+	if nectar <= 0.0:
+		return
+	_pollinate(agent_id, float(agent["pollen_load"]))
+	agent = agents[agent_id]
+	agent["hunger"] = maxf(0.0, float(agent["hunger"]) - nectar * 14.0)
+	# Nectar is metabolized; tracked material returns locally to the nutrient cycle.
+	ecology.add_resources(cell, {"nutrients": nectar})
+	agent["last_flower"] = cell
+	agent["last_visit_tick"] = tick
+	agent["move_cooldown"] = 8
+	agent["pollen_donor"] = cell
+	agent["pollen_kind"] = kind
+	agent["pollen_age"] = 0
+	agent["pollen_load"] = 0.0
+	agents[agent_id] = agent
+	_collect_pollen(agent_id, 0.04)
+	agents[agent_id]["state"] = "feeding"
+	_emit("organism.nectar_consumed", agent_id, {"cell": cell, "kind": kind, "amount": nectar})
+
+
 func _collect_pollen(agent_id: String, amount: float) -> void:
 	var agent: Dictionary = agents[agent_id]
-	agent["pollen_load"] = minf(0.12, float(agent["pollen_load"]) + maxf(0.0, amount))
+	var resource := "canopy_bloom" if agent["pollen_kind"] == "canopy" else "ground_bloom"
+	var collected: float = ecology.consume_resource(agent["cell"], resource, amount)
+	agent["pollen_load"] = collected
 	agent["state"] = "collecting"
 	agents[agent_id] = agent
-	_emit("organism.pollen_collected", agent_id, {"cell": agent["cell"], "amount": amount})
+	_emit("organism.pollen_collected", agent_id, {"cell": agent["cell"], "amount": collected, "kind": agent["pollen_kind"]})
 
 
 func _pollinate(agent_id: String, requested: float) -> void:
 	var agent: Dictionary = agents[agent_id]
 	var offered := minf(float(agent["pollen_load"]), maxf(0.0, requested))
-	var accepted: Dictionary = ecology.add_resources(agent["cell"], {"pollination": offered})
-	var deposited := float(accepted.get("pollination", 0.0))
+	var deposited: float = ecology.receive_pollen(agent["cell"], agent["pollen_donor"], agent["pollen_kind"], offered)
 	agent["pollen_load"] = float(agent["pollen_load"]) - deposited
 	agent["state"] = "pollinating"
 	agents[agent_id] = agent
 	if deposited > 0.0:
-		_emit("organism.patch_pollinated", agent_id, {"cell": agent["cell"], "amount": deposited})
+		_emit("organism.patch_pollinated", agent_id, {"cell": agent["cell"], "donor": agent["pollen_donor"], "kind": agent["pollen_kind"], "amount": deposited})
 
 
 func _collect_spores(agent_id: String, amount: float) -> void:

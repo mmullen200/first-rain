@@ -44,6 +44,9 @@ var volatile_sulfur := PackedFloat32Array()
 var ground_bloom := PackedFloat32Array()
 var canopy_bloom := PackedFloat32Array()
 var pollination := PackedFloat32Array()
+var flower_stores: Dictionary = {}
+var developing_seeds: Array[Dictionary] = []
+var seed_events: Array[Dictionary] = []
 var fungal_spores := PackedFloat32Array()
 var dam_material := PackedFloat32Array()
 var shade := PackedFloat32Array()
@@ -226,8 +229,7 @@ func step() -> void:
 			var rhizome_suitability: float = smoothstep(0.16, 0.5, local_moisture) * smoothstep(0.04, 0.3, nutrients[index]) * (1.0 - local_toxicity)
 			var pioneer_support: float = smoothstep(0.015, 0.12, local_moss) * smoothstep(0.015, 0.12, local_crust)
 			var rhizome_awakening: float = dormant_rhizome[index] * pioneer_support * rhizome_suitability * 0.045
-			var pollinated_spread: float = smoothstep(0.005, 0.08, pollination[index])
-			var rhizome_spread: float = neighbor_rhizome * rhizome_suitability * 0.016 * pollinated_spread
+			var rhizome_spread: float = neighbor_rhizome * rhizome_suitability * 0.016
 			var rhizome_growth: float = local_rhizome * rhizome_suitability * 0.022
 			var rhizome_stress: float = local_rhizome * (maxf(0.0, 0.12 - local_moisture) * 0.08 + maxf(0.0, local_temperature - 0.62) * 0.045 + maxf(0.0, local_toxicity - 0.46) * 0.08 + local_canopy * 0.006)
 			next_rhizome[index] = clampf(local_rhizome + rhizome_awakening + rhizome_spread + rhizome_growth - rhizome_stress, 0.0, 1.0)
@@ -239,8 +241,7 @@ func step() -> void:
 			# Canopy-formers are slow deep-succession producers. They require a
 			# functioning rooted/decomposer patch and create shade, litter, and vapor.
 			var canopy_suitability: float = smoothstep(0.2, 0.55, local_moisture) * smoothstep(0.08, 0.35, nutrients[index]) * smoothstep(0.05, 0.3, local_fungus + local_rhizome)
-			var reproductive_connection: float = smoothstep(0.01, 0.12, pollination[index])
-			var canopy_awakening: float = dormant_canopy[index] * canopy_suitability * maxf(0.0, local_rhizome - 0.005) * 0.005 * reproductive_connection
+			var canopy_awakening: float = dormant_canopy[index] * canopy_suitability * maxf(0.0, local_rhizome - 0.005) * 0.005
 			var canopy_growth: float = local_canopy * canopy_suitability * 0.0022
 			var canopy_stress: float = local_canopy * maxf(0.0, 0.16 - local_moisture) * 0.025
 			next_canopy[index] = clampf(local_canopy + canopy_awakening + canopy_growth - canopy_stress, 0.0, 1.0)
@@ -250,8 +251,8 @@ func step() -> void:
 
 			# Flowering is explicitly plant reproduction. Fungal fruiting remains a
 			# separate spore pathway and is never treated as a pollen source.
-			var ground_flowering: float = local_rhizome * rhizome_suitability * (0.006 + pollination[index] * 0.004)
-			var canopy_flowering: float = local_canopy * canopy_suitability * (0.002 + pollination[index] * 0.003)
+			var ground_flowering: float = local_rhizome * rhizome_suitability * 0.006
+			var canopy_flowering: float = local_canopy * canopy_suitability * 0.002
 			next_ground_bloom[index] = clampf(ground_bloom[index] * 0.982 + ground_flowering, 0.0, 1.0)
 			next_canopy_bloom[index] = clampf(canopy_bloom[index] * 0.987 + canopy_flowering, 0.0, 1.0)
 
@@ -336,6 +337,91 @@ func step() -> void:
 	fungal_spores = next_fungal_spores
 	dam_material = next_dam_material
 	tick += 1
+	_step_reproduction()
+
+
+# Two provisional plant compatibility groups; a cell is a reproductive patch,
+# not an individual genotype. Nectar and seed tissue are paid for by the plant.
+func flower_kind(cell: Vector2i) -> String:
+	var i := cell.y * WIDTH + cell.x
+	if canopy_bloom[i] > 0.02 and canopy[i] > 0.02 and canopy_bloom[i] > ground_bloom[i]:
+		return "canopy"
+	if ground_bloom[i] > 0.02 and rhizome[i] > 0.02:
+		return "rhizome"
+	return ""
+
+
+func flower_reward(cell: Vector2i) -> float:
+	return float(flower_stores.get(cell, {}).get("nectar", 0.0)) if not flower_kind(cell).is_empty() else 0.0
+
+
+func take_nectar(cell: Vector2i, requested: float) -> float:
+	var amount := minf(flower_reward(cell), maxf(0.0, requested))
+	if flower_stores.has(cell):
+		flower_stores[cell]["nectar"] -= amount
+	return amount
+
+
+func receive_pollen(cell: Vector2i, donor: Vector2i, kind: String, amount: float) -> float:
+	if cell == donor or kind.is_empty() or flower_kind(cell) != kind or amount <= 0.0:
+		return 0.0
+	# Only one developing seed batch per recipient/type at a time.
+	for batch in developing_seeds:
+		if batch["cell"] == cell and batch["kind"] == kind and batch["age"] < 90:
+			return 0.0
+	var tissue := consume_resource(cell, kind, minf(0.012, amount * 0.25))
+	if tissue <= 0.0:
+		return 0.0
+	developing_seeds.append({"cell": cell, "donor": donor, "kind": kind, "amount": tissue, "age": 0})
+	add_resources(cell, {"pollination": amount})
+	return amount
+
+
+func _step_reproduction() -> void:
+	seed_events.clear()
+	for y in range(HEIGHT):
+		for x in range(WIDTH):
+			var cell := Vector2i(x, y)
+			var kind := flower_kind(cell)
+			if kind.is_empty():
+				if flower_stores.has(cell):
+					add_resources(cell, {"dead_biomass": flower_stores[cell]["nectar"]})
+					flower_stores.erase(cell)
+				continue
+			if not flower_stores.has(cell):
+				flower_stores[cell] = {"nectar": 0.0}
+			var i := y * WIDTH + x
+			var room := maxf(0.0, 0.035 - flower_reward(cell))
+			var produced := consume_resource(cell, kind, minf(room, 0.0015 * moisture[i] * (1.0 - toxicity[i])))
+			flower_stores[cell]["nectar"] += produced
+	var remaining: Array[Dictionary] = []
+	for batch in developing_seeds:
+		batch["age"] += 1
+		var source: Vector2i = batch["cell"]
+		var kind := String(batch["kind"])
+		if batch["age"] == 90:
+			seed_events.append({"taxonomy": "ecology.seeds_matured", "cell": source, "kind": kind, "amount": batch["amount"]})
+		if batch["age"] >= 90:
+			var established := false
+			for direction in [Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(0, -1)]:
+				var target: Vector2i = source + direction
+				if target.x < 0 or target.y < 0 or target.x >= WIDTH or target.y >= HEIGHT:
+					continue
+				var i := target.y * WIDTH + target.x
+				if moisture[i] < 0.25 or toxicity[i] > 0.4 or nutrients[i] < 0.08 or temperature[i] > 0.65 or resource_amount(target, kind) > 0.15:
+					continue
+				var accepted: Dictionary = add_resources(target, {kind: batch["amount"]})
+				batch["amount"] -= float(accepted.get(kind, 0.0))
+				seed_events.append({"taxonomy": "ecology.seedling_established", "cell": target, "source": source, "kind": kind})
+				established = true
+				break
+			if established and batch["amount"] <= 0.000001:
+				continue
+		if batch["age"] >= 600:
+			add_resources(source, {"dead_biomass": batch["amount"]})
+		else:
+			remaining.append(batch)
+	developing_seeds = remaining
 
 
 func add_water(world: Vector2, amount := 0.9, radius := 4.0) -> void:
@@ -743,7 +829,10 @@ func cell_snapshot(x: int, y: int) -> Dictionary:
 
 func full_snapshot() -> Dictionary:
 	return {
-		"version": 2,
+		"version": 3,
+		"flower_stores": flower_stores.duplicate(true),
+		"developing_seeds": developing_seeds.duplicate(true),
+		"seed_events": seed_events.duplicate(true),
 		"tick": tick,
 		"width": WIDTH,
 		"height": HEIGHT,
@@ -781,13 +870,16 @@ func full_snapshot() -> Dictionary:
 
 
 func restore_snapshot(snapshot: Dictionary) -> bool:
-	if int(snapshot.get("version", 0)) != 2:
+	if int(snapshot.get("version", 0)) != 3:
 		return false
 	if int(snapshot.get("width", 0)) != WIDTH or int(snapshot.get("height", 0)) != HEIGHT:
 		return false
 	for field_name in ["elevation", "moisture", "temperature", "toxicity", "nutrients", "dormant_moss", "moss", "dead_biomass", "fungus", "fruiting", "microbial_crust", "dormant_rhizome", "rhizome", "dormant_canopy", "canopy", "surface_water", "aquatic_producer", "aquatic_consumer", "dissolved_oxygen", "sulfur_precursor", "volatile_sulfur", "ground_bloom", "canopy_bloom", "pollination", "fungal_spores", "dam_material", "shade"]:
 		if not snapshot.has(field_name) or snapshot[field_name].size() != WIDTH * HEIGHT:
 			return false
+	flower_stores = snapshot["flower_stores"].duplicate(true)
+	developing_seeds.assign(snapshot["developing_seeds"].duplicate(true))
+	seed_events.assign(snapshot["seed_events"].duplicate(true))
 	elevation = snapshot["elevation"].duplicate()
 	moisture = snapshot["moisture"].duplicate()
 	temperature = snapshot["temperature"].duplicate()

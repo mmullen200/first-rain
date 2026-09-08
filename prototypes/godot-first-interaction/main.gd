@@ -187,6 +187,8 @@ var ecosystem_label: Label
 var zone_label: Label
 var visited_zones: Dictionary = {}
 var scanner_before_survey := ""
+var reproductive_markers: Dictionary = {}
+var seedling_observations: Dictionary = {}
 
 
 func _ready() -> void:
@@ -209,12 +211,51 @@ func _ready() -> void:
 		_seed_colony_foraging_fixture()
 	if "--predator-ecology" in OS.get_cmdline_user_args():
 		_seed_predator_fixture()
+	if "--vector-pollination" in OS.get_cmdline_user_args():
+		_seed_vector_fixture()
 	evidence.begin_run(1, _evidence_snapshot())
-	if "--colony-foraging" in OS.get_cmdline_user_args() or "--predator-ecology" in OS.get_cmdline_user_args():
+	if "--colony-foraging" in OS.get_cmdline_user_args() or "--predator-ecology" in OS.get_cmdline_user_args() or "--vector-pollination" in OS.get_cmdline_user_args():
 		_open_emergency_cache()
 	_set_status("A fixed mound stands between separated living patches." if "--colony-foraging" in OS.get_cmdline_user_args() else "The crash has stopped. The ship is dead, but an emergency cache still blinks beneath the broken wing.")
 	if "--predator-ecology" in OS.get_cmdline_user_args():
 		_set_status("Red tracks cross the feeding ground. Farther east, another predator noses through dark remains.", 5.0)
+	if "--vector-pollination" in OS.get_cmdline_user_args():
+		_set_status("A small flying animal pauses among pale blossoms. Other flowering patches stand across the gaps.", 5.0)
+
+
+func _seed_vector_fixture() -> void:
+	# Reuse the existing scan/water site so this fixture exercises real controls.
+	var margin := Vector2i(4, 8)
+	var margin_world: Vector2 = ecology.world_position(margin.x, margin.y)
+	patches["hollow"]["node"].position = Vector3(margin_world.x, ecology.terrain_height(margin) + 0.04, margin_world.y)
+	patches["hollow"]["state"] = "thriving"
+	_create_world_label("FLOWERING MARGIN", patches["hollow"]["node"].position + Vector3(0.0, 0.3, 0.0), Color("f0ead5"), 0.0055)
+	for y in range(7, 12):
+		for x in range(4, 10):
+			var i: int = y * ecology.WIDTH + x
+			ecology.moisture[i] = 0.68
+			ecology.temperature[i] = 0.35
+			ecology.toxicity[i] = 0.02
+			ecology.nutrients[i] = 0.55
+			ecology.dormant_rhizome[i] = 0.0
+			ecology.dormant_canopy[i] = 0.0
+	for cell in [Vector2i(5, 8), Vector2i(7, 8), Vector2i(5, 10)]:
+		ecology.add_resources(cell, {"rhizome": 0.55, "ground_bloom": 0.45})
+	for cell in [Vector2i(8, 10), Vector2i(9, 8)]:
+		ecology.add_resources(cell, {"canopy": 0.4, "canopy_bloom": 0.5})
+	ecology._step_reproduction()
+	for cell in ecology.flower_stores:
+		# Initial nectar is transferred from finite plant tissue, not replenished by the fixture.
+		ecology.flower_stores[cell]["nectar"] += ecology.consume_resource(cell, ecology.flower_kind(cell), 0.025)
+	animal_simulation.register_agent("vector", "vector:1", {"cell": Vector2i(5, 8), "habitat_cell": Vector2i(7, 9)})
+	ecology_started = true
+	var cell := Vector2i(7, 9)
+	var world: Vector2 = ecology.world_position(cell.x, cell.y)
+	astronaut.position = Vector3(world.x, ecology.terrain_height(cell) + 0.02, world.y)
+	camera.position = astronaut.position + Vector3(8.8, 10.8, 10.5)
+	camera.look_at(astronaut.position)
+	_refresh_ecology_visuals()
+	_update_ecological_animal_markers()
 
 
 # Optional starting fixture, using the ordinary living ecosystem and controls.
@@ -292,6 +333,7 @@ func _physics_process(delta: float) -> void:
 	_update_ecology_grid(delta)
 	_update_grazer(delta)
 	_update_grazer_markers(delta)
+	_update_vector_markers(delta)
 	_update_colony_worker_visual()
 	_update_colony_prospect_visual()
 	_update_disturbance(delta)
@@ -841,7 +883,7 @@ func _build_interface() -> void:
 
 	var title := Label.new()
 	title.position = Vector2(24, 18)
-	title.text = "FIRST RAIN  /  GRAZER FAMILY PROTOTYPE"
+	title.text = "FIRST RAIN  /  POLLINATION PROTOTYPE" if "--vector-pollination" in OS.get_cmdline_user_args() else "FIRST RAIN  /  GRAZER FAMILY PROTOTYPE"
 	title.add_theme_font_size_override("font_size", 15)
 	title.add_theme_color_override("font_color", Color("e9b36e"))
 	canvas.add_child(title)
@@ -1418,7 +1460,7 @@ func _update_ecology_grid(delta: float) -> void:
 		if not ground_flowering_announced and state["total_ground_bloom"] >= 0.012:
 			ground_flowering_announced = true
 			evidence.record_event(ecology.tick, "ecology.ground_flowering", "basin", [], state)
-			_add_discovery("Ground flowering — rooted mats expose blossoms, but reproduction remains locally stalled without an animal crossing")
+			_add_discovery("Ground flowering — rooted mats expose blossoms; new seed production requires pollen from another compatible patch")
 			_set_status("Small gold blossoms open above rooted mats. Nothing answers them yet; separated patches remain reproductively disconnected.")
 		if not canopy_announced and state["canopy_cells"] >= 1:
 			canopy_announced = true
@@ -1717,7 +1759,7 @@ func _local_habitat_evidence(center: Vector2i, radius: int, include_flowering_to
 			var local_cover: float = canopy_values[index]
 			var local_surface_water: float = surface_water_values[index]
 			# The first flying vector must be invited by the ground layer. Canopy
-			# flowering becomes another destination only after pollination wakes it.
+			# flowering becomes another destination after canopy establishment.
 			var local_flowering: float = ground_bloom_values[index]
 			evidence["detritus"] += local_detritus * weight
 			evidence["forage"] += local_forage * weight
@@ -1944,7 +1986,7 @@ func _update_ecological_animal_markers() -> void:
 		var target := Vector3(world.x, ecology.terrain_height(cell) + height, world.y)
 		if not was_visible:
 			marker.position = target
-		elif agent["species"] != "grazer":
+		elif agent["species"] not in ["grazer", "vector"]:
 			marker.position = marker.position.lerp(target, 0.45)
 		var label: Label3D = marker.get_child(1)
 		label.text = String(label.text).split(" / ")[0] + " / " + String(agent["state"]).to_upper()
@@ -1959,6 +2001,25 @@ func _update_ecological_animal_markers() -> void:
 		if stable_id == "colony:1":
 			_update_colony_worker_stream(agent)
 	_update_colony_prospect_visual()
+
+
+func _update_vector_markers(delta: float) -> void:
+	for id in animal_markers:
+		var agent: Dictionary = animal_simulation.agent_state(id)
+		if agent.is_empty() or agent["species"] != "vector" or not agent["alive"] or not agent["present"]:
+			continue
+		var marker: Node3D = animal_markers[id]
+		var cell: Vector2i = agent["cell"]
+		var world: Vector2 = ecology.world_position(cell.x, cell.y)
+		var height := 0.45 if agent["state"] == "feeding" else 0.9
+		marker.position = marker.position.move_toward(Vector3(world.x, ecology.terrain_height(cell) + height, world.y), delta * 2.0)
+		var underfoot: Vector2i = ecology.world_to_cell(Vector2(marker.position.x, marker.position.z))
+		marker.position.y = maxf(marker.position.y, ecology.terrain_height(underfoot) + 0.4)
+		var body: MeshInstance3D = marker.get_child(0)
+		var color := Color("f5b0de") if agent["pollen_kind"] == "canopy" and agent["pollen_load"] > 0.0 else Color("e9d36a")
+		if body.get_meta("pollen_color", Color.TRANSPARENT) != color:
+			body.material_override = _material(color, 0.6)
+			body.set_meta("pollen_color", color)
 
 
 func _add_grazer_marker(id: String) -> void:
@@ -2239,8 +2300,12 @@ func _handle_authoritative_animal_events(events: Array[Dictionary]) -> void:
 				evidence.record_event(ecology.tick, "organism.plant_pollinated", event["subject"], [], facts)
 				if not animal_roles_announced.has("pollination_observed"):
 					animal_roles_announced["pollination_observed"] = true
-					_add_discovery("Plant pollination — flying vectors connect separated blossoms, enabling rooted spread and dormant canopy awakening")
-					_set_status("The flying vector crosses between flowering plant patches. The scanner detects transferred pollen; rooted spread and dormant canopy now have a missing connection.")
+					_add_discovery("Plant pollination — pollen carried between compatible flowering patches enables seed development")
+					_set_status("The flying animal carries pollen between compatible blossoms. Seed tissue begins developing at the receiving patch.")
+			"organism.nectar_consumed", "ecology.seeds_matured", "ecology.seedling_established":
+				evidence.record_event(ecology.tick, event["taxonomy"], event["subject"], [], event["facts"])
+				if event["taxonomy"] == "ecology.seedling_established":
+					seedling_observations[event["facts"]["cell"]] = ecology.tick
 			"organism.fungal_spores_distributed":
 				var facts: Dictionary = event["facts"]
 				evidence.record_event(ecology.tick, "organism.fungal_spores_distributed", event["subject"], [], facts)
@@ -2303,7 +2368,56 @@ func _reveal_presence_nudge() -> void:
 	_set_status("As the wind rises, the flame travels to a bare depression and repeats its familiar single focus pulse. It offers no action.")
 
 
+func _refresh_reproductive_markers() -> void:
+	var stages := {}
+	for batch in ecology.developing_seeds:
+		stages[batch["cell"]] = "SEEDS" if batch["age"] >= 90 else "SEED POD"
+	for cell in seedling_observations.keys():
+		if ecology.tick - int(seedling_observations[cell]) > 180:
+			seedling_observations.erase(cell)
+		else:
+			stages[cell] = "SEEDLING"
+	var cells: Array = ecology.flower_stores.keys()
+	for cell in stages:
+		if cell not in cells:
+			cells.append(cell)
+	for marker in reproductive_markers.values():
+		marker.visible = false
+	for cell in cells:
+		if not reproductive_markers.has(cell):
+			var root := Node3D.new()
+			var body := MeshInstance3D.new()
+			var sphere := SphereMesh.new()
+			sphere.radius = 0.12
+			sphere.height = 0.16
+			body.mesh = sphere
+			root.add_child(body)
+			var label := Label3D.new()
+			label.font_size = 22
+			label.pixel_size = 0.004
+			label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+			label.position.y = 0.3
+			root.add_child(label)
+			add_child(root)
+			reproductive_markers[cell] = root
+		var marker: Node3D = reproductive_markers[cell]
+		marker.visible = true
+		var world: Vector2 = ecology.world_position(cell.x, cell.y)
+		marker.position = Vector3(world.x + 0.3, ecology.terrain_height(cell) + 0.22, world.y)
+		var body: MeshInstance3D = marker.get_child(0)
+		var stage := String(stages.get(cell, ""))
+		var color := Color("eeb4da") if ecology.flower_kind(cell) == "canopy" else Color("fff0a0")
+		if not stage.is_empty():
+			color = Color("80ed9a") if stage == "SEEDLING" else Color("b88446")
+		body.material_override = _material(color, 0.6)
+		body.scale = Vector3.ONE * (1.0 if not stage.is_empty() else lerpf(0.45, 1.3, clampf(ecology.flower_reward(cell) / 0.035, 0.0, 1.0)))
+		var label: Label3D = marker.get_child(1)
+		label.text = stage
+		label.visible = marker.position.distance_to(astronaut.position) < 7.0
+
+
 func _refresh_ecology_visuals() -> void:
+	_refresh_reproductive_markers()
 	for y in range(EcologyGridModel.HEIGHT):
 		for x in range(EcologyGridModel.WIDTH):
 			var index: int = y * EcologyGridModel.WIDTH + x

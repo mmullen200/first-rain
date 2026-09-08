@@ -187,6 +187,26 @@ Dependence relaxes to two cells halfway through 1,800 well-fed, low-fear develop
 
 **Playtest gate:** identify smooth juvenile travel, near-adult feeding and catch-up, and separation/reunion following a threat. **R** restarts the paired scene, **WASD/arrows** move and **J** pauses. All prior toolkit controls remain available. These behavior and rendering checks are implemented evidence; the family behavior still needs human playtesting.
 
+## Flower visits and compatible reproduction (#33)
+
+Branch: `prototype/vector-pollination`. Run the living **POLLINATION PROTOTYPE** with:
+
+```sh
+/Applications/Godot.app/Contents/MacOS/Godot --path prototypes/godot-first-interaction -- --vector-pollination
+```
+
+The fixture seeds three flowering Rooted Mat patches, two flowering Canopy-Formers and one Flying Reproductive Vector. It pays initial nectar from plant tissue; subsequent weather, drying, growth, depletion and residency remain active. WASD/arrows move, F scans, Space waters, T transplants, J pauses and R restarts. The existing scan/water site is relocated to the labeled FLOWERING MARGIN. Drying can leave mature seeds waiting; a carried water dose at this open margin can enable establishment. The regression exercises this actual player control and checks the dose is consumed.
+
+Vectors feed from a finite nectar stock, replenished slowly from living plant tissue under local conditions. Hungry animals perceive flowers within two cells, remember observed rewards for 180 ticks, revisit rewarding sites and explore within their four-cell home range. A just-visited patch is avoided for 60 ticks. Feeding pauses last eight ticks, flight is smooth, and satiated animals rest. These are compressed prototype values.
+
+Each pollen load records its donor patch, plant group and age. A visit deposits incoming compatible pollen before collecting fresh pollen; the same patch and a different plant group cannot fertilize it. Rooted Mat and Canopy-Former are separate compatibility groups; cells stand in for reproductive patches, without individual genotypes or clonal identity. Fungal spores retain their separate existing pathway.
+
+Compatible delivery reserves finite recipient plant tissue as a seed batch. It matures after 90 ticks, then can establish in a neighboring cell only with suitable moisture, nutrients, temperature, toxicity and space. Unestablished seed expires into Detritus after 600 ticks. Pale yellow/pink flower beads shrink with nectar loss; brown seed pods and nearby SEED POD/SEEDS labels precede a green SEEDLING cue. Carrying canopy pollen gives the vector a pink tint.
+
+This experiment supersedes the older direct pollen-to-growth shortcut described above: Rooted Mat clonal spread needs no pollination, and existing dormant canopy seed germinates from habitat conditions. Only producing new seeds requires compatible pollen. Pollen never turns one plant group into another. Full plant water/nutrient accounting, genetics, mixed pollen loads and long-distance seed dispersal remain outside this slice. Animal snapshot version 6 and ecology snapshot version 3 include flower stores, memory and developing seeds; older snapshots are rejected.
+
+**Playtest gate:** identify feeding pauses and crossings, departure from depleted flowers, and the delay between pollen delivery and seedling appearance without F9. Automated behavior and replay checks do not validate comprehension or fun.
+
 ## Regression check
 
 The captured idle-opening failure can be replayed headlessly:
@@ -204,6 +224,7 @@ The captured idle-opening failure can be replayed headlessly:
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/animal_simulation_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/predator_ecology_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/juvenile_grazer_test.gd
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/vector_pollination_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/integrated_succession_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/ecological_roles_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/habitat_colonization_test.gd

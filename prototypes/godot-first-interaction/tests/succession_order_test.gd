@@ -90,12 +90,8 @@ func _assert_canopy_waits_for_pollination() -> void:
 	for ignored in range(40):
 		ecology.add_water(world, 0.35, 1.5)
 		ecology.step()
-	_assert(ecology.resource_amount(cell, "canopy") == 0.0, "canopy should remain dormant while flowering plants have no flying-vector pollination")
-	ecology.add_resources(cell, {"pollination": 0.3})
-	for ignored in range(40):
-		ecology.add_water(world, 0.35, 1.5)
-		ecology.step()
-	_assert(ecology.resource_amount(cell, "canopy") > 0.0, "pollination should let suitable dormant canopy wake")
+	_assert(ecology.resource_amount(cell, "canopy") > 0.0, "existing dormant canopy seed should germinate from habitat, independent of fresh pollen")
+	_assert(ecology.developing_seeds.is_empty(), "germination alone must not create new sexually produced seeds")
 
 
 func _advance_search_attempts(scene, attempts := 40) -> void:
