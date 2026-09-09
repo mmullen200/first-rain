@@ -49,8 +49,8 @@ The gradual, legible loss of Wreck Dependencies as damaged equipment ages, is us
 _Avoid_: Durability grind, sudden doomsday timer, scripted failure sequence
 
 **Wreck Life-Support Reclaimer**:
-The damaged wreck module that enables rapid suit servicing at shelter and contains one finite emergency water reserve that can be recovered only by permanently disabling that service.
-_Avoid_: Recycler, water generator
+The damaged wreck module that enables rapid suit servicing at shelter and slowly recovers usable water into a capped reserve. It remains a Wreck Dependency whose later failure must become legible before the Ecosystem has to replace it.
+_Avoid_: Infinite water source, permanent base service
 
 **Ecological Infrastructure**:
 A reusable, physically situated object or habitat alteration that changes local ecological conditions without generating matter from nothing.
@@ -189,8 +189,8 @@ The capacity of living matter such as moss to hold recently supplied water and k
 _Avoid_: Permanent water source, infinite moisture
 
 **Reservoir**:
-A terrain-bound store of water that persists across ordinary dry periods and can supply nearby ecological cells without consuming the astronaut's wreck supplies.
-_Avoid_: Water pickup, moisture bonus, permanent watering spot
+A terrain-bound store of finite water accumulated from real inputs such as runoff or rain. It can supply nearby ecological cells only while that stored water remains.
+_Avoid_: Water pickup, moisture bonus, infinite watering spot
 
 **Ecosystem engineer**:
 An animal whose ordinary behavior physically reshapes habitat, such as impounding water with gathered material, and thereby changes conditions for many other species.

@@ -79,7 +79,7 @@ The status text describes observable behavior for this low-fidelity prototype, b
 
 The wreck is a safe deliberation space: hunger and exposure stop advancing there. Press **E** at the opened wreck to recover exposure deliberately while two seconds of ecological time pass. If exposure reaches its limit in the field, the suit returns the astronaut to the wreck while ten seconds of ecological time pass; the scanner reports changes only to previously observed subjects. Press **J** to pause survival and ecology while reviewing the detailed record.
 
-Exposure remains an exact suit reading. Hunger is qualitative and accelerates exposure by 25% while hungry and 60% while starving, shortening excursions without trapping the astronaut or degrading controls. Drinking spends one shared water dose to recover half an excursion. The final carried dose requires a short hold, and an already-watered refuge rejects repeated spending.
+Exposure remains an exact suit reading. Hunger is qualitative and accelerates exposure by 25% while hungry and 60% while starving, shortening excursions without trapping the astronaut or degrading controls. Drinking spends one shared water dose to recover half an excursion. The last currently available dose requires a short hold, and an already-watered refuge rejects repeated spending.
 
 The balance values are deliberately provisional. The playtest asks whether players voluntarily structure their work into excursions, understand the cost of forced recovery, and still feel able to inspect and recover from an ecological mistake.
 
@@ -127,7 +127,9 @@ The loose shade panel can be carried as the astronaut's one bulky object and pla
 
 A robust living moss or rhizome cell can also surrender a finite clump to the same bulky carry frame. Extraction immediately thins the donor; placement transfers that exact living biomass rather than creating a planting token. Hot, dry, or toxic ground stresses the transplant through the ordinary ecological rules, so the initial placement is not proof of establishment. This asks whether source sacrifice and uncertain destination choice create a legible spatial Field Experiment.
 
-The revealed depression is a provisional terrain-bound Reservoir: after it is established, **E** refills one empty canister at a time. If water reaches zero before that Reservoir exists, holding **E** at the wreck dismantles the Wreck Life-Support Reclaimer for one final dose. The wreck stays safe, but voluntary recovery thereafter advances the same longer ecological interval as forced recovery. These fixtures test the accepted toolkit and material-economy boundaries; they do not settle later toolkit progression or the final Reservoir-forming ecology.
+Opening the emergency cache starts the wreck's damaged water system with three available doses. It produces one additional dose every twelve seconds of active play and stops at a provisional ten-dose capacity. The displayed **SHIP OUTPUT** shows progress toward the next dose. Water remains shared between ecological Interventions and emergency drinking; opening the Basin Survey pauses production with the rest of the simulation.
+
+Water committed to the revealed depression forms a finite terrain-bound pool and changes nearby habitat, but it cannot refill the Astronaut's supply. A true Reservoir must eventually accumulate finite water from runoff or rain rather than multiplying one carried dose. Later failure of the wreck's water system belongs to the Technological Attrition experiment and is not simulated here.
 
 ## Crash-basin spatial question
 

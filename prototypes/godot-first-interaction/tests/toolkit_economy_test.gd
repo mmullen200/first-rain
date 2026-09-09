@@ -34,22 +34,41 @@ func _run() -> void:
 		_fail("forced recovery did not leave the bulky panel in the field")
 		return
 	scene.water_doses = 0
-	scene.reservoir_established = true
+	scene.ship_water_production_elapsed = 0.0
+	scene.cache_opened = false
+	scene._update_ship_water_production(scene.SHIP_WATER_PRODUCTION_SECONDS)
+	if scene.water_doses != 0:
+		_fail("wreck produced water before the emergency cache was opened")
+		return
+	scene.cache_opened = true
+	scene.field_review_open = true
+	scene._physics_process(scene.SHIP_WATER_PRODUCTION_SECONDS)
+	if scene.water_doses != 0 or scene.ship_water_production_elapsed != 0.0:
+		_fail("wreck produced water while the Basin Survey paused the simulation")
+		return
+	scene.field_review_open = false
+	scene._update_ship_water_production(scene.SHIP_WATER_PRODUCTION_SECONDS - 0.1)
+	if scene.water_doses != 0:
+		_fail("wreck produced water before a full production interval")
+		return
+	scene._update_ship_water_production(0.1)
+	if scene.water_doses != 1:
+		_fail("wreck did not produce exactly one water dose per interval")
+		return
+	scene._update_ship_water_production(scene.SHIP_WATER_PRODUCTION_SECONDS * 20.0)
+	if scene.water_doses != scene.MAX_WATER_DOSES:
+		_fail("wreck water production did not stop at its ten-dose capacity")
+		return
+	scene.water_doses = 0
+	scene.refuge_watered = true
 	scene.refuge_revealed = true
 	scene.astronaut.position = scene.refuge_position
 	scene._update_nearby_interactions()
 	scene._interact()
-	if scene.water_doses != 1:
-		_fail("reservoir did not refill exactly one canister")
+	if scene.water_doses != 0:
+		_fail("the one-dose depression created renewable water")
 		return
-	scene.water_doses = 0
-	scene.reservoir_established = false
-	scene.reclaimer_intact = true
-	scene._dismantle_reclaimer()
-	if scene.water_doses != 1 or scene.reclaimer_intact:
-		_fail("reclaimer sacrifice did not exchange servicing for water")
-		return
-	print("PASS: toolkit supports free shade placement, persistent bulky drops, reservoir refill, and irreversible reclaimer sacrifice")
+	print("PASS: toolkit supports free shade placement, persistent bulky drops, capped wreck water production, and a finite depression pool")
 	quit(0)
 
 func _fail(message: String) -> void:

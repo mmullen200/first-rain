@@ -14,6 +14,8 @@ const ECOLOGY_STEP_SECONDS := 0.34
 const VOLUNTARY_RECOVERY_SECONDS := 2.0
 const FORCED_RECOVERY_SECONDS := 10.0
 const LAST_WATER_HOLD_SECONDS := 0.75
+const SHIP_WATER_PRODUCTION_SECONDS := 12.0
+const MAX_WATER_DOSES := 10
 const FIELD_TIME_SCALE := 12.0
 const EXPOSED_EXPOSURE_RATE := 0.105
 const MOSS_EXPOSURE_RATE := 0.035
@@ -114,10 +116,7 @@ var shade_placed := false
 var shade_placed_cell := Vector2i(-1, -1)
 var clump_marker: MeshInstance3D
 var carried_clump: Dictionary = {}
-var reservoir_established := false
-var reclaimer_intact := true
-var reclaimer_hold_active := false
-var reclaimer_hold_timer := 0.0
+var ship_water_production_elapsed := 0.0
 var presence_root: Node3D
 var presence_target := Vector3(24.0, 1.3, -3.5)
 var presence_signal_ring: MeshInstance3D
@@ -382,6 +381,7 @@ func _physics_process(delta: float) -> void:
 	_update_nearby_interactions()
 	_update_exposure(delta)
 	_update_hunger(delta)
+	_update_ship_water_production(delta)
 	_update_ecology(delta)
 	_update_ecology_grid(delta)
 	_update_grazer(delta)
@@ -394,17 +394,12 @@ func _physics_process(delta: float) -> void:
 	_update_presence_signals(delta)
 	_update_scan_pulse(delta)
 	_update_last_water_hold(delta)
-	_update_reclaimer_hold(delta)
 	if exposure >= 100.0:
 		_force_recovery()
 	_update_interface()
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.keycode == KEY_E and not event.pressed:
-		reclaimer_hold_active = false
-		reclaimer_hold_timer = 0.0
-		return
 	if event is InputEventKey and event.keycode == KEY_SPACE and not event.pressed:
 		last_water_hold_active = false
 		last_water_hold_timer = 0.0
@@ -1244,11 +1239,11 @@ func _update_nearby_interactions() -> void:
 		else:
 			prompt_label.text = "The film is unusual, but bare eyes reveal little."
 	elif near_refuge:
-		prompt_label.text = "E  refill one canister     F  scan reservoir" if reservoir_established else "F  scan the bare depression     SPACE  commit water here"
-	elif cache_opened and _at_wreck() and water_doses == 0 and not reservoir_established and reclaimer_intact:
-		prompt_label.text = "HOLD E  reclaim one emergency water / permanently slow recovery"
+		prompt_label.text = "F  scan standing water" if refuge_watered else "F  scan the bare depression     SPACE  commit water here"
 	elif cache_opened and _at_wreck() and exposure > 0.5:
 		prompt_label.text = "E  recover at the wreck while the ecosystem continues"
+	elif cache_opened and _at_wreck():
+		prompt_label.text = "Wreck water system producing     capacity %d doses" % MAX_WATER_DOSES
 	elif not scanner_recovered:
 		prompt_label.text = "The wreck's blinking cache may contain usable instruments."
 	else:
@@ -1262,9 +1257,7 @@ func _update_nearby_interactions() -> void:
 	if presence_root.visible:
 		prompt_label.text += "     C  signal toward nearby subject"
 	if last_water_hold_active:
-		prompt_label.text = "HOLD SPACE  final water dose  %d%%" % roundi(100.0 * last_water_hold_timer / LAST_WATER_HOLD_SECONDS)
-	if reclaimer_hold_active:
-		prompt_label.text = "HOLD E  dismantle life-support reclaimer  %d%%" % roundi(100.0 * reclaimer_hold_timer / LAST_WATER_HOLD_SECONDS)
+		prompt_label.text = "HOLD SPACE  last available water dose  %d%%" % roundi(100.0 * last_water_hold_timer / LAST_WATER_HOLD_SECONDS)
 
 
 func _update_exposure(delta: float) -> void:
@@ -1347,7 +1340,7 @@ func _request_water_intervention() -> void:
 	last_water_hold_active = true
 	last_water_hold_timer = 0.0
 	last_water_hold_target = "refuge" if near_refuge else nearest_patch
-	_set_status("This is the final carried water dose. Hold SPACE to commit it; release to keep it.")
+	_set_status("This is the last water dose currently available. Hold SPACE to commit it; the wreck is still producing.")
 
 
 func _update_last_water_hold(delta: float) -> void:
@@ -1370,7 +1363,7 @@ func _update_last_water_hold(delta: float) -> void:
 
 func _recover_at_wreck(forced: bool) -> void:
 	var before := _observed_recovery_state()
-	var elapsed := FORCED_RECOVERY_SECONDS if forced or not reclaimer_intact else VOLUNTARY_RECOVERY_SECONDS
+	var elapsed := FORCED_RECOVERY_SECONDS if forced else VOLUNTARY_RECOVERY_SECONDS
 	var command_id := ""
 	if not forced:
 		command_id = _record_command("recover", "wreck", {"elapsed": elapsed})
@@ -2603,12 +2596,11 @@ func _water_nearby_patch() -> void:
 			_set_status("The depression already holds the last intervention. Observe its response before committing water elsewhere.")
 			return
 		if water_doses <= 0:
-			_set_status("No water remains to test the Presence's indicated refuge.")
+			_set_status("No water is ready. The wreck's water system is producing another dose.")
 			return
 		var command_id := _record_command("water", "refuge", {"doses": 1})
 		water_doses -= 1
 		refuge_watered = true
-		reservoir_established = true
 		ecology_started = true
 		ecology.add_water(Vector2(refuge_position.x, refuge_position.z), 0.72, 4.0)
 		var refuge_cell: Vector2i = ecology.world_to_cell(Vector2(refuge_position.x, refuge_position.z))
@@ -2616,16 +2608,16 @@ func _water_nearby_patch() -> void:
 		evidence.checkpoint(ecology.tick, "player_intervention", _evidence_snapshot())
 		if refuge_signal_acknowledged:
 			_begin_presence_signal("invitation", refuge_position, astronaut.position)
-			_set_status("Water sinks into the depression and collects above the sealed substrate as a provisional reservoir. The flame answers around both participants.", 2.6)
+			_set_status("Water settles into the depression above the sealed substrate. The finite pool changes the nearby habitat, and the flame answers around both participants.", 2.6)
 		else:
 			_begin_presence_signal("focus", refuge_position)
-			_set_status("Water collects in the terrain-bound depression as a provisional reservoir. The flame repeats its focus pulse at the changing cells.", 2.6)
+			_set_status("Water settles into the terrain-bound depression as a finite pool. The flame repeats its focus pulse at the changing cells.", 2.6)
 		return
 	if nearest_patch == "":
 		_set_status("Water must be committed at a specific patch, not poured from a distance.")
 		return
 	if water_doses <= 0:
-		_set_status("No water remains. Restart to test another hypothesis.")
+		_set_status("No water is ready. The wreck's water system is producing another dose.")
 		return
 
 	var patch: Dictionary = patches[nearest_patch]
@@ -2666,15 +2658,6 @@ func _interact() -> void:
 	if nearest_harvest_cell.x >= 0:
 		_harvest_fruiting()
 		return
-	if near_refuge and reservoir_established and water_doses < 3:
-		var command_id := _record_command("refill", "reservoir", {"canisters": 1})
-		water_doses += 1
-		evidence.record_event(ecology.tick, "survival.canister_refilled", "reservoir:refuge", [command_id], {"water": water_doses})
-		_set_status("The astronaut refills one empty canister from the terrain-bound reservoir. More water remains here, not in the suit.")
-		return
-	if cache_opened and _at_wreck() and water_doses == 0 and not reservoir_established and reclaimer_intact:
-		_request_reclaimer_dismantle()
-		return
 	if cache_opened and _at_wreck() and exposure > 0.5:
 		_recover_at_wreck(false)
 		return
@@ -2702,6 +2685,7 @@ func _open_emergency_cache() -> void:
 	cache_opened = true
 	scanner_recovered = true
 	water_doses = 3
+	ship_water_production_elapsed = 0.0
 	ration_packs = 2
 	evidence.record_event(ecology.tick, "survival.supplies_recovered", "emergency_cache", [command_id], {"water": water_doses, "rations": ration_packs, "scanner": true})
 	emergency_cache.material_override = _material(Color("4e483e"), 0.92)
@@ -2711,7 +2695,7 @@ func _open_emergency_cache() -> void:
 	scanner_title.text = "CRACKED FIELD SCANNER  /  ONLINE"
 	scanner_readout.text = "NO LOCAL SAMPLE\n\nSensor status: moisture and temperature available; toxicity confidence degraded."
 	_update_discovery_readout()
-	_set_status("The cache holds a cracked Field Scanner, three water doses, and two ration packs. Water is both survival margin and ecological possibility.")
+	_set_status("The cache holds a cracked Field Scanner, three water doses, and two ration packs. The wreck's damaged water system is still producing.")
 
 
 func _use_water_for_survival() -> void:
@@ -2719,7 +2703,7 @@ func _use_water_for_survival() -> void:
 		_set_status("The astronaut's personal water remains locked in the emergency cache.")
 		return
 	if water_doses <= 0:
-		_set_status("No water remains for the astronaut or the ecosystem.")
+		_set_status("No water is ready. The wreck's water system is producing another dose.")
 		return
 	if _at_wreck():
 		_set_status("The wreck can recover the suit without spending water. Save carried water for field emergencies or ecological intervention.")
@@ -2847,35 +2831,20 @@ func _place_carried_clump(cell: Vector2i, forced_drop: bool) -> void:
 		_set_status("The %s clump is seated intact. The source has paid the cost; only later growth or decay will show whether this site works." % resource)
 
 
-func _request_reclaimer_dismantle() -> void:
-	if reclaimer_hold_active:
+func _update_ship_water_production(delta: float) -> void:
+	if not cache_opened:
 		return
-	reclaimer_hold_active = true
-	reclaimer_hold_timer = 0.0
-	_set_status("Hold E to dismantle the life-support reclaimer: gain one water dose, but all future voluntary recovery advances the longer interval.")
-
-
-func _update_reclaimer_hold(delta: float) -> void:
-	if not reclaimer_hold_active:
+	if water_doses >= MAX_WATER_DOSES:
+		water_doses = MAX_WATER_DOSES
+		ship_water_production_elapsed = 0.0
 		return
-	if not Input.is_key_pressed(KEY_E) or not _at_wreck():
-		reclaimer_hold_active = false
-		reclaimer_hold_timer = 0.0
-		return
-	reclaimer_hold_timer += delta
-	if reclaimer_hold_timer < LAST_WATER_HOLD_SECONDS:
-		return
-	reclaimer_hold_active = false
-	reclaimer_hold_timer = 0.0
-	_dismantle_reclaimer()
-
-
-func _dismantle_reclaimer() -> void:
-	var command_id := _record_command("dismantle", "wreck_life_support_reclaimer")
-	reclaimer_intact = false
-	water_doses = 1
-	evidence.record_event(ecology.tick, "survival.reclaimer_dismantled", "wreck_life_support_reclaimer", [command_id], {"water": 1, "voluntary_recovery_seconds": FORCED_RECOVERY_SECONDS})
-	_set_status("One sealed reserve becomes usable water. The wreck remains safe, but rapid suit servicing is permanently gone.")
+	ship_water_production_elapsed += delta
+	while ship_water_production_elapsed >= SHIP_WATER_PRODUCTION_SECONDS and water_doses < MAX_WATER_DOSES:
+		ship_water_production_elapsed -= SHIP_WATER_PRODUCTION_SECONDS
+		water_doses += 1
+		evidence.record_event(ecology.tick, "survival.ship_water_produced", "wreck_water_system", [], {"water": water_doses, "capacity": MAX_WATER_DOSES})
+	if water_doses >= MAX_WATER_DOSES:
+		ship_water_production_elapsed = 0.0
 
 
 func _update_interface() -> void:
@@ -2884,7 +2853,8 @@ func _update_interface() -> void:
 	zone_label.text = "ZONE  %s  /  %d of 5 surveyed" % [current_zone, visited_zones.size()]
 	if cache_opened:
 		var bulky := "     BULKY  %s CLUMP" % String(carried_clump["resource"]).to_upper() if not carried_clump.is_empty() else ("     BULKY  SHADE PANEL" if carrying_shade else "")
-		water_label.text = "WATER %d     RATIONS %d     FRESH FOOD %d%s" % [water_doses, ration_packs, fresh_food, bulky]
+		var ship_output := "MAX" if water_doses >= MAX_WATER_DOSES else "%d%%" % floori(100.0 * ship_water_production_elapsed / SHIP_WATER_PRODUCTION_SECONDS)
+		water_label.text = "WATER %d/%d     SHIP OUTPUT %s     RATIONS %d     FRESH FOOD %d%s" % [water_doses, MAX_WATER_DOSES, ship_output, ration_packs, fresh_food, bulky]
 	else:
 		water_label.text = "SUPPLIES  — emergency cache sealed"
 	var exposure_state := "grace period"
