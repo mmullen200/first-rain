@@ -12,6 +12,7 @@ func _initialize() -> void:
 func _run() -> void:
 	_assert_fungus_needs_detritus()
 	_assert_rooted_mats_need_both_pioneers()
+	_assert_rooted_mat_spread_needs_both_pioneers()
 	_assert_canopy_waits_for_pollination()
 	var scene = load("res://main.tscn").instantiate()
 	root.add_child(scene)
@@ -74,6 +75,33 @@ func _assert_rooted_mats_need_both_pioneers() -> void:
 		ecology.add_water(world, 0.35, 1.5)
 		ecology.step()
 	_assert(ecology.resource_amount(cell, "rhizome") > 0.0, "moss, microbial crust, and nutrients together should wake rooted mats")
+
+
+func _assert_rooted_mat_spread_needs_both_pioneers() -> void:
+	var bare = EcologyGrid.new()
+	var target := Vector2i(10, 10)
+	var source := target + Vector2i.LEFT
+	_prepare_rhizome_spread_pair(bare, source, target, false)
+	bare.step()
+	_assert(bare.resource_amount(target, "rhizome") == 0.0, "rooted mats should not spread into suitable bare ground without moss and microbial crust")
+
+	var supported = EcologyGrid.new()
+	_prepare_rhizome_spread_pair(supported, source, target, true)
+	supported.step()
+	_assert(supported.resource_amount(target, "rhizome") > 0.0, "rooted mats should spread where moss and microbial crust prepared suitable ground")
+
+
+func _prepare_rhizome_spread_pair(ecology, source: Vector2i, target: Vector2i, pioneers_present: bool) -> void:
+	var source_index: int = source.y * ecology.WIDTH + source.x
+	var target_index: int = target.y * ecology.WIDTH + target.x
+	ecology.rhizome[source_index] = 0.5
+	ecology.rhizome[target_index] = 0.0
+	ecology.dormant_rhizome[target_index] = 0.0
+	ecology.moisture[target_index] = 0.34
+	ecology.nutrients[target_index] = 0.35
+	ecology.toxicity[target_index] = 0.0
+	ecology.moss[target_index] = 0.2 if pioneers_present else 0.0
+	ecology.microbial_crust[target_index] = 0.2 if pioneers_present else 0.0
 
 
 func _assert_canopy_waits_for_pollination() -> void:

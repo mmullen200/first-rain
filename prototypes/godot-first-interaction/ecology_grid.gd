@@ -230,7 +230,7 @@ func step() -> void:
 			var rhizome_suitability: float = smoothstep(0.16, 0.5, local_moisture) * smoothstep(0.04, 0.3, nutrients[index]) * (1.0 - local_toxicity)
 			var pioneer_support: float = smoothstep(0.015, 0.12, local_moss) * smoothstep(0.015, 0.12, local_crust)
 			var rhizome_awakening: float = dormant_rhizome[index] * pioneer_support * rhizome_suitability * 0.045
-			var rhizome_spread: float = neighbor_rhizome * rhizome_suitability * 0.016
+			var rhizome_spread: float = neighbor_rhizome * pioneer_support * rhizome_suitability * 0.016
 			var rhizome_growth: float = local_rhizome * rhizome_suitability * 0.022
 			var rhizome_stress: float = local_rhizome * (maxf(0.0, 0.12 - local_moisture) * 0.08 + maxf(0.0, local_temperature - 0.62) * 0.045 + maxf(0.0, local_toxicity - 0.46) * 0.08 + local_canopy * 0.006)
 			next_rhizome[index] = clampf(local_rhizome + rhizome_awakening + rhizome_spread + rhizome_growth - rhizome_stress, 0.0, 1.0)
