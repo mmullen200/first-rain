@@ -221,6 +221,8 @@ Site selection scans a four-cell range. Measured throughflow dominates, while st
 
 Construction stops when upstream impounded surface water reaches 0.42 or dam material reaches 0.42. The animal then tends or watches the pond instead of stripping more vegetation. Dam material decays continuously into Detritus. When depth and structure fall, a resident engineer gathers and repairs again; without one, the dam substantially fails and the pond drains. Dams also retain part of the water approaching their natural downstream face while still diverting overflow through the existing terrain rules. Values and the adjacent upstream depth sample are accelerated prototype fixtures.
 
+Selecting a dam also moves the engineer's local habitat anchor to that site. A maintained dam beside standing water can sustain residency after the brief construction-triggering flow subsides, provided nearby building plants and aquatic consumers remain. If the pond, structure, or food web later collapses for the ordinary departure grace period, the engineer can still leave for the Regional Ecology.
+
 **Playtest gate:** use the terrain lens and **G** to release the perched pool, identify the engineer switching to that flow and hauling from elsewhere, observe construction stop at the pond target, then see maintenance follow structural loss. Observe the unmaintained WEATHERED DAM lose structure and its pool drain. Automated checks establish selection, actual excavation, finite transfer, target behavior, maintenance, Detritus return, drainage and exact replay; they do not validate comprehension or fun.
 
 Animal snapshot version is now 7 and ecology snapshot version 4 includes selected build sites and measured throughflow; older snapshots are rejected.

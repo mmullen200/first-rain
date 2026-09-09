@@ -625,6 +625,9 @@ func _choose_engineer_intention(agent: Dictionary) -> Dictionary:
 		return {"type": "wait", "agent_id": agent_id}
 	if previous_build != build_cell:
 		agent["build_cell"] = build_cell
+		# Once an engineer commits to a dam, the resulting pond becomes the
+		# center of its local range and the habitat used to judge residency.
+		agent["habitat_cell"] = build_cell
 		agents[agent_id] = agent
 		_emit("organism.dam_site_selected", agent_id, {"cell": build_cell, "flow": ecology.flow_strength(build_cell), "drop": ecology.terrain_drop(build_cell)})
 	if ecology.impounded_depth(build_cell) >= ENGINEER_TARGET_DEPTH:

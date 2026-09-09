@@ -89,6 +89,20 @@ func _run() -> void:
 	scene.animal_simulation.agents["engineer:1"]["move_cooldown"] = 0
 	scene.animal_simulation._choose_engineer_intention(scene.animal_simulation.agents["engineer:1"])
 	check(scene.animal_simulation.agent_state("engineer:1")["build_cell"] == cut_site, "fixture engineer did not adopt the player-created flow site")
+	check(scene.animal_simulation.agent_state("engineer:1")["habitat_cell"] == cut_site, "fixture engineer residency did not follow its active dam site")
+	var reached_cut := false
+	var remained_present := true
+	for ignored in range(100):
+		scene._seed_integrated_animals()
+		scene.animal_simulation.step()
+		var engineer: Dictionary = scene.animal_simulation.agent_state("engineer:1")
+		if bool(engineer.get("present", false)) and engineer.get("cell", Vector2i(-1, -1)) == cut_site:
+			reached_cut = true
+		if reached_cut and not bool(engineer.get("present", false)):
+			remained_present = false
+			break
+	check(reached_cut, "fixture engineer never reached the player-cut square")
+	check(remained_present, "fixture engineer departed after adopting an active dam site")
 	scene.queue_free()
 	await process_frame
 	if not failed:

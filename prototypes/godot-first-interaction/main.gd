@@ -1773,6 +1773,7 @@ func _local_habitat_evidence(center: Vector2i, radius: int, include_flowering_to
 		"nearby_cover": 0.0,
 		"forage_cover_edges": 0,
 		"surface_water": 0.0,
+		"dam_material": 0.0,
 		"aquatic_consumers": 0.0,
 		"drainage_flow": 0.0,
 		"plant_material": 0.0,
@@ -1792,6 +1793,7 @@ func _local_habitat_evidence(center: Vector2i, radius: int, include_flowering_to
 	var rhizome_values: PackedFloat32Array = habitat_state.get("rhizome", ecology.rhizome)
 	var canopy_values: PackedFloat32Array = habitat_state.get("canopy", ecology.canopy)
 	var surface_water_values: PackedFloat32Array = habitat_state.get("surface_water", ecology.surface_water)
+	var dam_material_values: PackedFloat32Array = habitat_state.get("dam_material", ecology.dam_material)
 	var aquatic_consumer_values: PackedFloat32Array = habitat_state.get("aquatic_consumer", ecology.aquatic_consumer)
 	var ground_bloom_values: PackedFloat32Array = habitat_state.get("ground_bloom", ecology.ground_bloom)
 	var moisture_values: PackedFloat32Array = habitat_state.get("moisture", ecology.moisture)
@@ -1817,6 +1819,7 @@ func _local_habitat_evidence(center: Vector2i, radius: int, include_flowering_to
 			evidence["detritus"] += local_detritus * weight
 			evidence["forage"] += local_forage * weight
 			evidence["surface_water"] += local_surface_water * weight
+			evidence["dam_material"] += dam_material_values[index] * weight
 			evidence["aquatic_consumers"] += aquatic_consumer_values[index] * weight
 			evidence["plant_material"] += (moss_values[index] + rhizome_values[index] + canopy_values[index]) * weight
 			if include_flowering_topology:
@@ -1918,9 +1921,12 @@ func _species_habitat_score(species: String, evidence: Dictionary) -> float:
 				return -1.0
 			return float(evidence["flowering"]) * viability + float(evidence["flowering_separation"]) * 0.025
 		"wetland_engineer":
-			if float(evidence["drainage_flow"]) < 0.12 or float(evidence["plant_material"]) < 0.32 or float(evidence["aquatic_consumers"]) < 0.04:
+			var natural_wetland := float(evidence["drainage_flow"]) >= 0.12
+			var engineered_wetland := float(evidence["dam_material"]) >= 0.08 and float(evidence["surface_water"]) >= 0.12
+			if (not natural_wetland and not engineered_wetland) or float(evidence["plant_material"]) < 0.32 or float(evidence["aquatic_consumers"]) < 0.04:
 				return -1.0
-			return minf(float(evidence["drainage_flow"]), minf(float(evidence["plant_material"]), float(evidence["aquatic_consumers"]) * 4.0)) * viability
+			var water_structure := maxf(float(evidence["drainage_flow"]), minf(float(evidence["dam_material"]), float(evidence["surface_water"])))
+			return minf(water_structure, minf(float(evidence["plant_material"]), float(evidence["aquatic_consumers"]) * 4.0)) * viability
 		"grazer":
 			if float(evidence["open_forage"]) < 0.65 or float(evidence["nearby_cover"]) < 0.1 or int(evidence["forage_cover_edges"]) < 1:
 				return -1.0
