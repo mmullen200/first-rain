@@ -32,7 +32,7 @@ func _init() -> void:
 
 	_assert(ecology.resource_amount(colony_cell, "nutrients") > nutrients_before, "colony should recycle detritus into available nutrients")
 	_assert(ecology.resource_amount(spore_cell, "fungal_spores") > 0.0, "fungal spores should be deposited through a distinct dispersal interaction")
-	_assert(ecology.resource_amount(engineer_cell, "dam_material") > 0.0, "engineer should turn gathered biomass into a water-retaining dam")
+	_assert(ecology.summary()["total_dam_material"] > 0.0, "engineer should carry gathered biomass to a selected water-retaining dam site")
 	_assert(simulation.conservation_violations.is_empty(), "shared authority should not report impossible transfers")
 	var taxonomies: Array = simulation.event_history.map(func(event: Dictionary): return event["taxonomy"])
 	_assert("organism.detritus_recycled" in taxonomies, "colony effect should be recorded")

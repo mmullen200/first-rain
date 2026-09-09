@@ -213,14 +213,67 @@ func _ready() -> void:
 		_seed_predator_fixture()
 	if "--vector-pollination" in OS.get_cmdline_user_args():
 		_seed_vector_fixture()
+	if "--wetland-engineer" in OS.get_cmdline_user_args():
+		_seed_engineer_fixture()
 	evidence.begin_run(1, _evidence_snapshot())
-	if "--colony-foraging" in OS.get_cmdline_user_args() or "--predator-ecology" in OS.get_cmdline_user_args() or "--vector-pollination" in OS.get_cmdline_user_args():
+	if "--colony-foraging" in OS.get_cmdline_user_args() or "--predator-ecology" in OS.get_cmdline_user_args() or "--vector-pollination" in OS.get_cmdline_user_args() or "--wetland-engineer" in OS.get_cmdline_user_args():
 		_open_emergency_cache()
 	_set_status("A fixed mound stands between separated living patches." if "--colony-foraging" in OS.get_cmdline_user_args() else "The crash has stopped. The ship is dead, but an emergency cache still blinks beneath the broken wing.")
 	if "--predator-ecology" in OS.get_cmdline_user_args():
 		_set_status("Red tracks cross the feeding ground. Farther east, another predator noses through dark remains.", 5.0)
 	if "--vector-pollination" in OS.get_cmdline_user_args():
 		_set_status("A small flying animal pauses among pale blossoms. Other flowering patches stand across the gaps.", 5.0)
+	if "--wetland-engineer" in OS.get_cmdline_user_args():
+		_set_status("Water murmurs through one shallow runnel. A perched pool waits behind a narrow dry lip.", 5.0)
+
+
+func _seed_engineer_fixture() -> void:
+	var home := Vector2i(8, 8)
+	var old_site := Vector2i(7, 8)
+	var old_source := Vector2i(7, 7)
+	var cut_site := Vector2i(9, 8)
+	var perched_source := Vector2i(9, 7)
+	var weathered_dam := Vector2i(14, 8)
+	var weathered_pond := Vector2i(13, 8)
+	for y in range(6, 11):
+		for x in range(6, 12):
+			var index: int = y * ecology.WIDTH + x
+			ecology.elevation[index] = 2.0
+			ecology.moisture[index] = 0.46
+			ecology.temperature[index] = 0.36
+			ecology.toxicity[index] = 0.02
+			ecology.nutrients[index] = 0.45
+			ecology.rhizome[index] = 0.2
+			ecology.aquatic_consumer[index] = 0.08
+	ecology.elevation[old_site.y * ecology.WIDTH + old_site.x] = 1.25
+	ecology.elevation[old_source.y * ecology.WIDTH + old_source.x] = 1.4
+	ecology.elevation[(old_site.y + 1) * ecology.WIDTH + old_site.x] = 1.0
+	ecology.elevation[perched_source.y * ecology.WIDTH + perched_source.x] = 1.5
+	ecology.elevation[cut_site.y * ecology.WIDTH + cut_site.x] = 1.55
+	ecology.elevation[(cut_site.y + 1) * ecology.WIDTH + cut_site.x] = 1.0
+	ecology.surface_water[old_source.y * ecology.WIDTH + old_source.x] = 0.25
+	ecology.surface_water[perched_source.y * ecology.WIDTH + perched_source.x] = 0.7
+	ecology.add_resources(Vector2i(11, 8), {"dead_biomass": 0.65, "rhizome": 0.3})
+	for cell in [Vector2i(13, 7), weathered_pond, Vector2i(13, 9), weathered_dam, Vector2i(14, 7), Vector2i(14, 9), Vector2i(15, 8)]:
+		ecology.elevation[cell.y * ecology.WIDTH + cell.x] = 1.7
+	ecology.elevation[weathered_pond.y * ecology.WIDTH + weathered_pond.x] = 1.35
+	ecology.elevation[weathered_dam.y * ecology.WIDTH + weathered_dam.x] = 1.1
+	ecology.elevation[8 * ecology.WIDTH + 15] = 0.9
+	ecology.surface_water[weathered_pond.y * ecology.WIDTH + weathered_pond.x] = 0.65
+	ecology.dam_material[weathered_dam.y * ecology.WIDTH + weathered_dam.x] = 0.55
+	ecology.step()
+	ecology_started = true
+	animal_simulation.register_agent("wetland_engineer", "engineer:1", {"cell": home, "habitat_cell": home})
+	analysis_lens_mode = 2
+	analysis_lens_enabled = true
+	var world: Vector2 = ecology.world_position(cut_site.x, cut_site.y)
+	astronaut.position = Vector3(world.x, ecology.terrain_height(cut_site) + 0.02, world.y)
+	camera.position = astronaut.position + Vector3(8.8, 10.8, 10.5)
+	camera.look_at(astronaut.position)
+	_create_world_label("DRY LIP", Vector3(world.x, ecology.terrain_height(cut_site) + 0.3, world.y), Color("d7c48c"), 0.0055)
+	var dam_world: Vector2 = ecology.world_position(weathered_dam.x, weathered_dam.y)
+	_create_world_label("WEATHERED DAM", Vector3(dam_world.x, ecology.terrain_height(weathered_dam) + 0.45, dam_world.y), Color("c99a65"), 0.005)
+	_refresh_ecology_visuals()
 
 
 func _seed_vector_fixture() -> void:
@@ -883,7 +936,7 @@ func _build_interface() -> void:
 
 	var title := Label.new()
 	title.position = Vector2(24, 18)
-	title.text = "FIRST RAIN  /  POLLINATION PROTOTYPE" if "--vector-pollination" in OS.get_cmdline_user_args() else "FIRST RAIN  /  GRAZER FAMILY PROTOTYPE"
+	title.text = "FIRST RAIN  /  WETLAND ENGINEER PROTOTYPE" if "--wetland-engineer" in OS.get_cmdline_user_args() else ("FIRST RAIN  /  POLLINATION PROTOTYPE" if "--vector-pollination" in OS.get_cmdline_user_args() else "FIRST RAIN  /  GRAZER FAMILY PROTOTYPE")
 	title.add_theme_font_size_override("font_size", 15)
 	title.add_theme_color_override("font_color", Color("e9b36e"))
 	canvas.add_child(title)
@@ -2286,6 +2339,10 @@ func _handle_authoritative_animal_events(events: Array[Dictionary]) -> void:
 				_set_status("The grazer takes one measured bite, then leaves the moss to recover while it digests.")
 			"organism.material_deposited":
 				var facts: Dictionary = event["facts"]
+				if event["subject"] == "engineer:1" and facts.get("resource", "") == "dam_material":
+					evidence.record_event(ecology.tick, "organism.dam_maintained", event["subject"], [], facts)
+					_set_status("The Wetland Engineer braces gathered plant matter across the strongest nearby flow.")
+					continue
 				if event["subject"] != "grazer:1":
 					continue
 				var cell: Vector2i = facts["cell"]
@@ -2306,6 +2363,9 @@ func _handle_authoritative_animal_events(events: Array[Dictionary]) -> void:
 				evidence.record_event(ecology.tick, event["taxonomy"], event["subject"], [], event["facts"])
 				if event["taxonomy"] == "ecology.seedling_established":
 					seedling_observations[event["facts"]["cell"]] = ecology.tick
+			"organism.dam_site_selected":
+				evidence.record_event(ecology.tick, event["taxonomy"], event["subject"], [], event["facts"])
+				_set_status("The Wetland Engineer turns from its forage and follows the louder water toward a new constriction.")
 			"organism.fungal_spores_distributed":
 				var facts: Dictionary = event["facts"]
 				evidence.record_event(ecology.tick, "organism.fungal_spores_distributed", event["subject"], [], facts)

@@ -7,13 +7,16 @@ extends RefCounted
 # observe snapshots/events. Species choose intentions internally; presentation
 # nodes never decide ecological outcomes.
 
-const SNAPSHOT_VERSION := 6
+const SNAPSHOT_VERSION := 7
 const JUVENILE_MATURATION_TICKS := 1800
 const PARENT_SENSE_RADIUS := 4
 const PARENT_MEMORY_TICKS := 120
 const PREDATOR_TERRITORY_RADIUS := 4
 const HUNT_RECOVERY_TICKS := 48
 const HUNT_ENERGY_COST := 0.24
+const ENGINEER_RANGE := 4
+const ENGINEER_TARGET_DEPTH := 0.42
+const ENGINEER_TARGET_DAM := 0.42
 const COLONY_WORKER_COUNT := 24
 const COLONY_STEP_TICKS := 18
 const COLONY_REST_TICKS := 3
@@ -74,6 +77,7 @@ func register_agent(species: String, stable_id: String, initial_state := {}) -> 
 		"digesting_resource": String(initial_state.get("digesting_resource", "")),
 		"last_feeding_cell": initial_state.get("last_feeding_cell", Vector2i(-1, -1)),
 		"last_gather_cell": initial_state.get("last_gather_cell", Vector2i(-1, -1)),
+		"build_cell": initial_state.get("build_cell", Vector2i(-1, -1)),
 		"heading": initial_state.get("heading", Vector2i(1, 0)),
 		"heading_steps": int(initial_state.get("heading_steps", 4)),
 		"move_cooldown": int(initial_state.get("move_cooldown", 0)),
@@ -608,12 +612,38 @@ func _choose_engineer_intention(agent: Dictionary) -> Dictionary:
 		return {"type": "wait", "agent_id": agent_id}
 	var carried_dead := float(agent["carried_material"].get("dead_biomass", 0.0))
 	var carried_roots := float(agent["carried_material"].get("rhizome", 0.0))
+	var candidate_site := best_engineer_build_site(habitat_cell, ENGINEER_RANGE)
+	var previous_build: Vector2i = agent.get("build_cell", Vector2i(-1, -1))
+	var build_cell: Vector2i = previous_build
+	if build_cell.x < 0 or ecology.downhill_neighbor(build_cell) == build_cell:
+		build_cell = candidate_site
+	elif candidate_site.x >= 0 and candidate_site != build_cell and ecology.flow_strength(candidate_site) > ecology.flow_strength(build_cell) + 0.02:
+		build_cell = candidate_site
+	if build_cell.x < 0:
+		agent["state"] = "listening"
+		agents[agent_id] = agent
+		return {"type": "wait", "agent_id": agent_id}
+	if previous_build != build_cell:
+		agent["build_cell"] = build_cell
+		agents[agent_id] = agent
+		_emit("organism.dam_site_selected", agent_id, {"cell": build_cell, "flow": ecology.flow_strength(build_cell), "drop": ecology.terrain_drop(build_cell)})
+	if ecology.impounded_depth(build_cell) >= ENGINEER_TARGET_DEPTH:
+		agent["state"] = "tending pond"
+		agents[agent_id] = agent
+		return {"type": "wait", "agent_id": agent_id}
 	if carried_dead + carried_roots >= 0.04:
-		var build_cell: Vector2i = agent.get("last_gather_cell", agent["cell"])
-		if agent["cell"] == build_cell and ecology.downhill_neighbor(build_cell) != build_cell:
+		if agent["cell"] == build_cell and ecology.resource_amount(build_cell, "dam_material") < ENGINEER_TARGET_DAM:
 			var source: String = "dead_biomass" if carried_dead >= carried_roots else "rhizome"
 			return {"type": "deposit", "agent_id": agent_id, "source_resource": source, "resource": "dam_material"}
+		if agent["cell"] == build_cell:
+			agent["state"] = "holding repair material"
+			agents[agent_id] = agent
+			return {"type": "wait", "agent_id": agent_id}
 		return {"type": "move", "agent_id": agent_id, "cell": _step_toward(agent["cell"], build_cell)}
+	if ecology.resource_amount(build_cell, "dam_material") >= ENGINEER_TARGET_DAM:
+		agent["state"] = "watching water"
+		agents[agent_id] = agent
+		return {"type": "wait", "agent_id": agent_id}
 	var building_source: String = "dead_biomass" if ecology.resource_amount(agent["cell"], "dead_biomass") >= ecology.resource_amount(agent["cell"], "rhizome") else "rhizome"
 	if ecology.resource_amount(agent["cell"], building_source) >= 0.025:
 		return {"type": "gather", "agent_id": agent_id, "resource": building_source, "amount": 0.07}
@@ -621,6 +651,26 @@ func _choose_engineer_intention(agent: Dictionary) -> Dictionary:
 	var root_cell := _strongest_resource_cell_near("rhizome", habitat_cell, 3)
 	var target: Vector2i = dead_cell if ecology.resource_amount(dead_cell, "dead_biomass") >= ecology.resource_amount(root_cell, "rhizome") else root_cell
 	return {"type": "move", "agent_id": agent_id, "cell": _step_toward(agent["cell"], target)}
+
+
+func best_engineer_build_site(center: Vector2i, radius := ENGINEER_RANGE) -> Vector2i:
+	var best := Vector2i(-1, -1)
+	var best_score := -1.0
+	for y in range(maxi(0, center.y - radius), mini(ecology.HEIGHT, center.y + radius + 1)):
+		for x in range(maxi(0, center.x - radius), mini(ecology.WIDTH, center.x + radius + 1)):
+			var cell := Vector2i(x, y)
+			if _cell_distance(center, cell) > radius or ecology.downhill_neighbor(cell) == cell:
+				continue
+			var flow: float = ecology.flow_strength(cell)
+			var drop: float = ecology.terrain_drop(cell)
+			if flow <= 0.001 and drop <= 0.02:
+				continue
+			# Running water dominates; terrain drop breaks dry/low-flow ties.
+			var score := flow * 12.0 + drop
+			if score > best_score + 0.000001:
+				best_score = score
+				best = cell
+	return best
 
 
 func _resolve_intention(intention: Dictionary) -> void:

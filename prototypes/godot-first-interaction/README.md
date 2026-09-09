@@ -203,9 +203,27 @@ Each pollen load records its donor patch, plant group and age. A visit deposits 
 
 Compatible delivery reserves finite recipient plant tissue as a seed batch. It matures after 90 ticks, then can establish in a neighboring cell only with suitable moisture, nutrients, temperature, toxicity and space. Unestablished seed expires into Detritus after 600 ticks. Pale yellow/pink flower beads shrink with nectar loss; brown seed pods and nearby SEED POD/SEEDS labels precede a green SEEDLING cue. Carrying canopy pollen gives the vector a pink tint.
 
-This experiment supersedes the older direct pollen-to-growth shortcut described above: Rooted Mat clonal spread needs no pollination, and existing dormant canopy seed germinates from habitat conditions. Only producing new seeds requires compatible pollen. Pollen never turns one plant group into another. Full plant water/nutrient accounting, genetics, mixed pollen loads and long-distance seed dispersal remain outside this slice. Animal snapshot version 6 and ecology snapshot version 3 include flower stores, memory and developing seeds; older snapshots are rejected.
+This experiment supersedes the older direct pollen-to-growth shortcut described above: Rooted Mat clonal spread needs no pollination, and existing dormant canopy seed germinates from habitat conditions. Only producing new seeds requires compatible pollen. Pollen never turns one plant group into another. Full plant water/nutrient accounting, genetics, mixed pollen loads and long-distance seed dispersal remain outside this slice. Flower stores, memory and developing seeds remain included in current snapshots.
 
 **Playtest gate:** identify feeding pauses and crossings, departure from depleted flowers, and the delay between pollen delivery and seedling appearance without F9. Automated behavior and replay checks do not validate comprehension or fun.
+
+## Wetland Engineer flow-site question (#34)
+
+Branch: `prototype/wetland-engineer-flow`. Can an Astronaut's terrain Intervention redirect water strongly enough that a Wetland Engineer treats the altered flow as a construction signal?
+
+```sh
+/Applications/Godot.app/Contents/MacOS/Godot --path prototypes/godot-first-interaction -- --wetland-engineer
+```
+
+The **WETLAND ENGINEER PROTOTYPE** starts beside a narrow DRY LIP with the Field Scanner recovered and its terrain lens active. A finite perched pool sits on the high side. Press **G** while standing on the lip to lower that Ecological Cell; the next Drainage Pulse crosses the cut. An already-present engineer isolates site choice from the slower immigration gate: it initially attends the existing shallow runnel, then can select the stronger player-created flow and haul finite Detritus or Rooted Mat material there. Ordinary play retains habitat-supported engineer arrival. A separate WEATHERED DAM beyond its range begins with an impounded pool and no maintainer, so failure and drainage remain visible in the same run. WASD/arrows move, V changes scanner lens, J pauses and R restarts; all prior controls remain available.
+
+Site selection scans a four-cell range. Measured throughflow dominates, while steepest local drop selects a dry/weak-flow fallback. The chosen site persists after a short pulse passes, but a materially stronger new flow can redirect construction. The gathering site never determines the dam site.
+
+Construction stops when upstream impounded surface water reaches 0.42 or dam material reaches 0.42. The animal then tends or watches the pond instead of stripping more vegetation. Dam material decays continuously into Detritus. When depth and structure fall, a resident engineer gathers and repairs again; without one, the dam substantially fails and the pond drains. Dams also retain part of the water approaching their natural downstream face while still diverting overflow through the existing terrain rules. Values and the adjacent upstream depth sample are accelerated prototype fixtures.
+
+**Playtest gate:** use the terrain lens and **G** to release the perched pool, identify the engineer switching to that flow and hauling from elsewhere, observe construction stop at the pond target, then see maintenance follow structural loss. Observe the unmaintained WEATHERED DAM lose structure and its pool drain. Automated checks establish selection, actual excavation, finite transfer, target behavior, maintenance, Detritus return, drainage and exact replay; they do not validate comprehension or fun.
+
+Animal snapshot version is now 7 and ecology snapshot version 4 includes selected build sites and measured throughflow; older snapshots are rejected.
 
 ## Regression check
 
@@ -225,6 +243,7 @@ The captured idle-opening failure can be replayed headlessly:
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/predator_ecology_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/juvenile_grazer_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/vector_pollination_test.gd
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/wetland_engineer_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/integrated_succession_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/ecological_roles_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/habitat_colonization_test.gd
