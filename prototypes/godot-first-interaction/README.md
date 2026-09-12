@@ -33,6 +33,14 @@ Can the player explain at least one animal arrival and one later departure from 
 
 Moss behavior, water quantities, environmental variables, timing, and the loose shade panel are disposable test fixtures. The current intervention response deliberately holds long enough to read: the Field Scanner reports rising local moisture and a responding dormant-life trace while explicitly withholding confirmation of living moss. They do not settle the later rule-set, survival-balance, feedback-tool, or toolkit decisions.
 
+## Four Bowls terrain question
+
+Branch: `prototype/four-bowls-terrain`. The Crash Basin now follows the Four Bowls survey rev B: 48 × 32 Ecological Cells at 2 m each, with 0.6–13.2 m of surveyed relief under a 16 m terrain ceiling. The Headwall and blocked spring feed a dry descending gully to The Fork; the uncut route continues east past the Toxic Vent, across Long Meadow and The Neck, and ends at The Sink. Six shallow **G** cuts breach the provisional 1.3 m southern lip and make the Fork choose the Shelter Bowl instead. The Divide keeps the two central basins spatially distinct, while the Dry Terrace and deliberately unassigned South Shelf remain dry alternatives.
+
+Terrain remains square and vertical-sided. Ecological state owns the top color; exposed sides use world-scaled pixel variation and elevation-sensitive rock strata. Boundary Ecological Cells now shed stranded water out of the Crash Basin instead of forming permanent edge puddles. The blocked spring is presently a situated terrain cue, not yet a renewable-flow mechanic; spring opening and re-closing remain separate interaction questions.
+
+**Playtest gate:** without coaching or observer overlays, identify the Headwall, separate water-holding lows and the eastern outlet from the terrain; predict the uncut Fork route with ordinary world cues or the local terrain lens; then make and explain the consequential southern cut. Automated checks establish dimensions, spot heights, drainage, retention, edge loss and rendering structure, but do not validate spatial comprehension, traversal feel or fun.
+
 ## Cellular ecology added for this revision
 
 The visible square cells now carry provisional moisture, temperature, toxicity, nutrients, dormant moss, living moss, dead biomass, fungus, and shade values. A fixed deterministic tick updates all cells through double-buffered local rules:
@@ -260,6 +268,7 @@ The captured idle-opening failure can be replayed headlessly:
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/topographic_hydrology_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/topographic_presentation_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/topography_regression_test.gd
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/four_bowls_terrain_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/succession_order_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/reversible_animal_residency_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/animal_arrival_pacing_test.gd

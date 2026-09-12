@@ -6,16 +6,17 @@ extends Node3D
 
 const WALK_SPEED := 1.9
 const GRAZER_MOVE_SPEED := 0.38
-const WORLD_MIN_X := -9.0
-const WORLD_MAX_X := 41.0
-const WORLD_MIN_Z := -7.0
-const WORLD_MAX_Z := 27.0
+const WORLD_MIN_X := -27.0
+const WORLD_MAX_X := 71.0
+const WORLD_MIN_Z := -33.0
+const WORLD_MAX_Z := 33.0
 const ECOLOGY_STEP_SECONDS := 0.34
 const VOLUNTARY_RECOVERY_SECONDS := 2.0
 const FORCED_RECOVERY_SECONDS := 10.0
 const LAST_WATER_HOLD_SECONDS := 0.75
 const SHIP_WATER_PRODUCTION_SECONDS := 12.0
 const MAX_WATER_DOSES := 10
+const HABITAT_SEARCH_CELLS_PER_TICK := 48
 const FIELD_TIME_SCALE := 12.0
 const EXPOSED_EXPOSURE_RATE := 0.105
 const MOSS_EXPOSURE_RATE := 0.035
@@ -62,6 +63,7 @@ var grazer_wake_event_id := ""
 var grazer_bite_event_id := ""
 var disturbance_event_id := ""
 var ecology_cells: Array[MeshInstance3D] = []
+var terrain_shader: Shader
 var canopy_meshes: Array[MeshInstance3D] = []
 var water_meshes: Array[MeshInstance3D] = []
 var flow_arrows: Array[MeshInstance3D] = []
@@ -160,6 +162,7 @@ var habitat_search_cursor := 0
 var habitat_search_scores: Dictionary = {}
 var habitat_search_best: Dictionary = {}
 var habitat_search_snapshot: Dictionary = {}
+var drainage_affinity_cache := PackedFloat32Array()
 var arrival_habitat_support: Dictionary = {}
 var unsupported_residency_ticks: Dictionary = {}
 var first_rain_announced := false
@@ -191,8 +194,8 @@ var seedling_observations: Dictionary = {}
 
 
 func _ready() -> void:
-	_build_world()
 	_build_ecology_grid()
+	_build_world()
 	_build_spatial_landmarks()
 	_build_astronaut()
 	_build_patches()
@@ -234,10 +237,12 @@ func _seed_engineer_fixture() -> void:
 	var perched_source := Vector2i(9, 7)
 	var weathered_dam := Vector2i(14, 8)
 	var weathered_pond := Vector2i(13, 8)
+	for y in range(ecology.HEIGHT):
+		for x in range(ecology.WIDTH):
+			ecology.elevation[y * ecology.WIDTH + x] = 2.0
 	for y in range(6, 11):
 		for x in range(6, 12):
 			var index: int = y * ecology.WIDTH + x
-			ecology.elevation[index] = 2.0
 			ecology.moisture[index] = 0.46
 			ecology.temperature[index] = 0.36
 			ecology.toxicity[index] = 0.02
@@ -459,58 +464,67 @@ func _build_world() -> void:
 
 	var ground_body := StaticBody3D.new()
 	ground_body.name = "BasinGround"
-	ground_body.position = Vector3(16.0, 0.0, 10.0)
+	ground_body.position = Vector3(22.0, 0.0, 0.0)
 	add_child(ground_body)
 
 	var ground_mesh := MeshInstance3D.new()
 	var plane := PlaneMesh.new()
-	plane.size = Vector2(52.0, 36.0)
+	plane.size = Vector2(100.0, 68.0)
 	ground_mesh.mesh = plane
 	ground_mesh.material_override = _material(Color("3e4241"), 0.92)
 	ground_body.add_child(ground_mesh)
 
 	var ground_collision := CollisionShape3D.new()
 	var ground_shape := BoxShape3D.new()
-	ground_shape.size = Vector3(52.0, 0.2, 36.0)
+	ground_shape.size = Vector3(100.0, 0.2, 68.0)
 	ground_collision.shape = ground_shape
 	ground_collision.position.y = -0.12
 	ground_body.add_child(ground_collision)
 
-	# Wreckage creates a readable origin and a grace-period shelter.
-	_create_box(Vector3(-5.8, 2.8, -3.7), Vector3(3.6, 1.05, 1.65), Color("697276"), Vector3(0.0, 0.28, 0.0))
-	_create_box(Vector3(-4.3, 2.53, -2.6), Vector3(4.7, 0.13, 1.2), Color("879095"), Vector3(0.0, -0.24, 0.05))
-	_create_box(Vector3(-6.1, 3.4, -3.55), Vector3(1.25, 0.52, 1.1), Color("29343b"), Vector3(0.0, 0.28, 0.0))
-	emergency_cache = _create_box(Vector3(-5.15, 2.49, -1.72), Vector3(0.9, 0.45, 0.62), Color("8e7048"), Vector3(0.0, 0.16, 0.0))
+	# Wreckage sits on the surveyed 6.9 m flank above the Shelter Bowl.
+	var wreck_world: Vector2 = ecology.world_position(EcologyGridModel.WRECK_CELL.x, EcologyGridModel.WRECK_CELL.y)
+	var wreck_height: float = ecology.terrain_height(EcologyGridModel.WRECK_CELL)
+	_create_box(Vector3(wreck_world.x - 0.8, wreck_height + 0.55, wreck_world.y - 0.7), Vector3(3.6, 1.05, 1.65), Color("697276"), Vector3(0.0, 0.28, 0.0))
+	_create_box(Vector3(wreck_world.x + 0.7, wreck_height + 0.28, wreck_world.y + 0.4), Vector3(4.7, 0.13, 1.2), Color("879095"), Vector3(0.0, -0.24, 0.05))
+	_create_box(Vector3(wreck_world.x - 1.1, wreck_height + 1.15, wreck_world.y - 0.55), Vector3(1.25, 0.52, 1.1), Color("29343b"), Vector3(0.0, 0.28, 0.0))
+	var cache_world := Vector2(wreck_world.x - 0.15, wreck_world.y + 1.38)
+	var cache_height: float = ecology.terrain_height(ecology.world_to_cell(cache_world))
+	emergency_cache = _create_box(Vector3(cache_world.x, cache_height + 0.25, cache_world.y), Vector3(0.9, 0.45, 0.62), Color("8e7048"), Vector3(0.0, 0.16, 0.0))
 	emergency_cache.name = "EmergencyCache"
 	var cache_light := OmniLight3D.new()
 	cache_light.name = "CacheBeacon"
-	cache_light.position = Vector3(-5.15, 0.62, -1.72)
+	cache_light.position = Vector3(cache_world.x, cache_height + 0.62, cache_world.y)
 	cache_light.light_color = Color("e7a34f")
 	cache_light.light_energy = 1.5
 	cache_light.omni_range = 1.35
 	add_child(cache_light)
-	_create_world_label("EMERGENCY CACHE", Vector3(-5.15, 0.68, -1.72), Color("ffd18b"), 0.0055)
+	_create_world_label("EMERGENCY CACHE", Vector3(cache_world.x, cache_height + 0.68, cache_world.y), Color("ffd18b"), 0.0055)
 
 	# The sheltered hollow reads through shade, darker ground, and surrounding stones.
 	var shelter_panel_color := Color("555b59")
 	shelter_panel_color.a = 0.5
-	var shelter_panel := _create_box(Vector3(-2.8, 1.25, -1.55), Vector3(3.2, 0.16, 1.55), shelter_panel_color, Vector3(0.0, -0.18, -0.08))
+	var shelter_world: Vector2 = ecology.world_position(EcologyGridModel.SHELTER_BOWL_CELL.x, EcologyGridModel.SHELTER_BOWL_CELL.y)
+	var shelter_height: float = ecology.terrain_height(EcologyGridModel.SHELTER_BOWL_CELL)
+	var shelter_panel := _create_box(Vector3(shelter_world.x, shelter_height + 1.25, shelter_world.y), Vector3(3.2, 0.16, 1.55), shelter_panel_color, Vector3(0.0, -0.18, -0.08))
 	shelter_panel.name = "ShelterPanel"
-	for position in [Vector3(-3.7, 0.28, -0.8), Vector3(-1.8, 0.22, -2.35), Vector3(-3.65, 0.2, -2.35)]:
+	for position in [Vector3(shelter_world.x - 0.9, shelter_height + 0.28, shelter_world.y + 0.75), Vector3(shelter_world.x + 1.0, shelter_height + 0.22, shelter_world.y - 0.8), Vector3(shelter_world.x - 0.85, shelter_height + 0.2, shelter_world.y - 0.8)]:
 		_create_rock(position, 0.55)
 
 	# The exposed crust reads through pale stones and a hot toxic vent.
-	for position in [Vector3(14.4, 0.18, 5.1), Vector3(17.8, 0.24, 0.6), Vector3(18.4, 0.18, 5.0)]:
+	var vent_world: Vector2 = ecology.world_position(EcologyGridModel.TOXIC_VENT_CELL.x, EcologyGridModel.TOXIC_VENT_CELL.y)
+	var vent_height: float = ecology.terrain_height(EcologyGridModel.TOXIC_VENT_CELL)
+	for position in [Vector3(vent_world.x - 1.2, vent_height + 0.18, vent_world.y + 1.1), Vector3(vent_world.x + 0.8, vent_height + 0.24, vent_world.y - 1.0), Vector3(vent_world.x + 1.4, vent_height + 0.18, vent_world.y + 1.0)]:
 		_create_rock(position, 0.42, Color("8d8068"))
-	var vent := _create_cylinder(Vector3(17.0, 0.34, 3.0), 0.42, 0.9, Color("765b45"))
+	var vent := _create_cylinder(Vector3(vent_world.x, vent_height + 0.34, vent_world.y), 0.42, 0.9, Color("765b45"))
 	vent.name = "ToxicVent"
 	var vent_light := OmniLight3D.new()
-	vent_light.position = Vector3(17.0, 0.9, 3.0)
+	vent_light.position = Vector3(vent_world.x, vent_height + 0.9, vent_world.y)
 	vent_light.light_color = Color("e5a557")
 	vent_light.light_energy = 0.9
 	vent_light.omni_range = 2.4
 	add_child(vent_light)
 
+	shade_panel_home = Vector3(wreck_world.x - 0.4, wreck_height + 0.14, wreck_world.y + 5.7)
 	shade_panel = _create_box(shade_panel_home, Vector3(1.45, 0.09, 0.85), Color("839199"), Vector3(0.0, 0.22, -0.08))
 	shade_panel.name = "LooseShadePanel"
 	shade_preview = _create_cylinder(shade_panel_home, 4.0, 0.025, Color(0.25, 0.75, 0.72, 0.28))
@@ -526,6 +540,37 @@ func _build_ecology_grid() -> void:
 	ecology = EcologyGridModel.new()
 	animal_simulation = AnimalSimulation.new(ecology, 1)
 	weather_simulation = WeatherSimulation.new(1701)
+	drainage_affinity_cache = _drainage_affinity_snapshot()
+	terrain_shader = Shader.new()
+	terrain_shader.code = """
+shader_type spatial;
+render_mode diffuse_burley;
+
+uniform vec4 top_color : source_color;
+uniform float elevation;
+uniform float fungus_glow;
+varying vec3 world_position;
+
+float block_noise(vec3 p) {
+	vec3 block = floor(p * vec3(0.72, 1.35, 0.72));
+	return fract(sin(dot(block, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+}
+
+void vertex() {
+	world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+}
+
+void fragment() {
+	float top_face = smoothstep(0.72, 0.96, NORMAL.y);
+	float stratum = step(0.5, fract((world_position.y + elevation * 0.13) * 0.82));
+	float pixel = block_noise(world_position);
+	vec3 lower_rock = mix(vec3(0.16, 0.18, 0.18), vec3(0.28, 0.24, 0.20), clamp(elevation / 13.2, 0.0, 1.0));
+	vec3 side_color = lower_rock * mix(0.78, 1.14, stratum) * mix(0.88, 1.1, step(0.55, pixel));
+	ALBEDO = mix(side_color, top_color.rgb, top_face);
+	ROUGHNESS = 0.92;
+	EMISSION = top_color.rgb * fungus_glow * top_face;
+}
+"""
 	var root := Node3D.new()
 	root.name = "ProvisionalEcologicalCells"
 	add_child(root)
@@ -581,13 +626,16 @@ func _build_ecology_grid() -> void:
 
 
 func _build_spatial_landmarks() -> void:
-	# The blocks themselves now carry the geography. Labels name only the four
-	# hand-authored landforms and the upstream hazard.
-	_create_terrain_label("HIGH CATCHMENT", EcologyGridModel.HIGH_CATCHMENT_CELL, Color("d9c49a"))
-	_create_terrain_label("UPSTREAM TOXIC VENT", EcologyGridModel.TOXIC_VENT_CELL, Color("e1ac70"))
-	_create_terrain_label("DRAINAGE SPINE", EcologyGridModel.CHANNEL_CELL, Color("81aeb5"))
-	_create_terrain_label("CLOSED HOLLOW", EcologyGridModel.CLOSED_HOLLOW_CELL, Color("78c7b4"))
+	_create_terrain_label("THE HEADWALL  /  SPRING BLOCKED", EcologyGridModel.HEADWALL_SPRING_CELL, Color("d9c49a"))
+	_create_terrain_label("TOXIC VENT", EcologyGridModel.TOXIC_VENT_CELL, Color("e1ac70"))
+	_create_terrain_label("THE FORK", EcologyGridModel.FORK_CELL, Color("d7c48c"))
+	_create_terrain_label("LONG MEADOW", EcologyGridModel.LONG_MEADOW_CELL, Color("81aeb5"))
+	_create_terrain_label("THE DIVIDE", EcologyGridModel.DIVIDE_CELL, Color("d9c49a"))
+	_create_terrain_label("SHELTER BOWL", EcologyGridModel.SHELTER_BOWL_CELL, Color("78c7b4"))
 	_create_terrain_label("DRY TERRACE", EcologyGridModel.DRY_TERRACE_CELL, Color("d6b477"))
+	_create_terrain_label("SOUTH SHELF", EcologyGridModel.SOUTH_SHELF_CELL, Color("9fb0a5"))
+	_create_terrain_label("THE NECK  /  DAM SITE", EcologyGridModel.NECK_CELL, Color("d7c48c"))
+	_create_terrain_label("THE SINK", EcologyGridModel.SINK_CELL, Color("81aeb5"))
 	# Outer-loop landmarks remain visible from the wreck while local conditions
 	# stay hidden behind shelves and stone clusters.
 	for point in [Vector3(1.0, 0.45, -4.5), Vector3(9.0, 0.55, -4.0), Vector3(22.0, 0.65, -1.0), Vector3(31.0, 0.55, 7.0), Vector3(38.0, 0.5, 15.0)]:
@@ -604,8 +652,8 @@ func _create_terrain_label(text: String, cell: Vector2i, color: Color) -> void:
 func _build_astronaut() -> void:
 	astronaut = CharacterBody3D.new()
 	astronaut.name = "Astronaut"
-	var start_cell: Vector2i = ecology.world_to_cell(Vector2(-5.25, -1.65))
-	astronaut.position = Vector3(-5.25, ecology.terrain_height(start_cell) + 0.02, -1.65)
+	var start_world: Vector2 = ecology.world_position(EcologyGridModel.WRECK_CELL.x, EcologyGridModel.WRECK_CELL.y)
+	astronaut.position = Vector3(start_world.x, ecology.terrain_height(EcologyGridModel.WRECK_CELL) + 0.02, start_world.y)
 	add_child(astronaut)
 
 	var collision := CollisionShape3D.new()
@@ -644,21 +692,21 @@ func _build_astronaut() -> void:
 
 
 func _build_patches() -> void:
-	var hollow_world := Vector2(-2.7, -1.55)
+	var hollow_world: Vector2 = ecology.world_position(EcologyGridModel.SHELTER_BOWL_CELL.x, EcologyGridModel.SHELTER_BOWL_CELL.y)
 	var hollow_height: float = ecology.terrain_height(ecology.world_to_cell(hollow_world))
 	patches["hollow"] = _create_patch(
 		"hollow",
 		"SHELTERED FILM",
-		Vector3(-2.7, hollow_height + 0.04, -1.55),
+		Vector3(hollow_world.x, hollow_height + 0.04, hollow_world.y),
 		Color("5c6250"),
 		true
 	)
-	var crust_world := Vector2(16.0, 3.0)
+	var crust_world: Vector2 = ecology.world_position(EcologyGridModel.DRY_TERRACE_CELL.x, EcologyGridModel.DRY_TERRACE_CELL.y)
 	var crust_height: float = ecology.terrain_height(ecology.world_to_cell(crust_world))
 	patches["crust"] = _create_patch(
 		"crust",
 		"SUN-STRUCK FILM",
-		Vector3(16.0, crust_height + 0.34, 3.0),
+		Vector3(crust_world.x, crust_height + 0.34, crust_world.y),
 		Color("8c826c"),
 		false
 	)
@@ -931,7 +979,15 @@ func _build_interface() -> void:
 
 	var title := Label.new()
 	title.position = Vector2(24, 18)
-	title.text = "FIRST RAIN  /  WETLAND ENGINEER PROTOTYPE" if "--wetland-engineer" in OS.get_cmdline_user_args() else ("FIRST RAIN  /  POLLINATION PROTOTYPE" if "--vector-pollination" in OS.get_cmdline_user_args() else "FIRST RAIN  /  GRAZER FAMILY PROTOTYPE")
+	title.text = "FIRST RAIN  /  FOUR BOWLS TERRAIN PROTOTYPE"
+	if "--wetland-engineer" in OS.get_cmdline_user_args():
+		title.text = "FIRST RAIN  /  WETLAND ENGINEER PROTOTYPE"
+	elif "--vector-pollination" in OS.get_cmdline_user_args():
+		title.text = "FIRST RAIN  /  POLLINATION PROTOTYPE"
+	elif "--predator-ecology" in OS.get_cmdline_user_args():
+		title.text = "FIRST RAIN  /  GRAZER FAMILY PROTOTYPE"
+	elif "--colony-foraging" in OS.get_cmdline_user_args():
+		title.text = "FIRST RAIN  /  COLONY FORAGING PROTOTYPE"
 	title.add_theme_font_size_override("font_size", 15)
 	title.add_theme_color_override("font_color", Color("e9b36e"))
 	canvas.add_child(title)
@@ -1304,12 +1360,12 @@ func _current_zone() -> String:
 		return "WRECK SHELTER"
 	var position := Vector2(astronaut.position.x, astronaut.position.z)
 	var zones := {
-		"SHELTERED HOLLOW": Vector2(-2.7, -1.55),
-		"EXPOSED TOXIC SHELF": Vector2(16.0, 3.0),
-		"DOWNSTREAM RECOVERY POCKET": Vector2(37.0, 23.0),
-		"DRY DRAINAGE SPINE": Vector2(18.0, 12.0)
+		"SHELTER BOWL": ecology.world_position(EcologyGridModel.SHELTER_BOWL_CELL.x, EcologyGridModel.SHELTER_BOWL_CELL.y),
+		"DRY TERRACE": ecology.world_position(EcologyGridModel.DRY_TERRACE_CELL.x, EcologyGridModel.DRY_TERRACE_CELL.y),
+		"LONG MEADOW": ecology.world_position(EcologyGridModel.LONG_MEADOW_CELL.x, EcologyGridModel.LONG_MEADOW_CELL.y),
+		"THE SINK": ecology.world_position(EcologyGridModel.SINK_CELL.x, EcologyGridModel.SINK_CELL.y)
 	}
-	var nearest := "DRY DRAINAGE SPINE"
+	var nearest := "SHELTER BOWL"
 	var nearest_distance := INF
 	for zone in zones:
 		var distance: float = position.distance_to(zones[zone])
@@ -1321,7 +1377,7 @@ func _current_zone() -> String:
 
 func _basin_survey_text() -> String:
 	var lines: Array[String] = ["VISITED ECOLOGICAL ZONES  /  last observed, not live"]
-	for zone in ["WRECK SHELTER", "SHELTERED HOLLOW", "DRY DRAINAGE SPINE", "EXPOSED TOXIC SHELF", "DOWNSTREAM RECOVERY POCKET"]:
+	for zone in ["WRECK SHELTER", "SHELTER BOWL", "LONG MEADOW", "DRY TERRACE", "THE SINK"]:
 		lines.append(("• " + zone) if visited_zones.has(zone) else "• ?????  /  unvisited")
 	lines.append("")
 	lines.append("SHADE PANEL  " + ("last observed at cell %d,%d" % [shade_placed_cell.x, shade_placed_cell.y] if shade_placed else ("carried" if carrying_shade else "last observed near wreck")))
@@ -1379,7 +1435,8 @@ func _recover_at_wreck(forced: bool) -> void:
 		if not carried_clump.is_empty():
 			var dropped_cell: Vector2i = ecology.world_to_cell(Vector2(astronaut.position.x, astronaut.position.z))
 			_place_carried_clump(dropped_cell, true)
-		astronaut.position = Vector3(-5.4, 0.05, -3.1)
+		var wreck_world: Vector2 = ecology.world_position(EcologyGridModel.WRECK_CELL.x, EcologyGridModel.WRECK_CELL.y)
+		astronaut.position = Vector3(wreck_world.x, ecology.terrain_height(EcologyGridModel.WRECK_CELL) + 0.02, wreck_world.y)
 		astronaut.velocity = Vector3.ZERO
 	exposure = 0.0
 	_advance_ecology_during_recovery(elapsed)
@@ -1676,7 +1733,6 @@ func _depart_ecological_role(stable_id: String, species: String, habitat_cell: V
 
 
 func _continue_arrival_habitat_search(species: Array[String]) -> Dictionary:
-	const CELLS_PER_ECOLOGY_TICK := 24
 	if habitat_search_species != species or habitat_search_snapshot.is_empty():
 		habitat_search_species = species.duplicate()
 		habitat_search_cursor = 0
@@ -1688,7 +1744,7 @@ func _continue_arrival_habitat_search(species: Array[String]) -> Dictionary:
 			if candidate != "predator":
 				habitat_search_scores[candidate] = -1.0
 	var cell_count: int = ecology.WIDTH * ecology.HEIGHT
-	var end_cursor: int = mini(habitat_search_cursor + CELLS_PER_ECOLOGY_TICK, cell_count)
+	var end_cursor: int = mini(habitat_search_cursor + HABITAT_SEARCH_CELLS_PER_TICK, cell_count)
 	for flat_index in range(habitat_search_cursor, end_cursor):
 		var cell := Vector2i(flat_index % ecology.WIDTH, floori(float(flat_index) / float(ecology.WIDTH)))
 		var evidence_by_radius := {}
@@ -1893,12 +1949,15 @@ func _drainage_spine_affinity(cell: Vector2i) -> float:
 
 
 func _drainage_affinity_snapshot() -> PackedFloat32Array:
+	if drainage_affinity_cache.size() == ecology.WIDTH * ecology.HEIGHT:
+		return drainage_affinity_cache
 	var values := PackedFloat32Array()
 	values.resize(ecology.WIDTH * ecology.HEIGHT)
 	for y in range(ecology.HEIGHT):
 		for x in range(ecology.WIDTH):
 			var cell := Vector2i(x, y)
 			values[y * ecology.WIDTH + x] = _drainage_spine_affinity(cell)
+	drainage_affinity_cache = values
 	return values
 
 
@@ -2512,13 +2571,13 @@ func _refresh_ecology_visuals() -> void:
 					color = Color("2d6b77").lerp(Color("e2bd6f"), elevation_band)
 				else:
 					color = color.darkened(0.44)
-			var material := StandardMaterial3D.new()
-			material.albedo_color = color
-			material.roughness = 0.9
-			if sample["fungus"] >= 0.035:
-				material.emission_enabled = true
-				material.emission = Color("7b2c89") * min(sample["fungus"] * 2.4, 0.85)
-				material.emission_energy_multiplier = 1.15
+			var material := ecology_cells[index].material_override as ShaderMaterial
+			if material == null:
+				material = ShaderMaterial.new()
+				material.shader = terrain_shader
+			material.set_shader_parameter("top_color", color)
+			material.set_shader_parameter("elevation", terrain_height)
+			material.set_shader_parameter("fungus_glow", minf(sample["fungus"] * 2.4, 0.85) if sample["fungus"] >= 0.035 else 0.0)
 			ecology_cells[index].material_override = material
 			var terrain_mesh := ecology_cells[index].mesh as BoxMesh
 			terrain_mesh.size.y = terrain_height
@@ -2536,7 +2595,7 @@ func _refresh_ecology_visuals() -> void:
 
 			var downhill: Vector2i = ecology.downhill_neighbor(Vector2i(x, y))
 			var arrow_nearby: bool = astronaut != null and world_position.distance_to(Vector2(astronaut.position.x, astronaut.position.z)) <= 6.2
-			flow_arrows[index].visible = analysis_lens_mode == 2 and scanner_recovered and arrow_nearby and downhill != Vector2i(x, y)
+			flow_arrows[index].visible = analysis_lens_mode == 2 and scanner_recovered and arrow_nearby and ecology.is_inside_basin(downhill) and downhill != Vector2i(x, y)
 			if flow_arrows[index].visible:
 				var target_world: Vector2 = ecology.world_position(downhill.x, downhill.y)
 				flow_arrows[index].position = Vector3(world_position.x, terrain_height + 0.055, world_position.y)
@@ -3034,6 +3093,7 @@ func _excavate_nearby_cell() -> void:
 	if removed <= 0.001:
 		_set_status("This Ecological Cell is already at the prototype excavation floor.")
 		return
+	drainage_affinity_cache = PackedFloat32Array()
 	var command_id := _record_command("excavate", "ecological_cell:%d,%d" % [cell.x, cell.y], {"depth": removed})
 	evidence.record_event(ecology.tick, "terrain.cell_excavated", "ecological_cell:%d,%d" % [cell.x, cell.y], [command_id], {"depth": removed, "downhill": ecology.downhill_neighbor(cell)})
 	astronaut.position.y = ecology.terrain_height(cell) + 0.02

@@ -39,7 +39,7 @@ func _assert_colony_is_telegraphed_before_settlement() -> void:
 	var scene = await _new_scene()
 	var colony_patch := Vector2i(21, 13)
 	_seed_patch(scene, colony_patch, {"dead_biomass": 0.2}, 1)
-	var calls_per_observation: int = ceili(float(scene.ecology.WIDTH * scene.ecology.HEIGHT) / 24.0)
+	var calls_per_observation: int = ceili(float(scene.ecology.WIDTH * scene.ecology.HEIGHT) / float(scene.HABITAT_SEARCH_CELLS_PER_TICK))
 	_advance_search(scene, calls_per_observation * scene.COLONY_PROSPECTING_OBSERVATIONS)
 	scene._update_ecological_animal_markers()
 	_assert(not scene.animal_simulation.agents.has("colony:1"), "initial scout observations must not create an anthill")

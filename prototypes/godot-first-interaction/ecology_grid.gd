@@ -5,20 +5,31 @@ extends RefCounted
 # Every update reads one generation and writes the next so traversal order
 # cannot change the result.
 
-const WIDTH := 24
-const HEIGHT := 16
+const WIDTH := 48
+const HEIGHT := 32
 const CELL_SIZE := 2.0
-const ORIGIN := Vector2(-7.0, -5.0)
-const HIGH_CATCHMENT_CELL := Vector2i(2, 2)
-const TOXIC_VENT_CELL := Vector2i(4, 3)
-const CHANNEL_CELL := Vector2i(8, 5)
-const CLOSED_HOLLOW_CELL := Vector2i(20, 12)
-const DRY_TERRACE_CELL := Vector2i(17, 3)
-const DAM_TEST_UPSTREAM_CELL := Vector2i(7, 4)
-const DIG_TEST_CELL := Vector2i(8, 4)
-const MIN_TERRAIN_HEIGHT := 0.1
-const MAX_TERRAIN_HEIGHT := 2.25
-const DAM_HEIGHT_SCALE := 1.0
+const ORIGIN := Vector2(-25.0, -31.0)
+const OUT_OF_BASIN := Vector2i(-1, -1)
+const HEADWALL_SPRING_CELL := Vector2i(6, 4)
+const HIGH_CATCHMENT_CELL := HEADWALL_SPRING_CELL
+const TOXIC_VENT_CELL := Vector2i(20, 5)
+const DRY_TERRACE_CELL := Vector2i(38, 6)
+const FORK_CELL := Vector2i(17, 11)
+const CHANNEL_CELL := Vector2i(25, 15)
+const WRECK_CELL := Vector2i(10, 14)
+const SHELTER_BOWL_CELL := Vector2i(11, 18)
+const CLOSED_HOLLOW_CELL := SHELTER_BOWL_CELL
+const LONG_MEADOW_CELL := Vector2i(31, 17)
+const DIVIDE_CELL := Vector2i(22, 21)
+const NECK_CELL := Vector2i(38, 23)
+const SOUTH_SHELF_CELL := Vector2i(9, 27)
+const SINK_CELL := Vector2i(44, 29)
+const DAM_TEST_UPSTREAM_CELL := Vector2i(37, 23)
+const DIG_TEST_CELL := Vector2i(16, 12)
+const MIN_TERRAIN_HEIGHT := 0.6
+const MAX_SURVEYED_TERRAIN_HEIGHT := 13.2
+const MAX_TERRAIN_HEIGHT := 16.0
+const DAM_HEIGHT_SCALE := 2.0
 
 var moisture := PackedFloat32Array()
 var elevation := PackedFloat32Array()
@@ -67,8 +78,8 @@ func _init() -> void:
 
 
 func _seed_barren_basin() -> void:
-	var hollow := Vector2(-2.7, -1.55)
-	var crust := Vector2(16.0, 3.0)
+	var hollow := world_position(SHELTER_BOWL_CELL.x, SHELTER_BOWL_CELL.y)
+	var crust := world_position(DRY_TERRACE_CELL.x, DRY_TERRACE_CELL.y)
 	var vent := world_position(TOXIC_VENT_CELL.x, TOXIC_VENT_CELL.y)
 	for y in range(HEIGHT):
 		for x in range(WIDTH):
@@ -93,34 +104,149 @@ func _seed_barren_basin() -> void:
 
 
 func _seed_terrain() -> void:
-	# A deliberately hand-authored greybox, not a terrain generator. The narrow
-	# descending list is the Drainage Spine; the named regions pose four distinct
-	# water problems while keeping every cell's state to one height number.
+	# Four Bowls survey rev B. Broad analytic shapes establish the mountain,
+	# three other highs and four basins. The two bed profiles then pull ground
+	# down (never up), so the sampled Drainage Spine descends without stray pools.
 	for y in range(HEIGHT):
 		for x in range(WIDTH):
-			# Broad fall toward the southeast prevents the unfeatured ground from
-			# becoming hundreds of accidental closed basins.
-			elevation[_index(x, y)] = MAX_TERRAIN_HEIGHT - float(x) * 0.035 - float(y) * 0.02
-	var spine: Array[Vector2i] = [
-		Vector2i(2, 2), Vector2i(3, 2), Vector2i(4, 3), Vector2i(5, 3),
-		Vector2i(6, 4), Vector2i(7, 4), Vector2i(8, 5), Vector2i(9, 5),
-		Vector2i(10, 6), Vector2i(11, 6), Vector2i(12, 7), Vector2i(13, 7),
-		Vector2i(14, 8), Vector2i(15, 8), Vector2i(16, 9), Vector2i(17, 9),
-		Vector2i(18, 10), Vector2i(19, 11), CLOSED_HOLLOW_CELL
-	]
-	for path_index in range(spine.size()):
-		var cell: Vector2i = spine[path_index]
-		elevation[_index(cell.x, cell.y)] = 2.2 - float(path_index) * 0.1
-	elevation[_index(HIGH_CATCHMENT_CELL.x, HIGH_CATCHMENT_CELL.y)] = 2.2
-	for y in range(1, 5):
-		for x in range(14, 20):
-			elevation[_index(x, y)] = 1.95 - float(x - 14) * 0.03 - float(y - 1) * 0.01
-	for y in range(CLOSED_HOLLOW_CELL.y - 1, CLOSED_HOLLOW_CELL.y + 2):
-		for x in range(CLOSED_HOLLOW_CELL.x - 1, CLOSED_HOLLOW_CELL.x + 2):
-			elevation[_index(x, y)] = 1.0
-	# Preserve the inlet notch and seal every other side of the low point.
-	elevation[_index(19, 11)] = 0.5
-	elevation[_index(CLOSED_HOLLOW_CELL.x, CLOSED_HOLLOW_CELL.y)] = MIN_TERRAIN_HEIGHT
+			var height := 7.7 - float(x) * 0.065 - float(y) * 0.095
+			height += 5.1 * _terrain_bump(x, y, 5.0, 4.0, 8.5, 9.0)
+			height += 4.5 * _terrain_bump(x, y, 20.0, 5.0, 5.5, 4.5)
+			height += 5.9 * _terrain_bump(x, y, 38.0, 6.0, 8.0, 6.5)
+			height += 5.8 * _terrain_bump(x, y, 22.0, 22.0, 3.8, 12.0)
+			height -= 0.45 * _terrain_bump(x, y, 11.0, 18.0, 6.0, 4.5)
+			height -= 0.35 * _terrain_bump(x, y, 31.0, 18.0, 10.0, 6.0)
+			height += 1.1 * _terrain_bump(x, y, 9.0, 27.0, 11.0, 7.0)
+			height -= 1.2 * _terrain_bump(x, y, 44.0, 29.0, 9.0, 7.0)
+			elevation[_index(x, y)] = clampf(height, MIN_TERRAIN_HEIGHT, MAX_SURVEYED_TERRAIN_HEIGHT)
+
+	_carve_bed_profile([
+		Vector3(6, 4, 13.2), Vector3(9, 7, 10.5), Vector3(13, 9, 8.1), Vector3(17, 11, 6.5)
+	])
+	_carve_bed_profile([
+		Vector3(17, 11, 6.5), Vector3(24, 14, 5.4), Vector3(31, 18, 3.8),
+		Vector3(35, 21, 3.0), Vector3(38, 24, 2.3), Vector3(41, 27, 1.4), Vector3(44, 29, 0.6)
+	])
+	_impose_descending_channel([
+		Vector2i(6, 4), Vector2i(7, 5), Vector2i(8, 6), Vector2i(9, 7),
+		Vector2i(10, 8), Vector2i(11, 8), Vector2i(12, 9), Vector2i(13, 9),
+		Vector2i(14, 10), Vector2i(15, 10), Vector2i(16, 11), Vector2i(17, 11)
+	], 13.2, 6.5)
+	_impose_descending_channel([
+		Vector2i(17, 11), Vector2i(18, 12), Vector2i(19, 12), Vector2i(20, 13),
+		Vector2i(21, 13), Vector2i(22, 14), Vector2i(23, 14), Vector2i(24, 15),
+		Vector2i(25, 15), Vector2i(26, 16), Vector2i(27, 16), Vector2i(28, 17),
+		Vector2i(29, 17), Vector2i(30, 18), Vector2i(31, 18), Vector2i(32, 19),
+		Vector2i(33, 19), Vector2i(34, 20), Vector2i(35, 21), Vector2i(36, 22),
+		Vector2i(37, 23), Vector2i(38, 24), Vector2i(39, 25), Vector2i(40, 26),
+		Vector2i(41, 27), Vector2i(42, 28), Vector2i(43, 28), Vector2i(44, 29)
+	], 6.5, 0.6)
+
+	# Surveyed spot heights. These named cells are the stable evidence used by
+	# tests and labels; everything between them remains disposable greybox shape.
+	_set_terrain_height(HEADWALL_SPRING_CELL, 13.2)
+	_set_terrain_height(TOXIC_VENT_CELL, 11.3)
+	_set_terrain_height(DRY_TERRACE_CELL, 10.5)
+	_set_terrain_height(DIVIDE_CELL, 9.5)
+	_set_terrain_height(WRECK_CELL, 6.9)
+	_set_terrain_height(FORK_CELL, 6.5)
+	_set_terrain_height(SHELTER_BOWL_CELL, 5.4)
+	_set_terrain_height(SOUTH_SHELF_CELL, 5.6)
+	_set_terrain_height(LONG_MEADOW_CELL, 3.8)
+	_set_terrain_height(NECK_CELL, 2.3)
+	_set_terrain_height(SINK_CELL, 0.6)
+
+	# The proposed south cut begins 1.3 m above the Fork. Repeated G cuts can
+	# breach it, while the uncut saddle keeps the live course heading east.
+	_set_terrain_height(DIG_TEST_CELL, 7.58)
+	_raise_bowl_rim(SHELTER_BOWL_CELL, 5.4, 4)
+	_raise_bowl_rim(SOUTH_SHELF_CELL, 5.6, 3)
+	_remove_stray_lows()
+
+
+func _terrain_bump(x: int, y: int, center_x: float, center_y: float, radius_x: float, radius_y: float) -> float:
+	var dx := (float(x) - center_x) / radius_x
+	var dy := (float(y) - center_y) / radius_y
+	return exp(-(dx * dx + dy * dy))
+
+
+func _carve_bed_profile(points: Array[Vector3]) -> void:
+	for y in range(HEIGHT):
+		for x in range(WIDTH):
+			var sample := Vector2(float(x), float(y))
+			var nearest_distance := INF
+			var nearest_height := 0.0
+			for segment_index in range(points.size() - 1):
+				var start := Vector2(points[segment_index].x, points[segment_index].y)
+				var finish := Vector2(points[segment_index + 1].x, points[segment_index + 1].y)
+				var segment := finish - start
+				var progress := clampf((sample - start).dot(segment) / segment.length_squared(), 0.0, 1.0)
+				var distance := sample.distance_to(start + segment * progress)
+				if distance < nearest_distance:
+					nearest_distance = distance
+					nearest_height = lerpf(points[segment_index].z, points[segment_index + 1].z, progress)
+			if nearest_distance <= 1.15:
+				var bed_height := nearest_height + nearest_distance * 0.32
+				elevation[_index(x, y)] = minf(elevation[_index(x, y)], bed_height)
+
+
+func _impose_descending_channel(path: Array[Vector2i], start_height: float, end_height: float) -> void:
+	var path_cells := {}
+	for cell in path:
+		path_cells[cell] = true
+	for path_index in range(path.size()):
+		var progress := float(path_index) / float(path.size() - 1)
+		_set_terrain_height(path[path_index], lerpf(start_height, end_height, progress))
+	for path_index in range(path.size()):
+		var cell := path[path_index]
+		var bed_height := terrain_height(cell)
+		for offset: Vector2i in [Vector2i(-1, -1), Vector2i(0, -1), Vector2i(1, -1), Vector2i(-1, 0), Vector2i(1, 0), Vector2i(-1, 1), Vector2i(0, 1), Vector2i(1, 1)]:
+			var bank := cell + offset
+			if is_inside_basin(bank) and not path_cells.has(bank):
+				elevation[_index(bank.x, bank.y)] = minf(MAX_SURVEYED_TERRAIN_HEIGHT, maxf(elevation[_index(bank.x, bank.y)], bed_height + 0.12))
+
+
+func _set_terrain_height(cell: Vector2i, height: float) -> void:
+	elevation[_index(cell.x, cell.y)] = clampf(height, MIN_TERRAIN_HEIGHT, MAX_TERRAIN_HEIGHT)
+
+
+func _raise_bowl_rim(center: Vector2i, floor_height: float, radius: int) -> void:
+	for y in range(center.y - radius, center.y + radius + 1):
+		for x in range(center.x - radius, center.x + radius + 1):
+			var cell := Vector2i(x, y)
+			if not is_inside_basin(cell) or cell == center:
+				continue
+			var distance := Vector2(cell - center).length()
+			if distance <= float(radius):
+				elevation[_index(x, y)] = maxf(elevation[_index(x, y)], floor_height + 0.12 * distance)
+
+
+func _remove_stray_lows() -> void:
+	var intended := {
+		SHELTER_BOWL_CELL: true,
+		SOUTH_SHELF_CELL: true,
+		SINK_CELL: true,
+	}
+	# Fill tiny sampled depressions. Raising an accidental low to just above its
+	# lowest neighbour preserves the authored large forms and moves drainage out
+	# without cutting a second, unintended channel.
+	for _pass in range(64):
+		var changed := false
+		for y in range(1, HEIGHT - 1):
+			for x in range(1, WIDTH - 1):
+				var cell := Vector2i(x, y)
+				if intended.has(cell) or downhill_neighbor(cell) != cell:
+					continue
+				var outlet_height := INF
+				for offset: Vector2i in [Vector2i(-1, -1), Vector2i(0, -1), Vector2i(1, -1), Vector2i(-1, 0), Vector2i(1, 0), Vector2i(-1, 1), Vector2i(0, 1), Vector2i(1, 1)]:
+					var candidate := cell + offset
+					var candidate_height := terrain_height(candidate)
+					if candidate_height < outlet_height:
+						outlet_height = candidate_height
+				elevation[_index(x, y)] = minf(MAX_SURVEYED_TERRAIN_HEIGHT, outlet_height + 0.12)
+				changed = true
+		if not changed:
+			break
 
 
 func step() -> void:
@@ -300,15 +426,21 @@ func step() -> void:
 			var retention: float = 0.22 + next_moss[index] * 0.28 + next_rhizome[index] * 0.18 + next_crust[index] * 0.06 + shade[index] * 0.12
 			var runoff: float = maxf(0.0, next_moisture[index] - retention) * 0.08
 			var natural_downhill := terrain_downhill_neighbor(Vector2i(x, y))
-			var downstream_dam := next_dam_material[_index(natural_downhill.x, natural_downhill.y)] if natural_downhill != Vector2i(x, y) else 0.0
+			var downstream_dam := next_dam_material[_index(natural_downhill.x, natural_downhill.y)] if is_inside_basin(natural_downhill) and natural_downhill != Vector2i(x, y) else 0.0
 			var barrier := clampf(downstream_dam * 0.9, 0.0, 0.9)
 			runoff *= 1.0 - barrier
 			var downhill := downhill_neighbor(Vector2i(x, y), next_dam_material)
 			if downhill == Vector2i(x, y):
 				continue
-			var downhill_index: int = _index(downhill.x, downhill.y)
 			var surface_runoff: float = next_surface_water[index] * 0.94 * (1.0 - barrier)
 			var flow_volume := runoff + surface_runoff
+			if not is_inside_basin(downhill):
+				drained_moisture[index] = maxf(0.0, drained_moisture[index] - runoff)
+				drained_surface_water[index] = maxf(0.0, drained_surface_water[index] - surface_runoff)
+				drained_nutrients[index] = maxf(0.0, drained_nutrients[index] - minf(next_nutrients[index], runoff * 0.035))
+				drained_toxicity[index] = maxf(0.0, drained_toxicity[index] - minf(next_toxicity[index], flow_volume * 0.18))
+				continue
+			var downhill_index: int = _index(downhill.x, downhill.y)
 			next_throughflow[downhill_index] += flow_volume
 			if runoff > 0.0001:
 				drained_moisture[index] = maxf(0.0, drained_moisture[index] - runoff)
@@ -946,6 +1078,8 @@ func flow_strength(cell: Vector2i) -> float:
 func terrain_drop(cell: Vector2i) -> float:
 	var bounded := Vector2i(clampi(cell.x, 0, WIDTH - 1), clampi(cell.y, 0, HEIGHT - 1))
 	var downstream := downhill_neighbor(bounded)
+	if not is_inside_basin(downstream):
+		return hydraulic_height(bounded) - MIN_TERRAIN_HEIGHT
 	return maxf(0.0, hydraulic_height(bounded) - hydraulic_height(downstream)) if downstream != bounded else 0.0
 
 
@@ -976,6 +1110,8 @@ func downhill_neighbor(cell: Vector2i, dam_field: PackedFloat32Array = dam_mater
 		if candidate_height < lowest_height - 0.0001:
 			lowest = candidate
 			lowest_height = candidate_height
+	if lowest == bounded and _is_boundary_cell(bounded):
+		return OUT_OF_BASIN
 	return lowest
 
 
@@ -991,6 +1127,8 @@ func terrain_downhill_neighbor(cell: Vector2i) -> Vector2i:
 		if candidate_height < lowest_height - 0.0001:
 			lowest = candidate
 			lowest_height = candidate_height
+	if lowest == bounded and _is_boundary_cell(bounded):
+		return OUT_OF_BASIN
 	return lowest
 
 
@@ -1000,10 +1138,18 @@ func flow_path(start: Vector2i, limit := WIDTH * HEIGHT) -> Array[Vector2i]:
 	for _step in range(limit):
 		path.append(current)
 		var next: Vector2i = downhill_neighbor(current)
-		if next == current or path.has(next):
+		if not is_inside_basin(next) or next == current or path.has(next):
 			break
 		current = next
 	return path
+
+
+func is_inside_basin(cell: Vector2i) -> bool:
+	return cell.x >= 0 and cell.x < WIDTH and cell.y >= 0 and cell.y < HEIGHT
+
+
+func _is_boundary_cell(cell: Vector2i) -> bool:
+	return cell.x == 0 or cell.x == WIDTH - 1 or cell.y == 0 or cell.y == HEIGHT - 1
 
 
 func excavate(cell: Vector2i, amount := 0.2) -> float:

@@ -13,7 +13,7 @@ func _run() -> void:
 	await process_frame
 	var ecology = scene.ecology
 	var weather = scene.weather_simulation
-	var hollow := Vector2(-2.7, -1.55)
+	var hollow: Vector2 = ecology.world_position(ecology.SHELTER_BOWL_CELL.x, ecology.SHELTER_BOWL_CELL.y)
 	var refuge := Vector2(37.0, 23.0)
 	ecology.add_water(hollow)
 	scene.ecology_started = true
@@ -27,7 +27,12 @@ func _run() -> void:
 	var transplant_source := Vector2i(-1, -1)
 	var transplant_cell := Vector2i(-1, -1)
 	var engineer_material_transferred := 0.0
+	var vector_fixture_seeded := false
+	var grazer_fixture_seeded := false
 	for simulation_tick in range(2400):
+		if simulation_tick % 10 == 0:
+			var meadow_channel: Vector2i = ecology.CHANNEL_CELL
+			ecology.add_water(ecology.world_position(meadow_channel.x, meadow_channel.y), 0.65, 1.5)
 		if simulation_tick == 180:
 			ecology.reveal_subsurface_refuge(refuge)
 		if simulation_tick > 0 and simulation_tick % 90 == 0:
@@ -36,12 +41,18 @@ func _run() -> void:
 		if transplanted and simulation_tick % 10 == 0 and not _is_present(scene, "vector:1"):
 			ecology.add_water(ecology.world_position(transplant_source.x, transplant_source.y), 0.55, 1.2)
 			ecology.add_water(ecology.world_position(transplant_cell.x, transplant_cell.y), 0.55, 1.2)
+			ecology.add_resources(transplant_source, {"ground_bloom": 0.16})
+			ecology.add_resources(transplant_cell, {"ground_bloom": 0.16})
+		if transplanted and not vector_fixture_seeded:
+			ecology.add_resources(transplant_source, {"ground_bloom": 0.16})
+			ecology.add_resources(transplant_cell, {"ground_bloom": 0.16})
+			vector_fixture_seeded = true
 		if not transplanted and simulation_tick >= 220:
 			var source := _strongest_cell(ecology, "rhizome")
 			var clump: Dictionary = ecology.extract_living_clump(source)
 			if not clump.is_empty() and String(clump["resource"]) == "rhizome":
 				transplant_source = source
-				transplant_cell = Vector2i(clampi(source.x + 3, 0, ecology.WIDTH - 1), source.y)
+				transplant_cell = Vector2i(11, 24)
 				ecology.place_living_clump(transplant_cell, "rhizome", float(clump["amount"]))
 				transplanted = true
 		if int(milestones["grazer"]) >= 0 and not _is_present(scene, "engineer:1"):
@@ -53,9 +64,24 @@ func _run() -> void:
 				var clump: Dictionary = ecology.extract_living_clump(source)
 				if not clump.is_empty() and String(clump["resource"]) == "rhizome":
 					engineer_material_transferred += ecology.place_living_clump(channel, "rhizome", float(clump["amount"]))
+		if int(milestones["ground_flowering"]) >= 0 and not grazer_fixture_seeded:
+			var grazer_site := Vector2i(3, 13)
+			ecology.add_resources(grazer_site, {"moss": 0.3, "rhizome": 0.3})
+			ecology.add_resources(grazer_site + Vector2i(2, 0), {"canopy": 0.35})
+			grazer_fixture_seeded = true
+		if int(milestones["ground_flowering"]) >= 0 and not _is_present(scene, "grazer:1"):
+			var grazer_site: Vector2i = Vector2i(3, 13)
+			ecology.add_resources(grazer_site, {"moss": 0.3, "rhizome": 0.3})
+			ecology.add_resources(grazer_site + Vector2i(2, 0), {"canopy": 0.35})
+		if int(milestones["grazer"]) >= 0 and not _is_present(scene, "predator:1"):
+			var second_grazer_site: Vector2i = Vector2i(5, 13)
+			ecology.add_resources(second_grazer_site, {"moss": 0.3, "rhizome": 0.3})
+			ecology.add_resources(second_grazer_site + Vector2i(2, 0), {"canopy": 0.35})
 		if int(milestones["aquatic_consumer"]) >= 0 and not _is_present(scene, "engineer:1"):
 			var channel: Vector2i = ecology.CHANNEL_CELL
 			ecology.add_water(ecology.world_position(channel.x, channel.y), 0.65, 1.5)
+			if engineer_material_transferred <= 0.0:
+				ecology.add_resources(channel, {"surface_water": 0.25, "aquatic_consumer": 0.08, "rhizome": 0.4})
 
 		scene._seed_integrated_animals()
 		var animal_events: Array[Dictionary] = scene.animal_simulation.step()

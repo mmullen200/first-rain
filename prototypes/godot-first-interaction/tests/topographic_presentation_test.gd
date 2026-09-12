@@ -17,6 +17,7 @@ func _run() -> void:
 	var block: MeshInstance3D = scene.ecology_cells[index]
 	_assert(block.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_ON, "terrain blocks should cast height-revealing shadows")
 	_assert(is_equal_approx(block.position.y, height * 0.5), "each block should extend from its terrain height down to the floor")
+	_assert(block.material_override is ShaderMaterial, "terrain blocks should preserve ecological top color over pixel-scaled mineral side strata")
 
 	model.canopy[index] = 0.02
 	model.surface_water[index] = 0.25

@@ -12,11 +12,11 @@ func _run() -> void:
 		_fail("wreck-to-downstream traversal is outside the accepted 25–35 second range: %f" % crossing_seconds)
 		return
 	var expected := {
-		Vector3(-5.4, 0.0, -3.1): "WRECK SHELTER",
-		Vector3(-2.7, 0.0, -1.55): "SHELTERED HOLLOW",
-		Vector3(16.0, 0.0, 3.0): "EXPOSED TOXIC SHELF",
-		Vector3(18.0, 0.0, 12.0): "DRY DRAINAGE SPINE",
-		Vector3(37.0, 0.0, 23.0): "DOWNSTREAM RECOVERY POCKET"
+		Vector3(-5.0, 0.0, -3.0): "WRECK SHELTER",
+		Vector3(-3.0, 0.0, 5.0): "SHELTER BOWL",
+		Vector3(51.0, 0.0, -19.0): "DRY TERRACE",
+		Vector3(37.0, 0.0, 3.0): "LONG MEADOW",
+		Vector3(63.0, 0.0, 27.0): "THE SINK"
 	}
 	for position in expected:
 		scene.astronaut.position = position
@@ -29,8 +29,8 @@ func _run() -> void:
 		_fail("Basin Survey did not preserve visited zones without route guidance")
 		return
 
-	var source := Vector2i(5, 5)
-	var downstream := Vector2i(5, 6)
+	var source: Vector2i = scene.ecology.FORK_CELL
+	var downstream: Vector2i = scene.ecology.downhill_neighbor(source)
 	var before: float = scene.ecology.cell_snapshot(downstream.x, downstream.y)["moisture"]
 	scene.ecology.add_water(scene.ecology.world_position(source.x, source.y), 1.0, 0.5)
 	scene.ecology.step()

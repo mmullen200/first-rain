@@ -17,7 +17,7 @@ func _initialize() -> void:
 			var elevation: float = ecology.terrain_height(Vector2i(x, y))
 			low = minf(low, elevation)
 			high = maxf(high, elevation)
-	_assert(high - low >= 1.5 and high - low <= 2.5, "terrain relief should read as a deliberate 1.5–2.5 world-unit shape")
+	_assert(high - low >= 12.5 and high - low <= 12.7, "terrain relief should match the surveyed 0.6–13.2 m range")
 
 	var catchment: Vector2i = EcologyGridModel.HIGH_CATCHMENT_CELL
 	var hollow: Vector2i = EcologyGridModel.CLOSED_HOLLOW_CELL
@@ -25,13 +25,15 @@ func _initialize() -> void:
 	_assert(ecology.terrain_height(catchment) > ecology.terrain_height(hollow), "the catchment should stand above the closed hollow")
 	_assert(ecology.downhill_neighbor(hollow) == hollow, "the closed hollow should have no lower outlet")
 	_assert(not ecology.flow_path(catchment).has(terrace), "the dry terrace should sit outside the catchment's natural flow path")
-	_assert(ecology.flow_path(catchment).has(EcologyGridModel.CHANNEL_CELL), "catchment runoff should converge into the Drainage Spine")
-	_assert(ecology.flow_path(catchment).has(hollow), "the Drainage Spine should feed the closed hollow")
+	_assert(ecology.flow_path(catchment).has(EcologyGridModel.FORK_CELL), "the Headwall gully should converge at the Fork")
+	_assert(ecology.flow_path(catchment).has(EcologyGridModel.CHANNEL_CELL), "the uncut Fork should feed the eastern Drainage Spine")
+	_assert(ecology.flow_path(catchment).has(EcologyGridModel.SINK_CELL), "the eastern Drainage Spine should reach the Sink")
+	_assert(not ecology.flow_path(catchment).has(hollow), "the uncut south lip should keep Headwall water out of the Shelter Bowl")
 	var terrace_water_before: float = ecology.surface_water[terrace.y * EcologyGridModel.WIDTH + terrace.x]
 	ecology.add_water(ecology.world_position(catchment.x, catchment.y), 0.9, 0.5)
-	for _tick in range(60):
+	for _tick in range(80):
 		ecology.step()
-	_assert(ecology.surface_water[hollow.y * EcologyGridModel.WIDTH + hollow.x] > terrace_water_before + 0.02, "a visible Drainage Pulse poured high should arrive and remain in the closed hollow")
+	_assert(ecology.surface_water[EcologyGridModel.SINK_CELL.y * EcologyGridModel.WIDTH + EcologyGridModel.SINK_CELL.x] > terrace_water_before + 0.02, "a visible Drainage Pulse poured high should reach the Sink")
 
 	var upstream: Vector2i = EcologyGridModel.DAM_TEST_UPSTREAM_CELL
 	var original_route: Vector2i = ecology.downhill_neighbor(upstream)

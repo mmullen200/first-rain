@@ -31,7 +31,7 @@ func _run() -> void:
 	var engineer_patch: Vector2i = scene.ecology.CHANNEL_CELL
 	_seed_patch(scene, engineer_patch, {"surface_water": 0.18, "rhizome": 0.14, "aquatic_consumer": 0.12}, 1)
 	scene.ecology.add_resources(grazer_patch + Vector2i(2, 0), {"canopy": 0.22})
-	_advance_search_attempts(scene, 260)
+	_advance_search_attempts(scene, 520)
 	_assert(_living_species(scene) == ["colony", "grazer", "grazer", "predator", "vector", "wetland_engineer"], "simultaneously supported roles should all establish without a global checklist")
 
 	if failed:
@@ -43,8 +43,10 @@ func _run() -> void:
 
 func _assert_fungus_needs_detritus() -> void:
 	var ecology = EcologyGrid.new()
-	var cell: Vector2i = EcologyGrid.CLOSED_HOLLOW_CELL
+	var cell := Vector2i(30, 10)
 	var world: Vector2 = ecology.world_position(cell.x, cell.y)
+	ecology.dead_biomass[cell.y * ecology.WIDTH + cell.x] = 0.0
+	ecology.fungus[cell.y * ecology.WIDTH + cell.x] = 0.0
 	ecology.add_resources(cell, {"fungal_spores": 0.7, "nutrients": 0.5})
 	for ignored in range(25):
 		ecology.add_water(world, 0.35, 1.5)
@@ -61,6 +63,8 @@ func _assert_rooted_mats_need_both_pioneers() -> void:
 	var ecology = EcologyGrid.new()
 	var cell: Vector2i = EcologyGrid.CLOSED_HOLLOW_CELL
 	var world: Vector2 = ecology.world_position(cell.x, cell.y)
+	ecology.microbial_crust[cell.y * ecology.WIDTH + cell.x] = 0.0
+	ecology.rhizome[cell.y * ecology.WIDTH + cell.x] = 0.0
 	ecology.add_resources(cell, {
 		"moss": 0.4,
 		"nutrients": 0.8,
