@@ -16,8 +16,18 @@ func _run() -> void:
 	var height: float = model.terrain_height(catchment)
 	var block: MeshInstance3D = scene.ecology_cells[index]
 	_assert(block.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_ON, "terrain blocks should cast height-revealing shadows")
-	_assert(is_equal_approx(block.position.y, height * 0.5), "each block should extend from its terrain height down to the floor")
+	_assert(block.mesh is ArrayMesh, "each Ecological Cell should render as one batched voxel mesh")
+	_assert(int(block.get_meta("voxel_count", 0)) == 9, "each Ecological Cell should contain a 3 by 3 patch of nine sub-columns")
+	var voxel_heights: PackedFloat32Array = block.get_meta("voxel_heights")
+	_assert(voxel_heights.size() == 9, "the voxel patch should retain nine independently sampled presentation heights")
+	_assert(is_equal_approx(block.position.y, 0.0), "voxel columns should extend upward from the basin floor")
 	_assert(block.material_override is ShaderMaterial, "terrain blocks should preserve ecological top color over pixel-scaled mineral side strata")
+
+	var east_world: Vector2 = model.world_position(catchment.x + 1, catchment.y)
+	var boundary := world.lerp(east_world, 0.5)
+	var height_before: float = scene._terrain_surface_height(boundary - Vector2(0.01, 0.0))
+	var height_after: float = scene._terrain_surface_height(boundary + Vector2(0.01, 0.0))
+	_assert(absf(height_after - height_before) < 0.05, "presentation height should remain continuous across Ecological Cell boundaries")
 
 	model.canopy[index] = 0.02
 	model.surface_water[index] = 0.25
@@ -33,13 +43,13 @@ func _run() -> void:
 	_assert(scene.analysis_lens_mode == 2, "the Field Scanner should expose a third elevation-and-flow mode")
 	_assert(scene.flow_arrows[index].visible, "the terrain lens should show a local downhill arrow")
 	scene._move_astronaut(0.0)
-	_assert(is_equal_approx(scene.astronaut.position.y, height + 0.02), "the astronaut should stand on the terrain height")
+	_assert(is_equal_approx(scene.astronaut.position.y, scene._terrain_surface_height(world) + 0.02), "the astronaut should stand on the continuous presentation surface")
 
 	var before: float = model.terrain_height(catchment)
 	scene._excavate_nearby_cell()
 	_assert(model.terrain_height(catchment) < before, "the astronaut's excavation should lower the occupied Ecological Cell")
 
-	print("PASS: stepped blocks, shadows, separate canopy and water, terrain lens arrows, and terrain-following astronaut expose the landform")
+	print("PASS: nine-column voxel patches, shadows, separate canopy and water, terrain lens arrows, and smooth terrain-following expose the landform")
 	quit(0)
 
 

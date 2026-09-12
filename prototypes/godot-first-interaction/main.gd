@@ -6,6 +6,10 @@ extends Node3D
 
 const WALK_SPEED := 1.9
 const GRAZER_MOVE_SPEED := 0.38
+const GROUND_ANIMAL_MOVE_SPEED := 0.72
+const TERRAIN_SUBDIVISIONS := 3
+const TERRAIN_BLOCK_GAP := 0.0
+const TERRAIN_VOXEL_HEIGHT_STEP := 0.12
 const WORLD_MIN_X := -27.0
 const WORLD_MAX_X := 71.0
 const WORLD_MIN_Z := -33.0
@@ -392,6 +396,7 @@ func _physics_process(delta: float) -> void:
 	_update_grazer(delta)
 	_update_grazer_markers(delta)
 	_update_vector_markers(delta)
+	_update_ground_animal_markers(delta)
 	_update_colony_worker_visual()
 	_update_colony_prospect_visual()
 	_update_disturbance(delta)
@@ -577,13 +582,15 @@ void fragment() {
 	var arrow_material := _material(Color("72d7e6"), 0.22, Color("4bbdcc"))
 	for y in range(EcologyGridModel.HEIGHT):
 		for x in range(EcologyGridModel.WIDTH):
-			var terrain_height: float = ecology.terrain_height(Vector2i(x, y))
+			var terrain_cell := Vector2i(x, y)
 			var cell := MeshInstance3D.new()
-			var mesh := BoxMesh.new()
-			mesh.size = Vector3(EcologyGridModel.CELL_SIZE - 0.08, terrain_height, EcologyGridModel.CELL_SIZE - 0.08)
-			cell.mesh = mesh
+			cell.name = "EcologicalCell_%d_%d" % [x, y]
+			var voxel_heights := _voxel_heights_for_cell(terrain_cell)
+			cell.mesh = _build_voxel_cell_mesh(voxel_heights)
+			cell.set_meta("voxel_heights", voxel_heights)
+			cell.set_meta("voxel_count", TERRAIN_SUBDIVISIONS * TERRAIN_SUBDIVISIONS)
 			var world: Vector2 = ecology.world_position(x, y)
-			cell.position = Vector3(world.x, terrain_height * 0.5, world.y)
+			cell.position = Vector3(world.x, 0.0, world.y)
 			cell.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 			root.add_child(cell)
 			ecology_cells.append(cell)
@@ -623,6 +630,73 @@ void fragment() {
 			root.add_child(arrow)
 			flow_arrows.append(arrow)
 	_refresh_ecology_visuals()
+
+
+func _terrain_surface_height(world: Vector2) -> float:
+	# Ecology remains one authoritative height per Ecological Cell. Presentation
+	# samples those cell centres bilinearly so actors can traverse the visibly
+	# stepped sub-columns without snapping at simulation-cell boundaries.
+	var grid := (world - EcologyGridModel.ORIGIN) / EcologyGridModel.CELL_SIZE
+	var x0 := floori(grid.x)
+	var y0 := floori(grid.y)
+	var progress_x := grid.x - float(x0)
+	var progress_y := grid.y - float(y0)
+	var northwest: float = ecology.terrain_height(Vector2i(x0, y0))
+	var northeast: float = ecology.terrain_height(Vector2i(x0 + 1, y0))
+	var southwest: float = ecology.terrain_height(Vector2i(x0, y0 + 1))
+	var southeast: float = ecology.terrain_height(Vector2i(x0 + 1, y0 + 1))
+	return lerpf(lerpf(northwest, northeast, progress_x), lerpf(southwest, southeast, progress_x), progress_y)
+
+
+func _voxel_heights_for_cell(cell: Vector2i) -> PackedFloat32Array:
+	var heights := PackedFloat32Array()
+	var centre: Vector2 = ecology.world_position(cell.x, cell.y)
+	var sub_size := EcologyGridModel.CELL_SIZE / float(TERRAIN_SUBDIVISIONS)
+	for sub_y in range(TERRAIN_SUBDIVISIONS):
+		for sub_x in range(TERRAIN_SUBDIVISIONS):
+			var offset := Vector2(
+				(float(sub_x) - 1.0) * sub_size,
+				(float(sub_y) - 1.0) * sub_size
+			)
+			var smooth_height := _terrain_surface_height(centre + offset)
+			heights.append(maxf(0.06, roundf(smooth_height / TERRAIN_VOXEL_HEIGHT_STEP) * TERRAIN_VOXEL_HEIGHT_STEP))
+	return heights
+
+
+func _build_voxel_cell_mesh(heights: PackedFloat32Array) -> ArrayMesh:
+	var surface := SurfaceTool.new()
+	surface.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var sub_size := EcologyGridModel.CELL_SIZE / float(TERRAIN_SUBDIVISIONS)
+	var half_width := (sub_size - TERRAIN_BLOCK_GAP) * 0.5
+	for sub_y in range(TERRAIN_SUBDIVISIONS):
+		for sub_x in range(TERRAIN_SUBDIVISIONS):
+			var centre_x := (float(sub_x) - 1.0) * sub_size
+			var centre_z := (float(sub_y) - 1.0) * sub_size
+			var height: float = heights[sub_y * TERRAIN_SUBDIVISIONS + sub_x]
+			_append_voxel_column(surface, centre_x, centre_z, half_width, height)
+	return surface.commit()
+
+
+func _append_voxel_column(surface: SurfaceTool, centre_x: float, centre_z: float, half_width: float, height: float) -> void:
+	var left := centre_x - half_width
+	var right := centre_x + half_width
+	var back := centre_z - half_width
+	var front := centre_z + half_width
+	# Top, north, south, west and east. The floor hides the column bottoms.
+	_append_voxel_quad(surface, Vector3(left, height, back), Vector3(left, height, front), Vector3(right, height, front), Vector3(right, height, back))
+	_append_voxel_quad(surface, Vector3(left, 0.0, back), Vector3(left, height, back), Vector3(right, height, back), Vector3(right, 0.0, back))
+	_append_voxel_quad(surface, Vector3(left, 0.0, front), Vector3(right, 0.0, front), Vector3(right, height, front), Vector3(left, height, front))
+	_append_voxel_quad(surface, Vector3(left, 0.0, back), Vector3(left, 0.0, front), Vector3(left, height, front), Vector3(left, height, back))
+	_append_voxel_quad(surface, Vector3(right, 0.0, back), Vector3(right, height, back), Vector3(right, height, front), Vector3(right, 0.0, front))
+
+
+func _append_voxel_quad(surface: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3) -> void:
+	var normal := (b - a).cross(c - a).normalized()
+	# Godot treats clockwise winding as front-facing. Keep the outward normal
+	# explicit so the top/side shader distinction does not depend on winding.
+	for vertex in [a, c, b, a, d, c]:
+		surface.set_normal(normal)
+		surface.add_vertex(vertex)
 
 
 func _build_spatial_landmarks() -> void:
@@ -1209,8 +1283,7 @@ func _move_astronaut(_delta: float) -> void:
 	astronaut.move_and_slide()
 	astronaut.position.x = clamp(astronaut.position.x, WORLD_MIN_X, WORLD_MAX_X)
 	astronaut.position.z = clamp(astronaut.position.z, WORLD_MIN_Z, WORLD_MAX_Z)
-	var ground_cell: Vector2i = ecology.world_to_cell(Vector2(astronaut.position.x, astronaut.position.z))
-	astronaut.position.y = ecology.terrain_height(ground_cell) + 0.02
+	astronaut.position.y = _terrain_surface_height(Vector2(astronaut.position.x, astronaut.position.z)) + 0.02
 	visited_zones[_current_zone()] = true
 	if input.length() > 0.1:
 		astronaut.rotation.y = lerp_angle(astronaut.rotation.y, atan2(input.x, input.y), 0.24)
@@ -2097,8 +2170,6 @@ func _update_ecological_animal_markers() -> void:
 		var target := Vector3(world.x, ecology.terrain_height(cell) + height, world.y)
 		if not was_visible:
 			marker.position = target
-		elif agent["species"] not in ["grazer", "vector"]:
-			marker.position = marker.position.lerp(target, 0.45)
 		var label: Label3D = marker.get_child(1)
 		label.text = String(label.text).split(" / ")[0] + " / " + String(agent["state"]).to_upper()
 		if agent["species"] == "grazer":
@@ -2123,9 +2194,8 @@ func _update_vector_markers(delta: float) -> void:
 		var cell: Vector2i = agent["cell"]
 		var world: Vector2 = ecology.world_position(cell.x, cell.y)
 		var height := 0.45 if agent["state"] == "feeding" else 0.9
-		marker.position = marker.position.move_toward(Vector3(world.x, ecology.terrain_height(cell) + height, world.y), delta * 2.0)
-		var underfoot: Vector2i = ecology.world_to_cell(Vector2(marker.position.x, marker.position.z))
-		marker.position.y = maxf(marker.position.y, ecology.terrain_height(underfoot) + 0.4)
+		marker.position = marker.position.move_toward(Vector3(world.x, _terrain_surface_height(world) + height, world.y), delta * 2.0)
+		marker.position.y = maxf(marker.position.y, _terrain_surface_height(Vector2(marker.position.x, marker.position.z)) + 0.4)
 		var body: MeshInstance3D = marker.get_child(0)
 		var color := Color("f5b0de") if agent["pollen_kind"] == "canopy" and agent["pollen_load"] > 0.0 else Color("e9d36a")
 		if body.get_meta("pollen_color", Color.TRANSPARENT) != color:
@@ -2162,11 +2232,33 @@ func _update_grazer_markers(delta: float) -> void:
 			continue
 		var cell: Vector2i = agent["cell"]
 		var world: Vector2 = ecology.world_position(cell.x, cell.y)
-		var target := Vector3(world.x, ecology.terrain_height(cell) + 0.25, world.y)
 		var speed := 1.8 if agent["state"] == "fleeing" else (0.85 if agent["state"] == "following parent" else GRAZER_MOVE_SPEED)
-		marker.position = marker.position.move_toward(target, speed * delta)
-		var underfoot: Vector2i = ecology.world_to_cell(Vector2(marker.position.x, marker.position.z))
-		marker.position.y = maxf(marker.position.y, ecology.terrain_height(underfoot) + 0.25)
+		_move_ground_actor(marker, world, 0.25, speed, delta)
+
+
+func _update_ground_animal_markers(delta: float) -> void:
+	for id in animal_markers:
+		var agent: Dictionary = animal_simulation.agent_state(id)
+		if agent.is_empty() or not bool(agent["alive"]) or not bool(agent.get("present", true)):
+			continue
+		var species := String(agent["species"])
+		if species in ["grazer", "vector", "colony"]:
+			continue
+		var marker: Node3D = animal_markers[id]
+		if not marker.visible:
+			continue
+		var cell: Vector2i = agent["cell"]
+		var world: Vector2 = ecology.world_position(cell.x, cell.y)
+		var speed := 1.15 if species == "predator" and String(agent["state"]) in ["hunting", "retreating"] else GROUND_ANIMAL_MOVE_SPEED
+		_move_ground_actor(marker, world, 0.25, speed, delta)
+
+
+func _move_ground_actor(actor: Node3D, target_world: Vector2, height_offset: float, speed: float, delta: float) -> void:
+	var current := Vector2(actor.position.x, actor.position.z)
+	var next := current.move_toward(target_world, speed * delta)
+	actor.position = Vector3(next.x, _terrain_surface_height(next) + height_offset, next.y)
+	if current.distance_to(next) > 0.0001:
+		actor.rotation.y = lerp_angle(actor.rotation.y, atan2(next.x - current.x, next.y - current.y), 0.2)
 
 
 func _update_predator_tracks(stable_id: String, agent: Dictionary) -> void:
@@ -2217,8 +2309,7 @@ func _update_colony_prospect_visual() -> void:
 			continue
 		var progress := fmod(cycle + float(scout_index) / float(maxi(1, visible_scouts)), 1.0)
 		var trail_point := start_world.lerp(target_world, progress)
-		var trail_cell: Vector2i = ecology.world_to_cell(trail_point)
-		scout.position = Vector3(trail_point.x, ecology.terrain_height(trail_cell) + 0.16, trail_point.y)
+		scout.position = Vector3(trail_point.x, _terrain_surface_height(trail_point) + 0.16, trail_point.y)
 	colony_prospect_label.text = "GROUND DISTURBED / NO MOUND" if observations >= 5 else "SCOUT TRAIL / NO NEST"
 	colony_prospect_label.position = Vector3(target_world.x, ecology.terrain_height(target_cell) + 0.58, target_world.y)
 
@@ -2260,8 +2351,7 @@ func _update_colony_worker_stream(agent: Dictionary) -> void:
 		var point := start.lerp(finish, progress)
 		# Small individual offsets make shared paths legible without inventing movement.
 		point += Vector2(sin(float(index) * 2.4), cos(float(index) * 2.4)) * 0.075
-		var height := lerpf(ecology.terrain_height(previous), ecology.terrain_height(cell), progress)
-		height = maxf(height, ecology.terrain_height(ecology.world_to_cell(point)))
+		var height := _terrain_surface_height(point)
 		ant.position = Vector3(point.x, height + 0.16, point.y)
 		var heading: Vector2i = worker["heading"]
 		ant.rotation.y = -atan2(float(heading.y), float(heading.x))
@@ -2314,9 +2404,9 @@ func _update_grazer(delta: float) -> void:
 	grazer_cell = authoritative["cell"]
 	_set_grazer_state(authoritative["state"])
 	var target_world: Vector2 = ecology.world_position(grazer_cell.x, grazer_cell.y)
-	grazer_target_position = Vector3(target_world.x, ecology.terrain_height(grazer_cell) + 0.28, target_world.y)
+	grazer_target_position = Vector3(target_world.x, _terrain_surface_height(target_world) + 0.28, target_world.y)
 	var speed := 1.8 if authoritative["state"] == "fleeing" else GRAZER_MOVE_SPEED
-	grazer_root.position = grazer_root.position.move_toward(grazer_target_position, speed * delta)
+	_move_ground_actor(grazer_root, target_world, 0.28, speed, delta)
 	if grazer_root.position.distance_to(grazer_target_position) > 0.01:
 		grazer_root.look_at(grazer_target_position, Vector3.UP)
 
@@ -2579,9 +2669,13 @@ func _refresh_ecology_visuals() -> void:
 			material.set_shader_parameter("elevation", terrain_height)
 			material.set_shader_parameter("fungus_glow", minf(sample["fungus"] * 2.4, 0.85) if sample["fungus"] >= 0.035 else 0.0)
 			ecology_cells[index].material_override = material
-			var terrain_mesh := ecology_cells[index].mesh as BoxMesh
-			terrain_mesh.size.y = terrain_height
-			ecology_cells[index].position.y = terrain_height * 0.5
+			var terrain_cell := Vector2i(x, y)
+			var voxel_heights := _voxel_heights_for_cell(terrain_cell)
+			var previous_heights: PackedFloat32Array = ecology_cells[index].get_meta("voxel_heights", PackedFloat32Array())
+			if voxel_heights != previous_heights:
+				ecology_cells[index].mesh = _build_voxel_cell_mesh(voxel_heights)
+				ecology_cells[index].set_meta("voxel_heights", voxel_heights)
+			ecology_cells[index].position.y = 0.0
 
 			var world_position: Vector2 = ecology.world_position(x, y)
 			var canopy_growth: float = clampf(sample["canopy"] * 80.0, 0.0, 1.0)
