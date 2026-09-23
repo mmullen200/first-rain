@@ -51,8 +51,10 @@ const EcologyGridModel = preload("res://ecology_grid.gd")
 const EvidenceRecorder = preload("res://evidence_recorder.gd")
 const AnimalSimulation = preload("res://animal_simulation.gd")
 const WeatherSimulation = preload("res://weather_simulation.gd")
+const AstronautFigure = preload("res://astronaut_figure.gd")
 
 var astronaut: CharacterBody3D
+var astronaut_figure: Node3D
 var camera: Camera3D
 var ecology
 var animal_simulation
@@ -740,24 +742,8 @@ func _build_astronaut() -> void:
 	collision.position.y = 0.68
 	astronaut.add_child(collision)
 
-	var suit := MeshInstance3D.new()
-	var capsule := CapsuleMesh.new()
-	capsule.radius = 0.34
-	capsule.height = 1.35
-	suit.mesh = capsule
-	suit.material_override = _material(Color("d9d1bd"), 0.58)
-	suit.position.y = 0.68
-	astronaut.add_child(suit)
-
-	var visor := MeshInstance3D.new()
-	var visor_mesh := SphereMesh.new()
-	visor_mesh.radius = 0.29
-	visor_mesh.height = 0.48
-	visor.mesh = visor_mesh
-	visor.material_override = _material(Color("334653"), 0.25, Color("7699ad"))
-	visor.position = Vector3(0.0, 1.32, -0.12)
-	visor.scale = Vector3(1.0, 0.85, 0.75)
-	astronaut.add_child(visor)
+	astronaut_figure = AstronautFigure.new()
+	astronaut.add_child(astronaut_figure)
 
 	camera = Camera3D.new()
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
@@ -1269,7 +1255,7 @@ func _record_command(verb: String, target: String, facts := {}) -> String:
 	return evidence.record_command(ecology.tick, verb, target, command_facts)
 
 
-func _move_astronaut(_delta: float) -> void:
+func _move_astronaut(delta: float) -> void:
 	var input := Vector2.ZERO
 	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
 		input.x -= 1.0
@@ -1281,12 +1267,17 @@ func _move_astronaut(_delta: float) -> void:
 		input.y += 1.0
 
 	input = input.normalized()
+	var previous_flat := Vector2(astronaut.position.x, astronaut.position.z)
 	astronaut.velocity = Vector3(input.x * WALK_SPEED, 0.0, input.y * WALK_SPEED)
 	astronaut.move_and_slide()
 	astronaut.position.x = clamp(astronaut.position.x, WORLD_MIN_X, WORLD_MAX_X)
 	astronaut.position.z = clamp(astronaut.position.z, WORLD_MIN_Z, WORLD_MAX_Z)
 	astronaut.position.y = _terrain_surface_height(Vector2(astronaut.position.x, astronaut.position.z)) + 0.02
 	visited_zones[_current_zone()] = true
+	if delta > 0.0:
+		# Animate from actual travel so walking into a wall or the map edge stands still.
+		var travelled := Vector2(astronaut.position.x, astronaut.position.z).distance_to(previous_flat)
+		astronaut_figure.animate(delta, travelled / delta)
 	if input.length() > 0.1:
 		astronaut.rotation.y = lerp_angle(astronaut.rotation.y, atan2(input.x, input.y), 0.24)
 	if analysis_lens_enabled:
