@@ -52,9 +52,11 @@ const EvidenceRecorder = preload("res://evidence_recorder.gd")
 const AnimalSimulation = preload("res://animal_simulation.gd")
 const WeatherSimulation = preload("res://weather_simulation.gd")
 const AstronautFigure = preload("res://astronaut_figure.gd")
+const HoodooField = preload("res://hoodoo_field.gd")
 
 var astronaut: CharacterBody3D
 var astronaut_figure: Node3D
+var hoodoo_field: Node3D
 var camera: Camera3D
 var ecology
 var animal_simulation
@@ -202,6 +204,7 @@ var seedling_observations: Dictionary = {}
 func _ready() -> void:
 	_build_ecology_grid()
 	_build_world()
+	_build_hoodoos()
 	_build_spatial_landmarks()
 	_build_astronaut()
 	_build_patches()
@@ -703,6 +706,12 @@ func _append_voxel_quad(surface: SurfaceTool, a: Vector3, b: Vector3, c: Vector3
 		surface.add_vertex(vertex)
 
 
+func _build_hoodoos() -> void:
+	hoodoo_field = HoodooField.new()
+	add_child(hoodoo_field)
+	hoodoo_field.build(ecology)
+
+
 func _build_spatial_landmarks() -> void:
 	_create_terrain_label("THE HEADWALL  /  SPRING BLOCKED", EcologyGridModel.HEADWALL_SPRING_CELL, Color("d9c49a"))
 	_create_terrain_label("TOXIC VENT", EcologyGridModel.TOXIC_VENT_CELL, Color("e1ac70"))
@@ -724,7 +733,9 @@ func _build_spatial_landmarks() -> void:
 
 func _create_terrain_label(text: String, cell: Vector2i, color: Color) -> void:
 	var world: Vector2 = ecology.world_position(cell.x, cell.y)
-	_create_world_label(text, Vector3(world.x, ecology.terrain_height(cell) + 0.72, world.y), color, 0.006)
+	# Lift the label clear of any hoodoo standing on the landmark.
+	var lift := maxf(0.72, float(hoodoo_field.hoodoo_heights.get(cell, 0.0)) - HoodooField.BASE_SINK + 0.5)
+	_create_world_label(text, Vector3(world.x, ecology.terrain_height(cell) + lift, world.y), color, 0.006)
 
 
 func _build_astronaut() -> void:
