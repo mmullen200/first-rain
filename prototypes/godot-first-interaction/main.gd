@@ -567,11 +567,13 @@ void vertex() {
 
 void fragment() {
 	float top_face = smoothstep(0.72, 0.96, NORMAL.y);
-	float stratum = step(0.5, fract((world_position.y + elevation * 0.13) * 0.82));
+	float local_elevation = clamp(world_position.y / 13.2, 0.0, 1.0);
+	float stratum = step(0.5, fract(world_position.y * 0.82));
 	float pixel = block_noise(world_position);
-	vec3 lower_rock = mix(vec3(0.16, 0.18, 0.18), vec3(0.28, 0.24, 0.20), clamp(elevation / 13.2, 0.0, 1.0));
+	vec3 lower_rock = mix(vec3(0.16, 0.18, 0.18), vec3(0.28, 0.24, 0.20), local_elevation);
 	vec3 side_color = lower_rock * mix(0.78, 1.14, stratum) * mix(0.88, 1.1, step(0.55, pixel));
-	ALBEDO = mix(side_color, top_color.rgb, top_face);
+	vec3 elevation_tint = mix(vec3(0.84, 0.87, 0.88), vec3(1.08, 1.03, 0.92), local_elevation);
+	ALBEDO = mix(side_color, top_color.rgb * elevation_tint, top_face);
 	ROUGHNESS = 0.92;
 	EMISSION = top_color.rgb * fungus_glow * top_face;
 }
@@ -2632,7 +2634,10 @@ func _refresh_ecology_visuals() -> void:
 			var sample: Dictionary = ecology.cell_snapshot(x, y)
 			var terrain_height: float = sample["elevation"]
 			var elevation_band: float = inverse_lerp(EcologyGridModel.MIN_TERRAIN_HEIGHT, EcologyGridModel.MAX_TERRAIN_HEIGHT, terrain_height)
-			var color := Color("353f40").lerp(Color("71634c"), elevation_band)
+			# Elevation tint is applied from each voxel's world height in the shader.
+			# Keeping it out of this per-cell uniform prevents hard color seams where
+			# adjacent nine-column patches meet.
+			var color := Color("4b514f")
 			color = color.lerp(Color("31515a"), clamp(sample["moisture"] * 0.52, 0.0, 0.5))
 			color = color.lerp(Color("9a7240"), clamp(sample["toxicity"] * 0.32, 0.0, 0.3))
 			color = color.lerp(Color("81553d"), clamp(sample["dead_biomass"] * 1.8, 0.0, 0.72))
