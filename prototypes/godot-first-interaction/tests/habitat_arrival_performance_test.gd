@@ -17,7 +17,7 @@ func _run() -> void:
 	scene.ecology.add_resources(Vector2i(4, 12), {"ground_bloom": 0.16})
 	for y in range(12, 15):
 		for x in range(20, 23):
-			scene.ecology.add_resources(Vector2i(x, y), {"dead_biomass": 0.2})
+			scene.ecology.add_resources(Vector2i(x, y), {"dead_biomass": 0.2, "fungus": 0.2})
 	scene.animal_simulation.register_agent("colony", "colony:1", {"cell": Vector2i(21, 13), "habitat_cell": Vector2i(21, 13)})
 	for ignored in range(2):
 		scene._seed_integrated_animals()

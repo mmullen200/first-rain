@@ -103,6 +103,9 @@ func _run() -> void:
 	_assert(transplanted, "finite rooted biomass was never robust enough to transplant into a separated patch")
 	for milestone in milestones:
 		_assert(int(milestones[milestone]) >= 0, "playable succession never reached %s" % String(milestone).replace("_", " "))
+	_assert(scene.colony_queen_cell in scene.hoodoo_field.queen_cells, "the colony should be founded by a queen waking in a hoodoo, not arrive from outside")
+	_assert(scene.dormant_queens[scene.colony_queen_cell]["state"] in ["founded", "dormant"], "the founding queen should be recorded")
+	print("Colony queen woke at hoodoo ", scene.colony_queen_cell)
 	_assert(int(milestones["aquatic_producer"]) < int(milestones["aquatic_consumer"]), "aquatic consumers appeared before producers")
 	_assert(int(milestones["first_rain"]) > int(milestones["aquatic_consumer"]), "First Rain occurred before the aquatic food web processed sulfur")
 	if failed:

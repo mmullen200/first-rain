@@ -26,18 +26,14 @@ func _run() -> void:
 		"canopy_bloom": 0.08
 	}, 1)
 	uniform_scene.ecology.add_water(uniform_scene.ecology.world_position(lush_patch.x, lush_patch.y), 0.5, 2.4)
-	_assert(uniform_scene._best_arrival_habitat("colony").is_empty(), "wet Detritus in one lush patch should not qualify the dry-ground colony")
 	_assert(uniform_scene._best_arrival_habitat("vector").is_empty(), "one connected bloom carpet should not qualify a reproductive vector")
 	_assert(uniform_scene._best_arrival_habitat("wetland_engineer").is_empty(), "standing water away from the Drainage Spine should not qualify a Wetland Engineer")
 	_assert(uniform_scene._best_arrival_habitat("grazer").is_empty(), "uniform forage under uniform cover should not qualify a grazer without a habitat edge")
 	uniform_scene.queue_free()
 
-	var colony_patch := Vector2i(21, 13)
-	_seed_patch(scene, colony_patch, {"dead_biomass": 0.2}, 1)
-	var colony_habitat: Dictionary = scene._best_arrival_habitat("colony")
-	_assert(not colony_habitat.is_empty(), "a concentrated fairly dry detritus patch should qualify for colony arrival")
-	_assert(_cell_distance(colony_habitat["cell"], colony_patch) <= 1, "the colony destination should follow the local detritus patch")
-	_assert(colony_habitat["cell"] != Vector2i(10, 8), "the old hardcoded colony cell should not control arrival")
+	# The colony never arrives: a queen sleeping in a hoodoo wakes beside fungus.
+	var queen: Vector2i = scene.hoodoo_field.queen_cells[1]
+	_seed_patch(scene, queen, {"fungus": 0.2, "dead_biomass": 0.2}, 1)
 
 	var vector_patch := Vector2i(4, 12)
 	scene.ecology.add_resources(vector_patch, {"ground_bloom": 0.16})
@@ -63,12 +59,13 @@ func _run() -> void:
 	scene.animal_simulation.register_agent("grazer", "grazer:1", {"cell": grazer_patch})
 	for ignored in range(520):
 		scene._seed_integrated_animals()
-	_assert(scene.animal_simulation.agents.has("colony:1"), "qualifying local habitat should establish the colony")
+	_assert(scene.animal_simulation.agents.has("colony:1"), "fungus beside a queen's hoodoo should wake the colony")
 	_assert(scene.animal_simulation.agents.has("vector:1"), "separated flowering patches should establish a reproductive vector")
 	_assert(scene.animal_simulation.agents.has("engineer:1"), "a planted wet Drainage Spine should establish a Wetland Engineer")
 	_assert(scene.animal_simulation.agents.has("grazer:2"), "open forage beside cover should establish the second grazer")
 	_assert(scene.animal_simulation.agents.has("predator:1"), "two living grazers should establish a nearby predator")
-	_assert(scene.animal_simulation.agent_state("colony:1")["cell"] == colony_habitat["cell"], "registration should use the selected local colony habitat")
+	var nest: Vector2i = scene.animal_simulation.agent_state("colony:1")["cell"]
+	_assert(maxi(absi(nest.x - queen.x), absi(nest.y - queen.y)) == 1, "the colony should found its nest beside the queen's hoodoo, not anywhere in the basin")
 	_assert(not _discoveries_explain_roles(scene.discoveries), "arrival discoveries should describe evidence without announcing ecological functions")
 
 	if failed:

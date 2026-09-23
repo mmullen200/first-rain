@@ -6,7 +6,8 @@ extends Node3D
 # on Ecological Cells, not terrain, so the height field and drainage are
 # untouched and a spire can later be removed piece by piece. Placement and
 # shapes come from a fixed seed, so every run builds the same field.
-# Presentation and astronaut collision only: no ecology or animal rules yet.
+# Some hoodoos hold a sleeping eusocial queen in a sealed chamber at the base;
+# main.gd decides when one wakes. The hoodoos themselves have no ecology yet.
 
 const EcologyGridModel = preload("res://ecology_grid.gd")
 
@@ -20,6 +21,11 @@ const BOWL_CLEARANCE_CELLS := 4.0
 const WATERCOURSE_CLEARANCE_CELLS := 1.5
 const BASE_SINK := 0.45
 const RING_SEGMENTS := 22
+const QUEEN_SEED := 20260924
+const QUEEN_CHANCE := 0.7
+const MIN_QUEENS := 4
+# Horizontal direction from a hoodoo toward the gameplay camera (main.gd offset).
+const CAMERA_SIDE := Vector2(8.8, 10.5)
 
 const HOODOO_SHADER := """
 shader_type spatial;
@@ -48,6 +54,8 @@ void fragment() {
 
 var hoodoo_cells: Array[Vector2i] = []
 var hoodoo_heights: Dictionary = {}
+var hoodoo_widths: Dictionary = {}
+var queen_cells: Array[Vector2i] = []
 var material: ShaderMaterial
 
 
@@ -83,6 +91,7 @@ func build(ecology) -> void:
 		if _far_from(centre, centres, CLUSTER_SPACING_CELLS) and _far_from(centre, hoodoo_cells, CLUSTER_SPACING_CELLS):
 			centres.append(centre)
 
+	var group_founders: Array[Vector2i] = []
 	for centre in centres:
 		var group_size := rng.randi_range(1, 3)
 		var placed := 0
@@ -98,7 +107,55 @@ func build(ecology) -> void:
 				"width": rng.randf_range(0.72, 1.0) * clampf(height / 3.4, 0.85, 1.15),
 				"capped": rng.randf() < 0.68,
 			})
+			if placed == 0:
+				group_founders.append(cell)
 			placed += 1
+	_choose_queens(group_founders)
+
+
+# At most one sleeping queen per group, so wherever the player works there is
+# usually one nearby, but not every group has one. A separate seed keeps the
+# hoodoo shapes unchanged.
+func _choose_queens(group_founders: Array[Vector2i]) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = QUEEN_SEED
+	var passed_over: Array[Vector2i] = []
+	for cell in group_founders:
+		if rng.randf() < QUEEN_CHANCE:
+			queen_cells.append(cell)
+		else:
+			passed_over.append(cell)
+	while queen_cells.size() < MIN_QUEENS and not passed_over.is_empty():
+		queen_cells.append(passed_over.pop_front())
+	for cell in queen_cells:
+		_add_sealed_chamber(cell, rng)
+
+
+# A low, dark, rounded plug at the foot of the spire: the one outward sign
+# that something is sealed inside.
+func _add_sealed_chamber(cell: Vector2i, rng: RandomNumberGenerator) -> void:
+	var body: Node3D = get_node("Hoodoo_%d_%d" % [cell.x, cell.y])
+	var width: float = hoodoo_widths[cell]
+	# Face the chamber roughly toward the fixed camera so it is never hidden
+	# behind its own spire.
+	var world_angle := atan2(CAMERA_SIDE.y, CAMERA_SIDE.x) + rng.randf_range(-0.6, 0.6)
+	var local_direction: Vector3 = body.transform.basis.inverse() * Vector3(cos(world_angle), 0.0, sin(world_angle))
+	var angle := atan2(local_direction.z, local_direction.x)
+	var plug := MeshInstance3D.new()
+	var mesh := SphereMesh.new()
+	mesh.radius = 0.27
+	mesh.height = 0.54
+	plug.mesh = mesh
+	var plug_material := StandardMaterial3D.new()
+	plug_material.albedo_color = Color("3d2418")
+	plug_material.roughness = 0.97
+	plug.material_override = plug_material
+	var reach := width * 0.72
+	plug.position = Vector3(cos(angle) * reach, BASE_SINK + 0.16, sin(angle) * reach)
+	plug.rotation.y = -angle
+	plug.scale = Vector3(0.55, 0.8, 1.0)
+	plug.name = "SealedChamber"
+	body.add_child(plug)
 
 
 func _is_clear_ground(ecology, cell: Vector2i, watercourse: Array[Vector2i]) -> bool:
@@ -169,6 +226,7 @@ func _add_hoodoo(ecology, cell: Vector2i, rng: RandomNumberGenerator, shape: Dic
 
 	hoodoo_cells.append(cell)
 	hoodoo_heights[cell] = height
+	hoodoo_widths[cell] = width
 
 
 # A surface of revolution from a (fraction of height, fraction of radius)

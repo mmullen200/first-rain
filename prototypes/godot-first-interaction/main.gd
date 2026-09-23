@@ -38,6 +38,13 @@ const ARRIVAL_SUPPORT_OBSERVATIONS := {
 }
 const COLONY_PROSPECTING_OBSERVATIONS := 2
 const DEPARTURE_GRACE_TICKS := 48
+# Sleeping queens wake on the scent of living fungus near their hoodoo, like
+# Striga seeds waking only beside a host root. Waking takes a stronger scent
+# than an established garden needs to keep going.
+const QUEEN_WAKE_FUNGUS := 0.01
+const COLONY_GARDEN_FUNGUS := 0.004
+const QUEEN_SCENT_RADIUS := 2
+const QUEEN_CHAMBER_OPENING_OBSERVATIONS := 5
 const ANIMAL_SETTLEMENTS := {
 	"colony:1": "colony",
 	"vector:1": "vector",
@@ -173,6 +180,11 @@ var habitat_search_snapshot: Dictionary = {}
 var drainage_affinity_cache := PackedFloat32Array()
 var arrival_habitat_support: Dictionary = {}
 var unsupported_residency_ticks: Dictionary = {}
+# Hoodoo cell -> {"state": dormant|stirring|founded|dead, "observations": int}.
+var dormant_queens: Dictionary = {}
+var queen_survey_calls := 0
+var colony_queen_cell := Vector2i(-1, -1)
+var queen_husks: Array[MeshInstance3D] = []
 var first_rain_announced := false
 
 var disturbance_state := "quiet"
@@ -330,8 +342,8 @@ func _seed_colony_foraging_fixture() -> void:
 	for y in range(8, 11):
 		for x in range(3, 6):
 			var cell := Vector2i(x, y)
-			ecology.add_resources(cell, {"dead_biomass": 0.4})
-			ecology.moisture[y * ecology.WIDTH + x] = 0.16
+			ecology.add_resources(cell, {"dead_biomass": 0.4, "fungus": 0.2})
+			ecology.moisture[y * ecology.WIDTH + x] = 0.3
 	for cell in [Vector2i(6, 9), Vector2i(4, 11)]:
 		var index: int = cell.y * ecology.WIDTH + cell.x
 		ecology.add_resources(cell, {"moss": 0.24, "rhizome": 0.18, "nutrients": 0.25})
@@ -710,6 +722,8 @@ func _build_hoodoos() -> void:
 	hoodoo_field = HoodooField.new()
 	add_child(hoodoo_field)
 	hoodoo_field.build(ecology)
+	for cell in hoodoo_field.queen_cells:
+		dormant_queens[cell] = {"state": "dormant", "observations": 0}
 
 
 func _build_spatial_landmarks() -> void:
@@ -1013,9 +1027,9 @@ func _build_ecological_animal_markers() -> void:
 		colony_prospect_root.add_child(scout)
 		colony_prospect_markers.append(scout)
 	colony_prospect_label = Label3D.new()
-	colony_prospect_label.text = "SCOUT TRAIL / NO NEST"
+	colony_prospect_label.text = "SEALED CHAMBER / QUEEN STIRRING"
 	colony_prospect_label.font_size = 25
-	colony_prospect_label.pixel_size = 0.0042
+	colony_prospect_label.pixel_size = 0.007
 	colony_prospect_label.modulate = Color("efc17d")
 	colony_prospect_label.outline_size = 7
 	colony_prospect_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
@@ -1254,6 +1268,7 @@ func _evidence_snapshot() -> Dictionary:
 		},
 		"grazer": {"awake": grazer_awake, "state": grazer_state, "cell": grazer_cell},
 		"animals": animal_simulation.snapshot(),
+		"queens": dormant_queens.duplicate(true),
 		"weather": weather_simulation.snapshot(),
 		"disturbance": disturbance_state
 	}
@@ -1666,10 +1681,14 @@ func _update_ecology_grid(delta: float) -> void:
 
 func _seed_integrated_animals() -> void:
 	_update_resident_habitat_support()
+	_update_dormant_queens()
 	var candidates: Dictionary = {}
 	var species_to_search: Array[String] = []
 	for stable_id in ANIMAL_SETTLEMENTS:
 		var species := String(ANIMAL_SETTLEMENTS[stable_id])
+		if species == "colony":
+			# The colony never arrives from outside; it wakes from a queen.
+			continue
 		var agent: Dictionary = animal_simulation.agent_state(stable_id)
 		if not agent.is_empty() and (not bool(agent["alive"]) or bool(agent.get("present", true))):
 			arrival_habitat_support.erase(stable_id)
@@ -1687,8 +1706,6 @@ func _seed_integrated_animals() -> void:
 		var species := String(candidates[stable_id])
 		var habitat: Dictionary = habitats.get(species, {})
 		if habitat.is_empty():
-			if species == "colony":
-				_end_colony_prospecting(stable_id)
 			arrival_habitat_support.erase(stable_id)
 			continue
 		var previous: Dictionary = arrival_habitat_support.get(stable_id, {})
@@ -1696,59 +1713,111 @@ func _seed_integrated_animals() -> void:
 		var same_site := not previous.is_empty() and _cell_distance(previous["cell"], habitat["cell"]) <= 1
 		if same_site:
 			observations = int(previous["observations"]) + 1
-		elif species == "colony":
-			_end_colony_prospecting(stable_id)
 		arrival_habitat_support[stable_id] = {
 			"cell": habitat["cell"],
 			"observations": observations,
 			"habitat": habitat
 		}
-		if species == "colony" and observations >= COLONY_PROSPECTING_OBSERVATIONS:
-			_begin_colony_prospecting(stable_id, habitat, observations)
 		var required_observations := int(ARRIVAL_SUPPORT_OBSERVATIONS.get(species, 4))
 		if observations >= required_observations:
 			_register_ecological_role(species, stable_id, habitat)
 			arrival_habitat_support.erase(stable_id)
-			if species == "colony":
-				_hide_colony_prospecting()
 
 
-func _begin_colony_prospecting(stable_id: String, habitat: Dictionary, observations: int) -> void:
-	if observations == 5:
-		_set_status("Scout traffic thickens around the same patch. Loose grains are shifting, but there is still no mound.")
-		evidence.record_event(ecology.tick, "organism.colony_site_disturbed", stable_id, [], {
-			"cell": habitat["cell"],
-			"observations": observations
-		})
+# One survey of every sleeping queen, at the same cadence as a full habitat
+# sweep, so waking takes as long as an arrival used to.
+func _update_dormant_queens() -> void:
+	queen_survey_calls += 1
+	if queen_survey_calls < _calls_per_habitat_observation():
 		return
-	if observations != COLONY_PROSPECTING_OBSERVATIONS:
+	queen_survey_calls = 0
+	var colony: Dictionary = animal_simulation.agent_state("colony:1")
+	if not colony.is_empty() and (not bool(colony["alive"]) or bool(colony.get("present", true))):
 		return
-	animal_roles_announced["colony_prospecting"] = true
-	_add_discovery("Eusocial prospecting — isolated workers repeatedly inspect dry Detritus; no nest is established yet")
-	_set_status("Isolated insects keep returning to the same dry Detritus patch. The scanner marks repeated traffic, but there is no nest yet.")
-	evidence.record_event(ecology.tick, "organism.colony_prospecting", stable_id, [], {
-		"cell": habitat["cell"],
-		"habitat_score": habitat["score"],
-		"observations": observations
-	})
+	for cell in hoodoo_field.queen_cells:
+		var queen: Dictionary = dormant_queens[cell]
+		if String(queen["state"]) not in ["dormant", "stirring"]:
+			continue
+		var scent := _local_habitat_evidence(cell, QUEEN_SCENT_RADIUS, false)
+		var fungus_scent: float = float(scent["fungus"]) * maxf(0.0, 1.0 - float(scent["toxicity"]))
+		if fungus_scent < QUEEN_WAKE_FUNGUS:
+			if String(queen["state"]) == "stirring":
+				_queen_died(cell)
+			else:
+				queen["observations"] = 0
+			continue
+		queen["observations"] = int(queen["observations"]) + 1
+		var observations := int(queen["observations"])
+		if observations == COLONY_PROSPECTING_OBSERVATIONS:
+			queen["state"] = "stirring"
+			_add_discovery("Sealed chamber — something inside a hoodoo stirs when living fungus grows close by")
+			_set_status("Something moves behind the dark plug at the foot of the hoodoo. Living fungus is growing close by.")
+			evidence.record_event(ecology.tick, "organism.colony_queen_stirring", "colony:1", [], {"hoodoo": cell, "fungus_scent": fungus_scent})
+		elif observations == QUEEN_CHAMBER_OPENING_OBSERVATIONS:
+			_set_status("The plug at the hoodoo's foot is cracking open. Whatever is inside needs the fungus to hold.")
+			evidence.record_event(ecology.tick, "organism.colony_chamber_opening", "colony:1", [], {"hoodoo": cell, "fungus_scent": fungus_scent})
+		if observations >= int(ARRIVAL_SUPPORT_OBSERVATIONS["colony"]):
+			var nest := _queen_nest_cell(cell)
+			queen["state"] = "founded"
+			colony_queen_cell = cell
+			_register_ecological_role("colony", "colony:1", {"cell": nest, "score": fungus_scent, "evidence": scent, "queen_hoodoo": cell})
+			return
 
 
-func _end_colony_prospecting(stable_id: String) -> void:
-	var previous: Dictionary = arrival_habitat_support.get(stable_id, {})
-	if previous.is_empty() or int(previous.get("observations", 0)) < COLONY_PROSPECTING_OBSERVATIONS:
-		return
-	_hide_colony_prospecting()
-	animal_roles_announced.erase("colony_prospecting")
-	_set_status("The isolated scout traffic fades after the dry Detritus patch stops holding. No anthill was built.")
-	evidence.record_event(ecology.tick, "organism.colony_prospecting_ended", stable_id, [], {
-		"cell": previous["cell"],
-		"cause": "candidate_habitat_lost"
-	})
+func _calls_per_habitat_observation() -> int:
+	return ceili(float(ecology.WIDTH * ecology.HEIGHT) / float(HABITAT_SEARCH_CELLS_PER_TICK))
 
 
-func _hide_colony_prospecting() -> void:
-	if colony_prospect_root != null:
-		colony_prospect_root.visible = false
+# A queen who breaks out and then loses her fungus has woken too early.
+func _queen_died(cell: Vector2i) -> void:
+	dormant_queens[cell]["state"] = "dead"
+	_add_discovery("Woke too early — a queen left her chamber, the fungus failed, and she died")
+	_set_status("The fungus beside the hoodoo has faded. The creature that broke out of the chamber lies still at its mouth.")
+	evidence.record_event(ecology.tick, "organism.colony_queen_died", "colony:1", [], {"hoodoo": cell, "cause": "fungus_lost_while_waking"})
+	var husk := MeshInstance3D.new()
+	var husk_mesh := SphereMesh.new()
+	husk_mesh.radius = 0.09
+	husk_mesh.height = 0.12
+	husk.mesh = husk_mesh
+	husk.scale = Vector3(1.6, 0.6, 0.9)
+	husk.material_override = _material(Color("8d8676"), 0.9)
+	husk.position = _queen_marker_position(cell)
+	husk.name = "QueenHusk_%d_%d" % [cell.x, cell.y]
+	add_child(husk)
+	queen_husks.append(husk)
+
+
+# The nest opens beside the hoodoo, on the neighbouring cell with the most
+# fungus, never inside the spire itself.
+func _queen_nest_cell(cell: Vector2i) -> Vector2i:
+	var best := cell
+	var best_fungus := -1.0
+	for offset in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1), Vector2i(1, 1), Vector2i(-1, 1), Vector2i(1, -1), Vector2i(-1, -1)]:
+		var neighbor: Vector2i = cell + offset
+		if not ecology.is_inside_basin(neighbor) or neighbor in hoodoo_field.hoodoo_cells:
+			continue
+		var amount: float = ecology.resource_amount(neighbor, "fungus")
+		if amount > best_fungus:
+			best_fungus = amount
+			best = neighbor
+	return best
+
+
+func _queen_marker_position(cell: Vector2i) -> Vector3:
+	var chamber: Node3D = hoodoo_field.get_node("Hoodoo_%d_%d/SealedChamber" % [cell.x, cell.y])
+	var at := chamber.global_position
+	var outward: Vector2 = Vector2(at.x, at.z) - ecology.world_position(cell.x, cell.y)
+	var mouth: Vector2 = Vector2(at.x, at.z) + outward.normalized() * 0.25
+	return Vector3(mouth.x, _terrain_surface_height(mouth) + 0.06, mouth.y)
+
+
+func _stirring_queen() -> Dictionary:
+	var best := {}
+	for cell in hoodoo_field.queen_cells:
+		var queen: Dictionary = dormant_queens[cell]
+		if String(queen["state"]) == "stirring" and (best.is_empty() or int(queen["observations"]) > int(best["observations"])):
+			best = {"cell": cell, "observations": int(queen["observations"])}
+	return best
 
 
 func _update_resident_habitat_support() -> void:
@@ -1797,8 +1866,11 @@ func _depart_ecological_role(stable_id: String, species: String, habitat_cell: V
 		return
 	unsupported_residency_ticks.erase(stable_id)
 	arrival_habitat_support.erase(stable_id)
+	if species == "colony" and dormant_queens.has(colony_queen_cell):
+		# The queen returns to her chamber and sleeps until fungus returns.
+		dormant_queens[colony_queen_cell] = {"state": "dormant", "observations": 0}
 	var names := {
-		"colony": "The worker trails thin and the hive falls quiet after its dry Detritus patch fails to recover.",
+		"colony": "The fungus garden has failed. The workers draw back into the hoodoo and the chamber seals over again.",
 		"vector": "The repeated crossings stop after the nearby flowering patches fade.",
 		"grazer": "Tracks leave the forage edge after food and cover no longer hold together here.",
 		"wetland_engineer": "The wetland animal leaves after flowing water, aquatic consumers, and building plants cease overlapping.",
@@ -1894,6 +1966,7 @@ func _local_habitat_evidence(center: Vector2i, radius: int, include_flowering_to
 	var evidence := {
 		"detritus": 0.0,
 		"dry_detritus": 0.0,
+		"fungus": 0.0,
 		"forage": 0.0,
 		"open_forage": 0.0,
 		"nearby_cover": 0.0,
@@ -1915,6 +1988,7 @@ func _local_habitat_evidence(center: Vector2i, radius: int, include_flowering_to
 	var open_forage_cells: Array[Vector2i] = []
 	var cover_cells: Array[Vector2i] = []
 	var dead_biomass_values: PackedFloat32Array = habitat_state.get("dead_biomass", ecology.dead_biomass)
+	var fungus_values: PackedFloat32Array = habitat_state.get("fungus", ecology.fungus)
 	var moss_values: PackedFloat32Array = habitat_state.get("moss", ecology.moss)
 	var rhizome_values: PackedFloat32Array = habitat_state.get("rhizome", ecology.rhizome)
 	var canopy_values: PackedFloat32Array = habitat_state.get("canopy", ecology.canopy)
@@ -1943,6 +2017,7 @@ func _local_habitat_evidence(center: Vector2i, radius: int, include_flowering_to
 			# flowering becomes another destination after canopy establishment.
 			var local_flowering: float = ground_bloom_values[index]
 			evidence["detritus"] += local_detritus * weight
+			evidence["fungus"] += fungus_values[index] * weight
 			evidence["forage"] += local_forage * weight
 			evidence["surface_water"] += local_surface_water * weight
 			evidence["dam_material"] += dam_material_values[index] * weight
@@ -2042,9 +2117,10 @@ func _species_habitat_score(species: String, evidence: Dictionary) -> float:
 	var viability: float = maxf(0.0, 1.0 - float(evidence["toxicity"]))
 	match species:
 		"colony":
-			if float(evidence["dry_detritus"]) < 0.08:
+			# A colony farms fungus; it stays only while a living garden holds.
+			if float(evidence["fungus"]) < COLONY_GARDEN_FUNGUS:
 				return -1.0
-			return float(evidence["dry_detritus"]) * viability
+			return float(evidence["fungus"]) * viability
 		"vector":
 			if int(evidence["flowering_clusters"]) < 2 or int(evidence["flowering_separation"]) < 2 or float(evidence["flowering"]) < 0.012:
 				return -1.0
@@ -2135,7 +2211,7 @@ func _register_ecological_role(species: String, stable_id: String, habitat: Dict
 	unsupported_residency_ticks[stable_id] = 0
 	animal_roles_announced[stable_id] = true
 	var arrival_observations := {
-		"colony": "After repeated scout visits, a fixed earthen mound finally forms beside dry Detritus; tiny workers begin tracing one route outward",
+		"colony": "A queen breaks out of her hoodoo beside the living fungus and plants the pellet of old fungus she carried; tiny workers soon trace one route outward",
 		"vector": "Flying animal — repeated crossings begin between separated ground-layer blossoms",
 		"wetland_engineer": "Large wetland animal — tracks gather beside shallow water and nearby plant growth",
 		"grazer": "Second grazer — another animal settles into a concentrated forage patch",
@@ -2291,48 +2367,25 @@ func _update_colony_prospect_visual() -> void:
 	if colony_prospect_root == null:
 		return
 	var colony: Dictionary = animal_simulation.agent_state("colony:1")
-	if not colony.is_empty() and bool(colony.get("present", true)):
-		colony_prospect_root.visible = false
-		return
-	var prospect: Dictionary = arrival_habitat_support.get("colony:1", {})
-	var observations := int(prospect.get("observations", 0))
-	if prospect.is_empty() or observations < COLONY_PROSPECTING_OBSERVATIONS:
+	var stirring := _stirring_queen()
+	if stirring.is_empty() or (not colony.is_empty() and bool(colony.get("present", true))):
 		colony_prospect_root.visible = false
 		return
 	colony_prospect_root.visible = true
-	var target_cell: Vector2i = prospect["cell"]
-	var start_cell := _nearest_basin_edge_cell(target_cell)
-	var start_world: Vector2 = ecology.world_position(start_cell.x, start_cell.y)
-	var target_world: Vector2 = ecology.world_position(target_cell.x, target_cell.y)
-	var visible_scouts: int = mini(colony_prospect_markers.size(), 1 + floori(float(observations) / 3.0))
-	var cycle := fmod(float(Time.get_ticks_msec()) / 7600.0, 1.0)
-	for scout_index in range(colony_prospect_markers.size()):
-		var scout := colony_prospect_markers[scout_index]
-		scout.visible = scout_index < visible_scouts
-		if not scout.visible:
-			continue
-		var progress := fmod(cycle + float(scout_index) / float(maxi(1, visible_scouts)), 1.0)
-		var trail_point := start_world.lerp(target_world, progress)
-		scout.position = Vector3(trail_point.x, _terrain_surface_height(trail_point) + 0.16, trail_point.y)
-	colony_prospect_label.text = "GROUND DISTURBED / NO MOUND" if observations >= 5 else "SCOUT TRAIL / NO NEST"
-	colony_prospect_label.position = Vector3(target_world.x, ecology.terrain_height(target_cell) + 0.58, target_world.y)
-
-
-func _nearest_basin_edge_cell(cell: Vector2i) -> Vector2i:
-	var candidates := [
-		Vector2i(0, cell.y),
-		Vector2i(ecology.WIDTH - 1, cell.y),
-		Vector2i(cell.x, 0),
-		Vector2i(cell.x, ecology.HEIGHT - 1)
-	]
-	var nearest: Vector2i = candidates[0]
-	var nearest_distance := _cell_distance(cell, nearest)
-	for candidate in candidates.slice(1):
-		var distance := _cell_distance(cell, candidate)
-		if distance < nearest_distance:
-			nearest = candidate
-			nearest_distance = distance
-	return nearest
+	var cell: Vector2i = stirring["cell"]
+	var observations := int(stirring["observations"])
+	var mouth := _queen_marker_position(cell)
+	# The queen shows at the chamber mouth, edging out further as it opens.
+	var emerged := clampf(float(observations) / float(ARRIVAL_SUPPORT_OBSERVATIONS["colony"]), 0.25, 1.0)
+	var pulse := sin(float(Time.get_ticks_msec()) / 420.0) * 0.02
+	for marker_index in range(colony_prospect_markers.size()):
+		var marker := colony_prospect_markers[marker_index]
+		marker.visible = marker_index == 0
+		if marker.visible:
+			marker.position = mouth + Vector3(0.0, pulse * emerged, 0.0)
+			marker.scale = Vector3(3.4, 1.3, 1.9) * emerged
+	colony_prospect_label.text = "CHAMBER OPENING / NO COLONY YET" if observations >= QUEEN_CHAMBER_OPENING_OBSERVATIONS else "SEALED CHAMBER / QUEEN STIRRING"
+	colony_prospect_label.position = mouth + Vector3(0.0, 0.62, 0.0)
 
 
 func _update_colony_worker_stream(agent: Dictionary) -> void:

@@ -9,11 +9,11 @@ func _initialize() -> void:
 
 func _run() -> void:
 	await _assert_water_feedback_persists()
-	await _assert_colony_is_telegraphed_before_settlement()
+	await _assert_colony_wakes_from_a_sleeping_queen()
 	if failed:
 		quit(1)
 	else:
-		print("PASS: watering gives immediate local feedback and sustained colony prospecting precedes any anthill")
+		print("PASS: watering gives immediate local feedback; a sleeping queen stirs, opens her chamber and founds the colony only while nearby fungus holds, and dies if it fails")
 		quit(0)
 
 
@@ -35,40 +35,55 @@ func _assert_water_feedback_persists() -> void:
 	scene.queue_free()
 
 
-func _assert_colony_is_telegraphed_before_settlement() -> void:
+func _assert_colony_wakes_from_a_sleeping_queen() -> void:
 	var scene = await _new_scene()
-	var colony_patch := Vector2i(21, 13)
-	_seed_patch(scene, colony_patch, {"dead_biomass": 0.2}, 1)
-	var calls_per_observation: int = ceili(float(scene.ecology.WIDTH * scene.ecology.HEIGHT) / float(scene.HABITAT_SEARCH_CELLS_PER_TICK))
-	_advance_search(scene, calls_per_observation * scene.COLONY_PROSPECTING_OBSERVATIONS)
-	scene._update_ecological_animal_markers()
-	_assert(not scene.animal_simulation.agents.has("colony:1"), "initial scout observations must not create an anthill")
-	_assert(scene.colony_prospect_root.visible, "repeated scouts should visibly telegraph a possible colony site")
-	_assert(scene.colony_prospect_label.text.contains("NO NEST"), "the telegraph should clearly distinguish prospecting from an established nest")
-	_assert(_has_event(scene.evidence.events, "organism.colony_prospecting"), "prospecting should be captured as evidence before settlement")
+	_assert(scene.hoodoo_field.queen_cells.size() >= 4, "several hoodoos should hold a sleeping queen")
+	var queen: Vector2i = scene.hoodoo_field.queen_cells[0]
+	var calls_per_observation: int = scene._calls_per_habitat_observation()
+	_advance_search(scene, calls_per_observation * 3)
+	_assert(scene.dormant_queens[queen]["state"] == "dormant", "a queen should keep sleeping while no fungus grows near her hoodoo")
+	_assert(not scene.animal_simulation.agents.has("colony:1"), "no colony should exist until a queen wakes")
 
-	var observations_before_settlement: int = int(scene.ARRIVAL_SUPPORT_OBSERVATIONS["colony"]) - int(scene.COLONY_PROSPECTING_OBSERVATIONS) - 1
-	_advance_search(scene, calls_per_observation * observations_before_settlement)
-	scene._update_ecological_animal_markers()
-	_assert(not scene.animal_simulation.agents.has("colony:1"), "the anthill should still be absent one sustained survey before settlement")
-	_assert(scene.colony_prospect_label.text.contains("GROUND DISTURBED"), "later prospecting should make the approaching settlement more legible")
+	_seed_patch(scene, queen, {"fungus": 0.2, "dead_biomass": 0.2}, 1)
+	_advance_search(scene, calls_per_observation * scene.COLONY_PROSPECTING_OBSERVATIONS)
+	scene._update_colony_prospect_visual()
+	_assert(scene.dormant_queens[queen]["state"] == "stirring", "living fungus beside the hoodoo should make its queen stir")
+	_assert(not scene.animal_simulation.agents.has("colony:1"), "a stirring queen should not yet be a colony")
+	_assert(scene.colony_prospect_root.visible, "the stirring queen should be visible at her chamber")
+	_assert(scene.colony_prospect_label.text.contains("QUEEN STIRRING"), "the telegraph should say a queen is stirring, not that a nest exists")
+	_assert(_has_event(scene.evidence.events, "organism.colony_queen_stirring"), "stirring should be captured as evidence")
+	for other in scene.hoodoo_field.queen_cells.slice(1):
+		_assert(scene.dormant_queens[other]["state"] == "dormant", "queens far from the fungus should keep sleeping")
+
+	var observations_before_founding: int = int(scene.ARRIVAL_SUPPORT_OBSERVATIONS["colony"]) - int(scene.COLONY_PROSPECTING_OBSERVATIONS) - 1
+	_advance_search(scene, calls_per_observation * observations_before_founding)
+	scene._update_colony_prospect_visual()
+	_assert(not scene.animal_simulation.agents.has("colony:1"), "the colony should still be absent one survey before founding")
+	_assert(scene.colony_prospect_label.text.contains("CHAMBER OPENING"), "the opening chamber should make the approaching colony legible")
 
 	_advance_search(scene, calls_per_observation)
-	_assert(_is_present(scene, "colony:1"), "continuously suitable habitat should eventually support a fixed anthill")
+	_assert(_is_present(scene, "colony:1"), "fungus held long enough should let the queen found a colony")
+	var nest: Vector2i = scene.animal_simulation.agent_state("colony:1")["cell"]
+	_assert(maxi(absi(nest.x - queen.x), absi(nest.y - queen.y)) == 1, "the nest should open right beside the queen's hoodoo")
+	_assert(scene.dormant_queens[queen]["state"] == "founded", "the founding queen should be recorded")
 	var minimum_seconds: float = float(calls_per_observation * int(scene.ARRIVAL_SUPPORT_OBSERVATIONS["colony"])) * scene.ECOLOGY_STEP_SECONDS
-	_assert(minimum_seconds > 35.0, "colony persistence should represent tens of seconds, not a few seconds")
+	_assert(minimum_seconds > 35.0, "waking should take tens of seconds, not a few")
 	scene.queue_free()
 
-	var cancelled_scene = await _new_scene()
-	_seed_patch(cancelled_scene, colony_patch, {"dead_biomass": 0.2}, 1)
-	_advance_search(cancelled_scene, calls_per_observation * cancelled_scene.COLONY_PROSPECTING_OBSERVATIONS)
-	_clear_patch(cancelled_scene, colony_patch)
-	_advance_search(cancelled_scene, calls_per_observation)
-	cancelled_scene._update_ecological_animal_markers()
-	_assert(not cancelled_scene.animal_simulation.agents.has("colony:1"), "lost habitat should cancel prospecting without leaving an anthill")
-	_assert(not cancelled_scene.colony_prospect_root.visible, "scout activity should visibly fade when the candidate site fails")
-	_assert(_has_event(cancelled_scene.evidence.events, "organism.colony_prospecting_ended"), "cancelled prospecting should be captured as ecological evidence")
-	cancelled_scene.queue_free()
+	var early_scene = await _new_scene()
+	var early_queen: Vector2i = early_scene.hoodoo_field.queen_cells[0]
+	_seed_patch(early_scene, early_queen, {"fungus": 0.2}, 1)
+	_advance_search(early_scene, calls_per_observation * early_scene.COLONY_PROSPECTING_OBSERVATIONS)
+	_assert(early_scene.dormant_queens[early_queen]["state"] == "stirring", "the queen should stir before the fungus fails")
+	_clear_patch(early_scene, early_queen, 2)
+	_advance_search(early_scene, calls_per_observation)
+	early_scene._update_colony_prospect_visual()
+	_assert(early_scene.dormant_queens[early_queen]["state"] == "dead", "a queen whose fungus fails while she wakes should die")
+	_assert(not early_scene.animal_simulation.agents.has("colony:1"), "a dead queen should leave no colony")
+	_assert(not early_scene.colony_prospect_root.visible, "the stirring telegraph should end with the queen")
+	_assert(_has_event(early_scene.evidence.events, "organism.colony_queen_died"), "the early waking should be captured as evidence")
+	_assert(early_scene.queen_husks.size() == 1, "the dead queen should stay visible at her chamber")
+	early_scene.queue_free()
 
 
 func _new_scene():
@@ -84,10 +99,11 @@ func _seed_patch(scene, center: Vector2i, resources: Dictionary, radius: int) ->
 			scene.ecology.add_resources(Vector2i(x, y), resources)
 
 
-func _clear_patch(scene, center: Vector2i) -> void:
-	for y in range(center.y - 1, center.y + 2):
-		for x in range(center.x - 1, center.x + 2):
+func _clear_patch(scene, center: Vector2i, radius := 1) -> void:
+	for y in range(center.y - radius, center.y + radius + 1):
+		for x in range(center.x - radius, center.x + radius + 1):
 			scene.ecology.consume_resource(Vector2i(x, y), "dead_biomass", 1.0)
+			scene.ecology.consume_resource(Vector2i(x, y), "fungus", 1.0)
 
 
 func _advance_search(scene, calls: int) -> void:

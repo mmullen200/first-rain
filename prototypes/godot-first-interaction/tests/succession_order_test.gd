@@ -20,8 +20,8 @@ func _run() -> void:
 
 	# Every animal habitat exists at once. Each role must establish from its own
 	# current local support rather than from a hard-coded predecessor.
-	var colony_patch := Vector2i(21, 13)
-	_seed_patch(scene, colony_patch, {"dead_biomass": 0.2}, 1)
+	var queen: Vector2i = scene.hoodoo_field.queen_cells[0]
+	_seed_patch(scene, queen, {"fungus": 0.2, "dead_biomass": 0.2}, 1)
 	var flower_patch := Vector2i(4, 12)
 	scene.ecology.add_resources(flower_patch, {"ground_bloom": 0.16})
 	scene.ecology.add_resources(flower_patch + Vector2i(2, 0), {"ground_bloom": 0.16})

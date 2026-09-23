@@ -33,6 +33,13 @@ func _initialize() -> void:
 		_assert(Vector2(cell).distance_to(Vector2(EcologyGrid.WRECK_CELL)) >= HoodooField.WRECK_CLEARANCE_CELLS, "hoodoo %s crowds the wreck" % cell)
 		_assert(not watercourse.has(cell), "hoodoo %s blocks the spring watercourse" % cell)
 		_assert(ecology.downhill_neighbor(cell) != cell, "hoodoo %s stands in a water-holding low" % cell)
+	var queens: Array[Vector2i] = field.queen_cells
+	_assert(queens.size() >= HoodooField.MIN_QUEENS, "several hoodoos should hold a sleeping queen")
+	_assert(queens == repeat.queen_cells, "the same hoodoos should hold queens every run")
+	_assert(not queens.has(EcologyGrid.HEADWALL_SPRING_CELL), "the spring spire is a seal, not a queen's chamber")
+	for queen in queens:
+		_assert(cells.has(queen), "every queen should sleep in a real hoodoo")
+		_assert(field.has_node("Hoodoo_%d_%d/SealedChamber" % [queen.x, queen.y]), "a queen's hoodoo should show a sealed chamber")
 	heights.sort()
 	_assert(heights[heights.size() - 2] - heights[0] > 1.2, "hoodoos should vary in size")
 	repeat.free()
@@ -65,7 +72,7 @@ func _physics_process(_delta: float) -> bool:
 	if failed:
 		quit(1)
 	else:
-		print("PASS: seeded hoodoos vary in size, keep clear of the wreck and water, seal the spring with the tallest spire, and block the astronaut")
+		print("PASS: seeded hoodoos hold sleeping queens behind sealed chambers, vary in size, keep clear of the wreck and water, seal the spring with the tallest spire, and block the astronaut")
 		quit(0)
 	return true
 
