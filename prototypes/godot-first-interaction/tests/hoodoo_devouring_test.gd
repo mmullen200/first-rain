@@ -38,7 +38,10 @@ func _check_workers_eat_the_queens_hoodoo() -> void:
 	var gathered := 0.0
 	var returned := 0.0
 	var rust_carried := false
-	for ignored in range(900):
+	var left_after_36_s := start
+	for step in range(900):
+		if step == 105:
+			left_after_36_s = ecology.resource_amount(queen, "old_matter")
 		for event in simulation.step():
 			if event["taxonomy"] == "organism.colony_hoodoo_gathered" and event["facts"]["cell"] == queen:
 				gathered += float(event["facts"]["amount"])
@@ -48,7 +51,10 @@ func _check_workers_eat_the_queens_hoodoo() -> void:
 			rust_carried = rust_carried or (worker["resource"] == "old_matter" and float(worker["load"]) > 0.0)
 	var left: float = ecology.resource_amount(queen, "old_matter")
 	queen_report = "%.2f of %.2f left after %.0f s" % [left, start, 900 * 0.34]
-	_assert(left < start * 0.8, "workers should visibly wear down the hoodoo beside their nest (%.3f of %.3f left)" % [left, start])
+	_assert(left < start * 0.8, "workers should visibly wear down the hoodoo beside their nest over five minutes (%.3f of %.3f left)" % [left, start])
+	# Hoodoos come down slowly: after the 36 s in which an earlier, faster
+	# colony ate 90% of one, most of it should still be standing.
+	_assert(left_after_36_s > start * 0.8, "a hoodoo should take minutes to eat, not lose %.0f%% in 36 s" % [100.0 * (start - left_after_36_s) / start])
 	_assert(rust_carried, "workers should be seen carrying hoodoo pieces")
 	_assert(absf(gathered - (start - left)) < 0.0005, "everything taken from the hoodoo should be accounted for by workers (%.4f taken, %.4f gathered)" % [start - left, gathered])
 	_assert(returned > 0.0, "hoodoo pieces should reach the nest as Detritus")
@@ -84,6 +90,11 @@ func _check_colony_opens_the_spring() -> void:
 	var spire: Node3D = scene.hoodoo_field.get_node("Hoodoo_%d_%d" % [spring.x, spring.y])
 	var downstream: Vector2i = scene.ecology.flow_path(spring)[2]
 	var dry_downstream: float = scene.ecology.resource_amount(downstream, "surface_water")
+	# Eating a whole spire now takes over an hour of play, too long to simulate
+	# here. Start the seal just above half, check the cap falls as it passes
+	# half, then leave only its last crumbs and check that eating them opens
+	# the spring.
+	scene.ecology.old_matter[spring.y * scene.ecology.WIDTH + spring.x] = EcologyGridModel.SPRING_SEAL_MATTER * 0.505
 	var halfway_step := -1
 	var opened_step := -1
 	var plants_cut := false
@@ -94,6 +105,7 @@ func _check_colony_opens_the_spring() -> void:
 		if halfway_step < 0 and scene.ecology.resource_amount(spring, "old_matter") < EcologyGridModel.SPRING_SEAL_MATTER * 0.5:
 			halfway_step = step
 			_assert(not spire.get_node("Mass/Cap").visible, "a half-eaten spire should have lost its cap")
+			scene.ecology.old_matter[spring.y * scene.ecology.WIDTH + spring.x] = 0.004
 		if scene.ecology.spring_open:
 			opened_step = step
 			break
@@ -101,7 +113,7 @@ func _check_colony_opens_the_spring() -> void:
 	_assert(bool(colony.get("present", false)), "the fixture colony should stay resident while it works")
 	_assert(plants_cut, "workers should keep cutting plants while the spire is there")
 	_assert(opened_step > 0, "a colony within reach should eventually eat the spring spire away")
-	print("queen's hoodoo: %s; spire half gone after %.0f s, spring open after %.0f s" % [queen_report, halfway_step * scene.ECOLOGY_STEP_SECONDS, opened_step * scene.ECOLOGY_STEP_SECONDS])
+	print("queen's hoodoo: %s; spire (started just above half) passed half after %.0f s, last crumbs eaten and spring open after %.0f s" % [queen_report, halfway_step * scene.ECOLOGY_STEP_SECONDS, opened_step * scene.ECOLOGY_STEP_SECONDS])
 	if opened_step > 0:
 		_assert(not spire.get_node("Mass").visible, "no spire should remain over an open spring")
 		_assert(spire.get_node("Collision").disabled, "the astronaut should be able to walk where the spire stood")

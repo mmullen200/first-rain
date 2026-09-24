@@ -22,8 +22,9 @@ const COLONY_STEP_TICKS := 18
 const COLONY_REST_TICKS := 3
 const COLONY_RANGE := 6
 const COLONY_LOAD := 0.003
-# Old hoodoo matter is brittle and breaks off in bigger pieces than a clipped plant.
-const COLONY_HOODOO_LOAD := 0.006
+# Old hoodoo matter is hard: each trip chips off only a crumb, so a spire
+# takes a long time to come down.
+const COLONY_HOODOO_LOAD := 0.0006
 const DIRECTIONS := [
 	Vector2i(1, 0), Vector2i(1, 1), Vector2i(0, 1), Vector2i(-1, 1),
 	Vector2i(-1, 0), Vector2i(-1, -1), Vector2i(0, -1), Vector2i(1, -1)
