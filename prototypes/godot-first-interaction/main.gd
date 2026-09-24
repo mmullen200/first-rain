@@ -45,6 +45,10 @@ const QUEEN_WAKE_FUNGUS := 0.01
 const COLONY_GARDEN_FUNGUS := 0.004
 const QUEEN_SCENT_RADIUS := 2
 const QUEEN_CHAMBER_OPENING_OBSERVATIONS := 5
+# A colony stays while its tended garden holds; the spire over the nest stands
+# full at COLONY_GARDEN_FULL.
+const COLONY_GARDEN_KEEP := 0.02
+const COLONY_GARDEN_FULL := 0.3
 const ANIMAL_SETTLEMENTS := {
 	"colony:1": "colony",
 	"vector:1": "vector",
@@ -60,6 +64,7 @@ const AnimalSimulation = preload("res://animal_simulation.gd")
 const WeatherSimulation = preload("res://weather_simulation.gd")
 const AstronautFigure = preload("res://astronaut_figure.gd")
 const HoodooField = preload("res://hoodoo_field.gd")
+const GardenSpire = preload("res://garden_spire.gd")
 
 var astronaut: CharacterBody3D
 var astronaut_figure: Node3D
@@ -189,6 +194,7 @@ var dormant_queens: Dictionary = {}
 var queen_survey_calls := 0
 var colony_queen_cell := Vector2i(-1, -1)
 var queen_husks: Array[MeshInstance3D] = []
+var garden_spire: Node3D
 var first_rain_announced := false
 
 var disturbance_state := "quiet"
@@ -410,7 +416,7 @@ func _seed_hoodoo_devouring_fixture() -> void:
 		ecology.moisture[index] = 0.55
 		ecology.temperature[index] = 0.4
 		ecology.toxicity[index] = 0.05
-	animal_simulation.register_agent("colony", "colony:1", {"cell": home})
+	animal_simulation.register_agent("colony", "colony:1", {"cell": home, "garden": 0.35})
 	ecology_started = true
 	var stand := home + Vector2i(1, 2)
 	var world: Vector2 = ecology.world_position(stand.x, stand.y)
@@ -1040,6 +1046,9 @@ func _build_ecological_animal_markers() -> void:
 			body.mesh = mesh
 		body.material_override = _material(specification[1], 0.58, specification[1].darkened(0.45))
 		marker.add_child(body)
+		if stable_id == "colony:1":
+			# The garden's own mound replaces the plain hive marker.
+			body.visible = false
 		var label := Label3D.new()
 		label.text = specification[0]
 		label.position.y = 0.58
@@ -1051,6 +1060,10 @@ func _build_ecological_animal_markers() -> void:
 		marker.add_child(label)
 		add_child(marker)
 		animal_markers[stable_id] = marker
+		if stable_id == "colony:1":
+			garden_spire = GardenSpire.new()
+			garden_spire.position.y = -0.25
+			marker.add_child(garden_spire)
 	colony_ant_stream_root = Node3D.new()
 	colony_ant_stream_root.name = "ColonyWorkerStream"
 	colony_ant_stream_root.visible = false
@@ -1908,6 +1921,11 @@ func _update_resident_habitat_support() -> void:
 			continue
 		var species := String(agent["species"])
 		var habitat_cell: Vector2i = agent.get("habitat_cell", agent["cell"])
+		if species == "colony" and float(agent.get("garden", 0.0)) >= COLONY_GARDEN_KEEP:
+			# A colony with a living garden of its own is supported.
+			unsupported_residency_ticks[stable_id] = 0
+			animal_simulation.recall_colony(stable_id, false)
+			continue
 		var habitat := _habitat_at_cell(species, habitat_cell, habitat_snapshot)
 		if not habitat.is_empty():
 			unsupported_residency_ticks[stable_id] = 0
@@ -2340,6 +2358,9 @@ func _update_ecological_animal_markers() -> void:
 			body.scale = Vector3(1.5, 0.6, 1.0) if int(agent["hunt_cooldown"]) > AnimalSimulation.HUNT_RECOVERY_TICKS - 4 else Vector3.ONE
 		if stable_id == "colony:1":
 			_update_colony_worker_stream(agent)
+			var garden_growth := clampf(float(agent.get("garden", 0.0)) / COLONY_GARDEN_FULL, 0.0, 1.0)
+			garden_spire.set_growth(garden_growth)
+			label.position.y = 0.58 + GardenSpire.HEIGHT * garden_spire.shown_growth
 	_update_colony_prospect_visual()
 
 

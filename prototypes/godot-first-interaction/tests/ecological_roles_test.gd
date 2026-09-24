@@ -35,7 +35,7 @@ func _init() -> void:
 	_assert(ecology.summary()["total_dam_material"] > 0.0, "engineer should carry gathered biomass to a selected water-retaining dam site")
 	_assert(simulation.conservation_violations.is_empty(), "shared authority should not report impossible transfers")
 	var taxonomies: Array = simulation.event_history.map(func(event: Dictionary): return event["taxonomy"])
-	_assert("organism.detritus_recycled" in taxonomies, "colony effect should be recorded")
+	_assert("organism.colony_garden_tended" in taxonomies, "colony effect should be recorded")
 	_assert("organism.patch_pollinated" in taxonomies, "vector effect should be recorded")
 	_assert("organism.fungal_spores_distributed" in taxonomies, "fungal dispersal should not be mislabeled as pollination")
 	_assert("organism.material_deposited" in taxonomies, "engineer construction should be recorded")

@@ -31,7 +31,7 @@ func _init() -> void:
 	_assert(_has_event(simulation.event_history, "organism.colony_plant_gathered"), "a worker never gathered a small amount of plant matter")
 	_assert(_has_event(simulation.event_history, "organism.colony_plant_returned"), "a worker never returned plant matter to the hive")
 	_assert(ecology.resource_amount(forage_cell, "moss") + ecology.resource_amount(forage_cell, "rhizome") < initial_plant, "worker foraging did not remove plant matter from the source patch")
-	_assert(ecology.resource_amount(hive_cell, "dead_biomass") > 0.0 or _has_event(simulation.event_history, "organism.detritus_recycled"), "returned plant matter never reached the hive economy")
+	_assert(ecology.resource_amount(hive_cell, "dead_biomass") > 0.0 or _has_event(simulation.event_history, "organism.colony_garden_tended"), "returned plant matter never reached the hive economy")
 	_assert(simulation.conservation_violations.is_empty(), "colony worker transport violated material conservation")
 	if failed:
 		quit(1)

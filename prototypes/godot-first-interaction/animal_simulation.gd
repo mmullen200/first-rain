@@ -7,7 +7,7 @@ extends RefCounted
 # observe snapshots/events. Species choose intentions internally; presentation
 # nodes never decide ecological outcomes.
 
-const SNAPSHOT_VERSION := 7
+const SNAPSHOT_VERSION := 8
 const JUVENILE_MATURATION_TICKS := 1800
 const PARENT_SENSE_RADIUS := 4
 const PARENT_MEMORY_TICKS := 120
@@ -22,6 +22,17 @@ const COLONY_STEP_TICKS := 18
 const COLONY_REST_TICKS := 3
 const COLONY_RANGE := 6
 const COLONY_LOAD := 0.003
+# The colony farms fungus. What workers bring home is tended into a garden
+# held in the hanging structure over the nest; the colony eats the garden,
+# not the pile. A founding queen brings a small pellet of the old fungus.
+const COLONY_TENDING := 0.06
+const COLONY_GARDEN_CAPACITY := 1.0
+const COLONY_GARDEN_SPILL := 0.005
+# Each tending the colony eats a share of its garden, more when hungry, so the
+# garden settles at a size set by how much food comes home.
+const COLONY_GARDEN_EAT_SHARE := 0.01
+const COLONY_GARDEN_HUNGRY_SHARE := 0.02
+const COLONY_FOUNDING_PELLET := 0.06
 # Old hoodoo matter is hard: each trip chips off only a crumb, so a spire
 # takes a long time to come down.
 const COLONY_HOODOO_LOAD := 0.0006
@@ -98,6 +109,7 @@ func register_agent(species: String, stable_id: String, initial_state := {}) -> 
 		"parent_last_seen": initial_state.get("parent_last_seen", bounded_cell),
 		"parent_memory_ticks": int(initial_state.get("parent_memory_ticks", 0)),
 		"brood": float(initial_state.get("brood", 0.0)),
+		"garden": float(initial_state.get("garden", COLONY_FOUNDING_PELLET if species == "colony" else 0.0)),
 		"pollen_load": float(initial_state.get("pollen_load", 0.0)),
 		"pollen_donor": initial_state.get("pollen_donor", Vector2i(-1, -1)),
 		"pollen_kind": String(initial_state.get("pollen_kind", "")),
@@ -142,6 +154,8 @@ func set_agent_presence(stable_id: String, present: bool, habitat_cell := Vector
 		}.get(String(agent["species"]), "seeking")
 		if String(agent["species"]) == "colony":
 			agent["home_cell"] = destination
+			# A queen waking again plants a fresh pellet of the old fungus.
+			agent["garden"] = maxf(float(agent.get("garden", 0.0)), COLONY_FOUNDING_PELLET)
 			_reset_colony_workers(agent)
 		agent["present"] = true
 		agents[stable_id] = agent
@@ -776,21 +790,35 @@ func _gather_material(agent_id: String, resource: String, requested: float) -> v
 		_emit("organism.material_gathered", agent_id, {"cell": agent["cell"], "resource": resource, "amount": gathered})
 
 
-func _colony_recycle(agent_id: String, requested: float) -> void:
+# Tending: carried matter piled at the nest is worked into the garden, the
+# colony eats from the garden, and the garden seeds living fungus onto the
+# nest ground. With nothing coming home the garden is eaten down and fails.
+func _colony_tend(agent_id: String) -> void:
 	var agent: Dictionary = agents[agent_id]
 	var home_cell: Vector2i = agent.get("home_cell", agent["cell"])
-	var removed: float = ecology.consume_resource(home_cell, "dead_biomass", requested)
-	var returned := removed * 0.72
-	var accepted: Dictionary = ecology.add_resources(home_cell, {"nutrients": returned})
+	var garden := float(agent.get("garden", 0.0))
+	var room := maxf(0.0, COLONY_GARDEN_CAPACITY - garden)
+	var tended: float = ecology.consume_resource(home_cell, "dead_biomass", minf(COLONY_TENDING, room))
+	garden += tended
+	_check_transfer(tended, tended, "%s_pile_to_garden" % agent_id)
+	var appetite := garden * (COLONY_GARDEN_EAT_SHARE + COLONY_GARDEN_HUNGRY_SHARE * float(agent["hunger"]))
+	var eaten := minf(garden, appetite)
+	garden -= eaten
+	var accepted: Dictionary = ecology.add_resources(home_cell, {"nutrients": eaten * 0.72})
 	var deposited := float(accepted.get("nutrients", 0.0))
-	var metabolic_loss := removed - deposited
-	agent["hunger"] = maxf(0.0, float(agent["hunger"]) - removed * 5.0)
+	var metabolic_loss := eaten - deposited
+	var spilled_request := garden * COLONY_GARDEN_SPILL
+	var spill: Dictionary = ecology.add_resources(home_cell, {"fungus": spilled_request})
+	var spilled := float(spill.get("fungus", 0.0))
+	garden -= spilled
+	_check_transfer(spilled, float(spill.get("fungus", 0.0)), "%s_garden_to_ground" % agent_id)
+	agent["garden"] = maxf(0.0, garden)
+	agent["hunger"] = maxf(0.0, float(agent["hunger"]) - eaten * 5.0)
 	agent["brood"] = minf(1.0, float(agent["brood"]) + metabolic_loss * 0.5)
-	agent["state"] = "hive recycling"
+	agent["state"] = "tending garden"
 	agent["move_cooldown"] = 8
 	agents[agent_id] = agent
-	if removed > 0.0:
-		_emit("organism.detritus_recycled", agent_id, {"cell": home_cell, "removed": removed, "nutrients": deposited, "metabolic_loss": metabolic_loss})
+	_emit("organism.colony_garden_tended", agent_id, {"cell": home_cell, "tended": tended, "eaten": eaten, "nutrients": deposited, "metabolic_loss": metabolic_loss, "spilled_fungus": spilled, "garden": agent["garden"]})
 
 
 # Workers and scent belong to the colony snapshot. No scene node selects food.
@@ -914,8 +942,8 @@ func _step_colony(agent_id: String) -> void:
 	agent["hunger"] = minf(1.0, float(agent["hunger"]) + 0.035)
 	agent["brood"] = maxf(0.0, float(agent["brood"]) - 0.002)
 	agents[agent_id] = agent
-	if (tick - 1) % 9 == 0 and ecology.resource_amount(home, "dead_biomass") >= 0.025:
-		_colony_recycle(agent_id, 0.06)
+	if (tick - 1) % 9 == 0:
+		_colony_tend(agent_id)
 
 
 func _move_colony_worker(worker: Dictionary, destination: Vector2i) -> void:
