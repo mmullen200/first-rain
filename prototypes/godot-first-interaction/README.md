@@ -151,6 +151,17 @@ The Drainage Spine is initially dry. A real water input can produce a temporary 
 
 All landform blocks, labels, colors, route spacing, and transport rates are throwaway fixtures. The playtest asks whether landmark navigation, paired-site comparison, route choice, cross-zone equipment movement, and ecological transfer make the basin feel like one causal place.
 
+
+## Queen waking start
+
+Starts beside the first queen's hoodoo with a watered fungus garden already growing, to watch a queen stir, open her chamber and found the colony without the long setup:
+
+```sh
+/Applications/Godot.app/Contents/MacOS/Godot --path prototypes/godot-first-interaction -- --queen-waking
+```
+
+Ordinary controls apply; letting the garden dry or eating the fungus can make the queen die while waking.
+
 ## Hoodoo devouring question (#39)
 
 Branch: `prototype/hoodoo-devouring`. Does the player see the colony taking a hoodoo apart, and later recognise the spire over the Headwall spring as the same material, so that the spring opening reads as something the colony did?
@@ -162,12 +173,12 @@ Branch: `prototype/hoodoo-devouring`. Does the player see the colony taking a ho
 Its title is **HOODOO DEVOURING PROTOTYPE**. It starts an established colony high on the Headwall, two cells from the spring spire, with a small plant patch on the other side. The Headwall is dry: the fixture starts the fungus garden well watered, and **Space** keeps it damp. **WASD** moves, **J** pauses, **R** restarts; the other controls work as usual.
 
 - Each hoodoo holds **old matter** in its Ecological Cell, 0.1 per metre of height; the spring spire holds the ecology's own spring seal (0.5). Nothing in the ecology wears it down: water, weather and time leave it alone.
-- A worker on a cell with nothing living to cut breaks off a piece of old matter (0.006, twice a plant load, because it is brittle) and carries it home, where it joins the nest's Detritus and feeds the fungus. Workers notice a hoodoo from the next cell, as they notice plants, and recruit to it by scent the same way. Plants come first on a cell that has both, so the colony keeps cutting plants and the two sources compete.
+- A worker on a cell with nothing living to cut breaks off a crumb of old matter (0.0006, a fifth of a plant load, because old matter is hard) and carries it home, where it joins the nest's Detritus and feeds the fungus. Workers notice a hoodoo from the next cell, as they notice plants, and recruit to it by scent the same way. Plants come first on a cell that has both, so the colony keeps cutting plants and the two sources compete.
 - Carried hoodoo pieces are rust-coloured; clipped plants stay green. A spire shortens and narrows as it is eaten, drops its cap below 70% and ends as a low stub. The spring spire goes entirely, and then the spring runs: 0.05 surface water per tick at the Headwall, down the existing watercourse, and the label reads SPRING RUNNING.
 - The colony's reach is unchanged. In ordinary play the nearest sleeping queen is 11 cells from the spring and workers stay within 6 cells of the nest, so the spring cannot open yet; the fixture places the nest within reach. How the colony reaches the spring in ordinary play is an open decision.
 - In ordinary play the workers start by eating the queen's own hoodoo, which stands beside the nest.
 
-Measured headlessly: a colony beside a queen's hoodoo eats it (0.35) to nothing within about 5 minutes, then moves on to the rest of the group. In the fixture the spire is half gone after about 3 minutes and the spring opens after about 5.
+Eating was slowed tenfold after the first playtest (2026-09-24: "they should consume the hoodoo much more slowly"). Measured headlessly: a colony beside a queen's hoodoo (0.35) eats half of it in about 3 minutes 20 seconds and 90% in about 6 minutes, against 21 and 36 seconds before. The spring spire should now take roughly ten times the earlier 3 minutes to half and 5 minutes to open; that full run is too long for the regression suite, which starts the seal nearly eaten instead, and has not been measured end to end.
 
 **Playtest gate:** without F9 or coaching, the player says the workers are breaking down a hoodoo, and connects the spring running to the colony eating the spire. Automated checks establish transport, conservation, the seal and the flow, not comprehension.
 

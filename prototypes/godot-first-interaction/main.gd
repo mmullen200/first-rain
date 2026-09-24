@@ -238,6 +238,8 @@ func _ready() -> void:
 		_seed_colony_foraging_fixture()
 	if "--hoodoo-devouring" in OS.get_cmdline_user_args():
 		_seed_hoodoo_devouring_fixture()
+	if "--queen-waking" in OS.get_cmdline_user_args():
+		_seed_queen_waking_fixture()
 	if "--predator-ecology" in OS.get_cmdline_user_args():
 		_seed_predator_fixture()
 	if "--vector-pollination" in OS.get_cmdline_user_args():
@@ -245,8 +247,10 @@ func _ready() -> void:
 	if "--wetland-engineer" in OS.get_cmdline_user_args():
 		_seed_engineer_fixture()
 	evidence.begin_run(1, _evidence_snapshot())
-	if "--colony-foraging" in OS.get_cmdline_user_args() or "--hoodoo-devouring" in OS.get_cmdline_user_args() or "--predator-ecology" in OS.get_cmdline_user_args() or "--vector-pollination" in OS.get_cmdline_user_args() or "--wetland-engineer" in OS.get_cmdline_user_args():
+	if "--colony-foraging" in OS.get_cmdline_user_args() or "--hoodoo-devouring" in OS.get_cmdline_user_args() or "--queen-waking" in OS.get_cmdline_user_args() or "--predator-ecology" in OS.get_cmdline_user_args() or "--vector-pollination" in OS.get_cmdline_user_args() or "--wetland-engineer" in OS.get_cmdline_user_args():
 		_open_emergency_cache()
+	if "--queen-waking" in OS.get_cmdline_user_args():
+		_set_status("Violet fungus is spreading at the foot of a hoodoo. The dark plug at its base looks like a sealed door.", 5.0)
 	if "--hoodoo-devouring" in OS.get_cmdline_user_args():
 		_set_status("A colony has opened its nest high on the Headwall, a stone's throw from the great spire over the dry spring.", 5.0)
 	_set_status("A fixed mound stands between separated living patches." if "--colony-foraging" in OS.get_cmdline_user_args() else "The crash has stopped. The ship is dead, but an emergency cache still blinks beneath the broken wing.")
@@ -371,6 +375,25 @@ func _seed_colony_foraging_fixture() -> void:
 # Starts an established colony within reach of the spring spire, which no
 # sleeping queen is in ordinary play. A small plant patch on the other side
 # gives the workers a living alternative to the spire.
+# Starts beside a queen's hoodoo with a watered fungus garden already
+# growing, so her stirring, opening and founding can be watched directly.
+func _seed_queen_waking_fixture() -> void:
+	var queen: Vector2i = hoodoo_field.queen_cells[0]
+	for y in range(queen.y - 1, queen.y + 2):
+		for x in range(queen.x - 1, queen.x + 2):
+			var cell := Vector2i(x, y)
+			if cell in hoodoo_field.hoodoo_cells:
+				continue
+			ecology.add_resources(cell, {"dead_biomass": 0.4, "fungus": 0.2})
+			ecology.moisture[y * ecology.WIDTH + x] = 0.6
+	ecology_started = true
+	var stand := queen + Vector2i(1, 2)
+	var world: Vector2 = ecology.world_position(stand.x, stand.y)
+	astronaut.position = Vector3(world.x, ecology.terrain_height(stand) + 0.02, world.y)
+	_update_camera()
+	_refresh_ecology_visuals()
+
+
 func _seed_hoodoo_devouring_fixture() -> void:
 	var home := Vector2i(8, 3)
 	for y in range(home.y - 1, home.y + 2):
