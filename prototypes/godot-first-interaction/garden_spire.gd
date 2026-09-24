@@ -26,7 +26,7 @@ const RAMP_THICKNESS := 0.09
 var segments: Array[Node3D] = []
 var segment_heights: Array[float] = []
 var column_strands: Array[MeshInstance3D] = []
-var drapes: Array[MeshInstance3D] = []
+var drapes: Array[Node3D] = []
 var growth := 0.0
 var shown_growth := 0.0
 var sway_time := 0.0
@@ -61,7 +61,7 @@ func _process(delta: float) -> void:
 	bed_material.emission_energy_multiplier = 0.9 * pulse * clampf(shown_growth * 3.0, 0.0, 1.0)
 	cap_material.emission_energy_multiplier = 1.1 * (0.85 + 0.15 * sin(sway_time * 2.1 + 1.0))
 	for index in range(drapes.size()):
-		var drape := drapes[index]
+		var drape: Node3D = drapes[index]
 		drape.rotation.z = sin(sway_time * 0.9 + float(index) * 0.7) * 0.07
 		drape.rotation.x = cos(sway_time * 0.7 + float(index) * 1.3) * 0.05
 
