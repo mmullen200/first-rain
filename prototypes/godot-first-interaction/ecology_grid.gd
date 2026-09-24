@@ -30,6 +30,10 @@ const MIN_TERRAIN_HEIGHT := 0.6
 const MAX_SURVEYED_TERRAIN_HEIGHT := 13.2
 const MAX_TERRAIN_HEIGHT := 16.0
 const DAM_HEIGHT_SCALE := 2.0
+# The previous biosphere's undecayed remains plug the Headwall spring. Nothing
+# in the ecology breaks them down; only the colony's workers remove them.
+const SPRING_SEAL_MATTER := 0.5
+const SPRING_FLOW := 0.05
 
 var moisture := PackedFloat32Array()
 var elevation := PackedFloat32Array()
@@ -60,6 +64,8 @@ var developing_seeds: Array[Dictionary] = []
 var seed_events: Array[Dictionary] = []
 var fungal_spores := PackedFloat32Array()
 var dam_material := PackedFloat32Array()
+var old_matter := PackedFloat32Array()
+var spring_open := false
 var throughflow := PackedFloat32Array()
 var shade := PackedFloat32Array()
 var habitat_shade := PackedFloat32Array()
@@ -70,10 +76,11 @@ var tick := 0
 
 func _init() -> void:
 	var count: int = WIDTH * HEIGHT
-	for field in [elevation, moisture, temperature, toxicity, nutrients, dormant_moss, moss, dead_biomass, fungus, fruiting, microbial_crust, dormant_rhizome, rhizome, dormant_canopy, canopy, surface_water, aquatic_producer, aquatic_consumer, dissolved_oxygen, sulfur_precursor, volatile_sulfur, ground_bloom, canopy_bloom, pollination, fungal_spores, dam_material, throughflow, shade]:
+	for field in [elevation, moisture, temperature, toxicity, nutrients, dormant_moss, moss, dead_biomass, fungus, fruiting, microbial_crust, dormant_rhizome, rhizome, dormant_canopy, canopy, surface_water, aquatic_producer, aquatic_consumer, dissolved_oxygen, sulfur_precursor, volatile_sulfur, ground_bloom, canopy_bloom, pollination, fungal_spores, dam_material, old_matter, throughflow, shade]:
 		field.resize(count)
 	_seed_terrain()
 	_seed_barren_basin()
+	old_matter[_index(HEADWALL_SPRING_CELL.x, HEADWALL_SPRING_CELL.y)] = SPRING_SEAL_MATTER
 	habitat_shade = shade.duplicate()
 
 
@@ -480,6 +487,13 @@ func step() -> void:
 	fungal_spores = next_fungal_spores
 	dam_material = next_dam_material
 	throughflow = next_throughflow
+	# The spring runs once its seal has been eaten away, and stays open.
+	var spring_index := _index(HEADWALL_SPRING_CELL.x, HEADWALL_SPRING_CELL.y)
+	if not spring_open and old_matter[spring_index] <= 0.0001:
+		spring_open = true
+	if spring_open:
+		surface_water[spring_index] = clampf(surface_water[spring_index] + SPRING_FLOW, 0.0, 1.0)
+		moisture[spring_index] = clampf(moisture[spring_index] + SPRING_FLOW, 0.0, 1.0)
 	tick += 1
 	_step_reproduction()
 
@@ -701,6 +715,8 @@ func resource_amount(cell: Vector2i, resource: String) -> float:
 			return fungal_spores[index]
 		"dam_material":
 			return dam_material[index]
+		"old_matter":
+			return old_matter[index]
 	return 0.0
 
 
@@ -738,6 +754,8 @@ func consume_resource(cell: Vector2i, resource: String, requested: float) -> flo
 			fungal_spores[index] -= consumed
 		"dam_material":
 			dam_material[index] -= consumed
+		"old_matter":
+			old_matter[index] -= consumed
 		_:
 			return 0.0
 	return consumed
@@ -812,6 +830,8 @@ func add_resources(cell: Vector2i, resources: Dictionary) -> Dictionary:
 				fungal_spores[index] = clampf(fungal_spores[index] + requested, 0.0, 1.0)
 			"dam_material":
 				dam_material[index] = clampf(dam_material[index] + requested, 0.0, 1.0)
+			"old_matter":
+				old_matter[index] = clampf(old_matter[index] + requested, 0.0, 1.0)
 			_:
 				continue
 		accepted[resource] = resource_amount(cell, resource) - before
@@ -861,6 +881,7 @@ func sample_world(world: Vector2) -> Dictionary:
 		"pollination": pollination[index],
 		"fungal_spores": fungal_spores[index],
 		"dam_material": dam_material[index],
+		"old_matter": old_matter[index],
 		"shade": shade[index]
 	}
 
@@ -967,13 +988,14 @@ func cell_snapshot(x: int, y: int) -> Dictionary:
 		"pollination": pollination[index],
 		"fungal_spores": fungal_spores[index],
 		"dam_material": dam_material[index],
+		"old_matter": old_matter[index],
 		"shade": shade[index]
 	}
 
 
 func full_snapshot() -> Dictionary:
 	return {
-		"version": 4,
+		"version": 5,
 		"flower_stores": flower_stores.duplicate(true),
 		"developing_seeds": developing_seeds.duplicate(true),
 		"seed_events": seed_events.duplicate(true),
@@ -1006,6 +1028,8 @@ func full_snapshot() -> Dictionary:
 		"pollination": pollination.duplicate(),
 		"fungal_spores": fungal_spores.duplicate(),
 		"dam_material": dam_material.duplicate(),
+		"old_matter": old_matter.duplicate(),
+		"spring_open": spring_open,
 		"throughflow": throughflow.duplicate(),
 		"shade": shade.duplicate(),
 		"habitat_shade": habitat_shade.duplicate(),
@@ -1015,11 +1039,11 @@ func full_snapshot() -> Dictionary:
 
 
 func restore_snapshot(snapshot: Dictionary) -> bool:
-	if int(snapshot.get("version", 0)) != 4:
+	if int(snapshot.get("version", 0)) != 5:
 		return false
 	if int(snapshot.get("width", 0)) != WIDTH or int(snapshot.get("height", 0)) != HEIGHT:
 		return false
-	for field_name in ["elevation", "moisture", "temperature", "toxicity", "nutrients", "dormant_moss", "moss", "dead_biomass", "fungus", "fruiting", "microbial_crust", "dormant_rhizome", "rhizome", "dormant_canopy", "canopy", "surface_water", "aquatic_producer", "aquatic_consumer", "dissolved_oxygen", "sulfur_precursor", "volatile_sulfur", "ground_bloom", "canopy_bloom", "pollination", "fungal_spores", "dam_material", "throughflow", "shade"]:
+	for field_name in ["elevation", "moisture", "temperature", "toxicity", "nutrients", "dormant_moss", "moss", "dead_biomass", "fungus", "fruiting", "microbial_crust", "dormant_rhizome", "rhizome", "dormant_canopy", "canopy", "surface_water", "aquatic_producer", "aquatic_consumer", "dissolved_oxygen", "sulfur_precursor", "volatile_sulfur", "ground_bloom", "canopy_bloom", "pollination", "fungal_spores", "dam_material", "old_matter", "throughflow", "shade"]:
 		if not snapshot.has(field_name) or snapshot[field_name].size() != WIDTH * HEIGHT:
 			return false
 	flower_stores = snapshot["flower_stores"].duplicate(true)
@@ -1051,6 +1075,8 @@ func restore_snapshot(snapshot: Dictionary) -> bool:
 	pollination = snapshot["pollination"].duplicate()
 	fungal_spores = snapshot["fungal_spores"].duplicate()
 	dam_material = snapshot["dam_material"].duplicate()
+	old_matter = snapshot["old_matter"].duplicate()
+	spring_open = bool(snapshot["spring_open"])
 	throughflow = snapshot["throughflow"].duplicate()
 	shade = snapshot["shade"].duplicate()
 	habitat_shade = snapshot.get("habitat_shade", shade).duplicate()

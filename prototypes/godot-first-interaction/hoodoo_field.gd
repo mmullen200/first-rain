@@ -7,7 +7,11 @@ extends Node3D
 # untouched and a spire can later be removed piece by piece. Placement and
 # shapes come from a fixed seed, so every run builds the same field.
 # Some hoodoos hold a sleeping eusocial queen in a sealed chamber at the base;
-# main.gd decides when one wakes. The hoodoos themselves have no ecology yet.
+# main.gd decides when one wakes.
+# Each hoodoo holds old matter in the ecology grid, in proportion to its
+# height. Nothing rots it; colony workers break it off, and sync() shrinks the
+# spire to match what is left. The spring spire's matter is the ecology's own
+# spring seal.
 
 const EcologyGridModel = preload("res://ecology_grid.gd")
 
@@ -26,6 +30,11 @@ const QUEEN_CHANCE := 0.7
 const MIN_QUEENS := 4
 # Horizontal direction from a hoodoo toward the gameplay camera (main.gd offset).
 const CAMERA_SIDE := Vector2(8.8, 10.5)
+const MATTER_PER_METRE := 0.1
+# Below this share of its matter a hoodoo has lost its cap.
+const CAP_LOST_FRACTION := 0.7
+# What still stands of an ordinary hoodoo once it is eaten down.
+const STUB_FRACTION := 0.12
 
 const HOODOO_SHADER := """
 shader_type spatial;
@@ -56,6 +65,8 @@ var hoodoo_cells: Array[Vector2i] = []
 var hoodoo_heights: Dictionary = {}
 var hoodoo_widths: Dictionary = {}
 var queen_cells: Array[Vector2i] = []
+var full_matter: Dictionary = {}
+var remaining_fractions: Dictionary = {}
 var material: ShaderMaterial
 
 
@@ -111,6 +122,36 @@ func build(ecology) -> void:
 				group_founders.append(cell)
 			placed += 1
 	_choose_queens(group_founders)
+	for cell in hoodoo_cells:
+		if cell != EcologyGridModel.HEADWALL_SPRING_CELL:
+			ecology.add_resources(cell, {"old_matter": float(hoodoo_heights[cell]) * MATTER_PER_METRE})
+		full_matter[cell] = ecology.resource_amount(cell, "old_matter")
+		remaining_fractions[cell] = 1.0
+
+
+# Match every spire to the old matter the colony has left in its cell. The
+# column shortens and narrows a little, the cap drops away early, and an
+# ordinary hoodoo ends as a low stub. The spring spire goes entirely.
+func sync(ecology) -> void:
+	for cell in hoodoo_cells:
+		var full: float = full_matter[cell]
+		var fraction := clampf(ecology.resource_amount(cell, "old_matter") / full, 0.0, 1.0) if full > 0.0 else 0.0
+		if is_equal_approx(fraction, float(remaining_fractions[cell])):
+			continue
+		remaining_fractions[cell] = fraction
+		var body: StaticBody3D = get_node("Hoodoo_%d_%d" % [cell.x, cell.y])
+		var mass: Node3D = body.get_node("Mass")
+		var gone := fraction <= 0.0 and cell == EcologyGridModel.HEADWALL_SPRING_CELL
+		var standing := lerpf(STUB_FRACTION, 1.0, fraction)
+		mass.visible = not gone
+		mass.scale = Vector3(lerpf(0.8, 1.0, fraction), standing, lerpf(0.8, 1.0, fraction))
+		if mass.has_node("Cap"):
+			mass.get_node("Cap").visible = fraction >= CAP_LOST_FRACTION
+		var collision: CollisionShape3D = body.get_node("Collision")
+		collision.disabled = gone
+		var cylinder: CylinderShape3D = collision.shape
+		cylinder.height = (float(hoodoo_heights[cell]) + BASE_SINK) * standing
+		collision.position.y = cylinder.height * 0.5
 
 
 # At most one sleeping queen per group, so wherever the player works there is
@@ -186,6 +227,9 @@ func _add_hoodoo(ecology, cell: Vector2i, rng: RandomNumberGenerator, shape: Dic
 	body.position = Vector3(world.x + jitter.x, ecology.terrain_height(cell) - BASE_SINK, world.y + jitter.y)
 	body.rotation = Vector3(rng.randf_range(-0.05, 0.05), rng.randf_range(0.0, TAU), rng.randf_range(-0.05, 0.05))
 	add_child(body)
+	var mass := Node3D.new()
+	mass.name = "Mass"
+	body.add_child(mass)
 
 	var tint := Color("b2623a").lerp(Color("c98150"), rng.randf()).lerp(Color("8f4e33"), rng.randf() * 0.35)
 	var noise := [rng.randf_range(0.0, TAU), rng.randf_range(0.0, TAU), rng.randf_range(0.0, TAU), rng.randf_range(0.0, TAU)]
@@ -202,7 +246,7 @@ func _add_hoodoo(ecology, cell: Vector2i, rng: RandomNumberGenerator, shape: Dic
 	var column := MeshInstance3D.new()
 	column.mesh = _lathe(profile, column_height, width, 30, noise, 0.09, tint, not capped)
 	column.material_override = material
-	body.add_child(column)
+	mass.add_child(column)
 
 	if capped:
 		var neck_radius: float = profile[profile.size() - 1][1] * width
@@ -212,11 +256,13 @@ func _add_hoodoo(ecology, cell: Vector2i, rng: RandomNumberGenerator, shape: Dic
 		var cap := MeshInstance3D.new()
 		cap.mesh = _lathe(cap_profile, cap_height, cap_radius, 14, [noise[1], noise[3], noise[0], noise[2]], 0.13, tint.lightened(0.05), true)
 		cap.material_override = material
+		cap.name = "Cap"
 		cap.position = Vector3(rng.randf_range(-0.14, 0.14), column_height - 0.12, rng.randf_range(-0.14, 0.14))
 		cap.rotation = Vector3(rng.randf_range(-0.26, 0.26), 0.0, rng.randf_range(-0.26, 0.26))
-		body.add_child(cap)
+		mass.add_child(cap)
 
 	var collision := CollisionShape3D.new()
+	collision.name = "Collision"
 	var cylinder := CylinderShape3D.new()
 	cylinder.radius = width * 0.62
 	cylinder.height = height + BASE_SINK

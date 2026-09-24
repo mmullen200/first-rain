@@ -172,6 +172,10 @@ var colony_ant_markers: Array[MeshInstance3D] = []
 var colony_prospect_root: Node3D
 var colony_prospect_markers: Array[MeshInstance3D] = []
 var colony_prospect_label: Label3D
+var spring_label: Label3D
+var spring_open_announced := false
+var worker_plant_material: StandardMaterial3D
+var worker_hoodoo_material: StandardMaterial3D
 var habitat_search_species: Array[String] = []
 var habitat_search_cursor := 0
 var habitat_search_scores: Dictionary = {}
@@ -232,6 +236,8 @@ func _ready() -> void:
 	evidence = EvidenceRecorder.new()
 	if "--colony-foraging" in OS.get_cmdline_user_args():
 		_seed_colony_foraging_fixture()
+	if "--hoodoo-devouring" in OS.get_cmdline_user_args():
+		_seed_hoodoo_devouring_fixture()
 	if "--predator-ecology" in OS.get_cmdline_user_args():
 		_seed_predator_fixture()
 	if "--vector-pollination" in OS.get_cmdline_user_args():
@@ -239,8 +245,10 @@ func _ready() -> void:
 	if "--wetland-engineer" in OS.get_cmdline_user_args():
 		_seed_engineer_fixture()
 	evidence.begin_run(1, _evidence_snapshot())
-	if "--colony-foraging" in OS.get_cmdline_user_args() or "--predator-ecology" in OS.get_cmdline_user_args() or "--vector-pollination" in OS.get_cmdline_user_args() or "--wetland-engineer" in OS.get_cmdline_user_args():
+	if "--colony-foraging" in OS.get_cmdline_user_args() or "--hoodoo-devouring" in OS.get_cmdline_user_args() or "--predator-ecology" in OS.get_cmdline_user_args() or "--vector-pollination" in OS.get_cmdline_user_args() or "--wetland-engineer" in OS.get_cmdline_user_args():
 		_open_emergency_cache()
+	if "--hoodoo-devouring" in OS.get_cmdline_user_args():
+		_set_status("A colony has opened its nest high on the Headwall, a stone's throw from the great spire over the dry spring.", 5.0)
 	_set_status("A fixed mound stands between separated living patches." if "--colony-foraging" in OS.get_cmdline_user_args() else "The crash has stopped. The ship is dead, but an emergency cache still blinks beneath the broken wing.")
 	if "--predator-ecology" in OS.get_cmdline_user_args():
 		_set_status("Red tracks cross the feeding ground. Farther east, another predator noses through dark remains.", 5.0)
@@ -354,6 +362,36 @@ func _seed_colony_foraging_fixture() -> void:
 	ecology_started = true
 	var world: Vector2 = ecology.world_position(home.x, home.y + 1)
 	astronaut.position = Vector3(world.x, ecology.terrain_height(home + Vector2i(0, 1)) + 0.02, world.y)
+	camera.position = astronaut.position + Vector3(8.8, 10.8, 10.5)
+	camera.look_at(astronaut.position)
+	_refresh_ecology_visuals()
+	_update_ecological_animal_markers()
+
+
+# Starts an established colony within reach of the spring spire, which no
+# sleeping queen is in ordinary play. A small plant patch on the other side
+# gives the workers a living alternative to the spire.
+func _seed_hoodoo_devouring_fixture() -> void:
+	var home := Vector2i(8, 3)
+	for y in range(home.y - 1, home.y + 2):
+		for x in range(home.x - 1, home.x + 2):
+			var cell := Vector2i(x, y)
+			if cell in hoodoo_field.hoodoo_cells:
+				continue
+			ecology.add_resources(cell, {"dead_biomass": 0.4, "fungus": 0.2})
+			# The Headwall is dry; a well-watered garden lasts a few minutes.
+			ecology.moisture[y * ecology.WIDTH + x] = 0.6
+	for cell in [Vector2i(11, 2), Vector2i(11, 3)]:
+		var index: int = cell.y * ecology.WIDTH + cell.x
+		ecology.add_resources(cell, {"moss": 0.24, "rhizome": 0.18, "nutrients": 0.25})
+		ecology.moisture[index] = 0.55
+		ecology.temperature[index] = 0.4
+		ecology.toxicity[index] = 0.05
+	animal_simulation.register_agent("colony", "colony:1", {"cell": home})
+	ecology_started = true
+	var stand := home + Vector2i(1, 2)
+	var world: Vector2 = ecology.world_position(stand.x, stand.y)
+	astronaut.position = Vector3(world.x, ecology.terrain_height(stand) + 0.02, world.y)
 	camera.position = astronaut.position + Vector3(8.8, 10.8, 10.5)
 	camera.look_at(astronaut.position)
 	_refresh_ecology_visuals()
@@ -727,7 +765,7 @@ func _build_hoodoos() -> void:
 
 
 func _build_spatial_landmarks() -> void:
-	_create_terrain_label("THE HEADWALL  /  SPRING BLOCKED", EcologyGridModel.HEADWALL_SPRING_CELL, Color("d9c49a"))
+	spring_label = _create_terrain_label("THE HEADWALL  /  SPRING BLOCKED", EcologyGridModel.HEADWALL_SPRING_CELL, Color("d9c49a"))
 	_create_terrain_label("TOXIC VENT", EcologyGridModel.TOXIC_VENT_CELL, Color("e1ac70"))
 	_create_terrain_label("THE FORK", EcologyGridModel.FORK_CELL, Color("d7c48c"))
 	_create_terrain_label("LONG MEADOW", EcologyGridModel.LONG_MEADOW_CELL, Color("81aeb5"))
@@ -745,11 +783,11 @@ func _build_spatial_landmarks() -> void:
 	_create_box(Vector3(vent_world.x, ecology.terrain_height(EcologyGridModel.TOXIC_VENT_CELL) + 0.24, vent_world.y), Vector3(0.55, 0.48, 0.55), Color("b8793f"), Vector3.ZERO)
 
 
-func _create_terrain_label(text: String, cell: Vector2i, color: Color) -> void:
+func _create_terrain_label(text: String, cell: Vector2i, color: Color) -> Label3D:
 	var world: Vector2 = ecology.world_position(cell.x, cell.y)
 	# Lift the label clear of any hoodoo standing on the landmark.
 	var lift := maxf(0.72, float(hoodoo_field.hoodoo_heights.get(cell, 0.0)) - HoodooField.BASE_SINK + 0.5)
-	_create_world_label(text, Vector3(world.x, ecology.terrain_height(cell) + lift, world.y), color, 0.006)
+	return _create_world_label(text, Vector3(world.x, ecology.terrain_height(cell) + lift, world.y), color, 0.006)
 
 
 func _build_astronaut() -> void:
@@ -994,6 +1032,8 @@ func _build_ecological_animal_markers() -> void:
 	colony_ant_stream_root.name = "ColonyWorkerStream"
 	colony_ant_stream_root.visible = false
 	add_child(colony_ant_stream_root)
+	worker_plant_material = _material(Color("a6df66"), 0.5)
+	worker_hoodoo_material = _material(Color("b2623a"), 0.9)
 	for worker_index in range(AnimalSimulation.COLONY_WORKER_COUNT):
 		var ant := MeshInstance3D.new()
 		var ant_mesh := SphereMesh.new()
@@ -1007,7 +1047,7 @@ func _build_ecological_animal_markers() -> void:
 		fragment_mesh.size = Vector3(0.08, 0.05, 0.11)
 		fragment.mesh = fragment_mesh
 		fragment.position = Vector3(0.045, 0.07, 0.0)
-		fragment.material_override = _material(Color("a6df66"), 0.5)
+		fragment.material_override = worker_plant_material
 		fragment.visible = false
 		ant.add_child(fragment)
 		colony_ant_stream_root.add_child(ant)
@@ -1075,6 +1115,8 @@ func _build_interface() -> void:
 		title.text = "FIRST RAIN  /  GRAZER FAMILY PROTOTYPE"
 	elif "--colony-foraging" in OS.get_cmdline_user_args():
 		title.text = "FIRST RAIN  /  COLONY FORAGING PROTOTYPE"
+	elif "--hoodoo-devouring" in OS.get_cmdline_user_args():
+		title.text = "FIRST RAIN  /  HOODOO DEVOURING PROTOTYPE"
 	title.add_theme_font_size_override("font_size", 15)
 	title.add_theme_color_override("font_color", Color("e9b36e"))
 	canvas.add_child(title)
@@ -1619,6 +1661,7 @@ func _update_ecology_grid(delta: float) -> void:
 		_seed_integrated_animals()
 		var animal_events: Array[Dictionary] = animal_simulation.step()
 		_handle_authoritative_animal_events(animal_events)
+		_check_spring_opened()
 		var state: Dictionary = ecology.summary()
 		var weather_events: Array[Dictionary] = weather_simulation.step(state)
 		_handle_weather_events(weather_events)
@@ -1762,6 +1805,18 @@ func _update_dormant_queens() -> void:
 			colony_queen_cell = cell
 			_register_ecological_role("colony", "colony:1", {"cell": nest, "score": fungus_scent, "evidence": scent, "queen_hoodoo": cell})
 			return
+
+
+# The spring runs when the colony has eaten the spire of old matter that
+# sealed it; the ecology owns the flow.
+func _check_spring_opened() -> void:
+	if spring_open_announced or not ecology.spring_open:
+		return
+	spring_open_announced = true
+	spring_label.text = "THE HEADWALL  /  SPRING RUNNING"
+	evidence.record_event(ecology.tick, "environment.spring_opened", "cell:%d,%d" % [EcologyGridModel.HEADWALL_SPRING_CELL.x, EcologyGridModel.HEADWALL_SPRING_CELL.y], [], {"cell": EcologyGridModel.HEADWALL_SPRING_CELL})
+	_add_discovery("The Headwall spring — its seal was the same old matter as the hoodoos; with the spire eaten away, water runs")
+	_set_status("The last of the great spire is gone. Water wells up where it stood and starts down the gully.")
 
 
 func _calls_per_habitat_observation() -> int:
@@ -2412,7 +2467,10 @@ func _update_colony_worker_stream(agent: Dictionary) -> void:
 		ant.position = Vector3(point.x, height + 0.16, point.y)
 		var heading: Vector2i = worker["heading"]
 		ant.rotation.y = -atan2(float(heading.y), float(heading.x))
-		ant.get_child(0).visible = float(worker["load"]) > 0.0
+		var fragment: MeshInstance3D = ant.get_child(0)
+		fragment.visible = float(worker["load"]) > 0.0
+		# Hoodoo pieces are the spires' own rust colour; clipped plants are green.
+		fragment.material_override = worker_hoodoo_material if String(worker["resource"]) == "old_matter" else worker_plant_material
 
 
 func _update_colony_worker_visual() -> void:
@@ -2580,9 +2638,20 @@ func _handle_authoritative_animal_events(events: Array[Dictionary]) -> void:
 					_set_status("A vector leaves a fungal fruiting body dusted with spores, then sheds them over wet dead matter. The scanner records dispersal, not pollination.")
 			"organism.colony_trail_followed", "organism.colony_plant_gathered":
 				evidence.record_event(ecology.tick, event["taxonomy"], event["subject"], [], event["facts"])
+			"organism.colony_hoodoo_gathered":
+				var facts: Dictionary = event["facts"]
+				evidence.record_event(ecology.tick, "organism.colony_hoodoo_gathered", event["subject"], [], facts)
+				if not animal_roles_announced.has("colony_hoodoo_observed"):
+					animal_roles_announced["colony_hoodoo_observed"] = true
+					_add_discovery("Hoodoo matter — the colony's workers break pieces off the spires, the only thing seen to wear them down")
+					_set_status("Workers are climbing a hoodoo and coming away with rust-coloured crumbs of it.")
 			"organism.colony_plant_returned":
 				var facts: Dictionary = event["facts"]
 				evidence.record_event(ecology.tick, "organism.colony_plant_returned", event["subject"], [], facts)
+				if String(facts.get("source_resource", "")) == "old_matter" and not animal_roles_announced.has("colony_hoodoo_digested"):
+					animal_roles_announced["colony_hoodoo_digested"] = true
+					_add_discovery("Hoodoo matter feeds the fungus — the old remains do not rot on their own, but the colony's garden digests them")
+					_set_status("The rust-coloured crumbs go down into the nest with the clipped plants, to the fungus garden.")
 				if not animal_roles_announced.has("colony_transport_observed"):
 					animal_roles_announced["colony_transport_observed"] = true
 					_add_discovery("Eusocial worker trail — small plant loads travel back to one fixed hive and enter its Detritus cycle")
@@ -2683,6 +2752,8 @@ func _refresh_reproductive_markers() -> void:
 
 func _refresh_ecology_visuals() -> void:
 	_refresh_reproductive_markers()
+	if hoodoo_field != null:
+		hoodoo_field.sync(ecology)
 	for y in range(EcologyGridModel.HEIGHT):
 		for x in range(EcologyGridModel.WIDTH):
 			var index: int = y * EcologyGridModel.WIDTH + x
@@ -3603,7 +3674,7 @@ func _create_rock(position: Vector3, scale_value: float, color := Color("666b67"
 	add_child(rock)
 
 
-func _create_world_label(text: String, position: Vector3, color: Color, pixel_size: float) -> void:
+func _create_world_label(text: String, position: Vector3, color: Color, pixel_size: float) -> Label3D:
 	var label := Label3D.new()
 	label.text = text
 	label.position = position
@@ -3613,6 +3684,7 @@ func _create_world_label(text: String, position: Vector3, color: Color, pixel_si
 	label.outline_size = 9
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	add_child(label)
+	return label
 
 
 func _material(color: Color, roughness: float, emission := Color(0.0, 0.0, 0.0, 1.0)) -> StandardMaterial3D:

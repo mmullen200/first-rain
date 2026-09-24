@@ -39,7 +39,7 @@ Branch: `prototype/four-bowls-terrain`. The Crash Basin now follows the Four Bow
 
 Terrain remains square and vertical-sided. Each authoritative Ecological Cell renders as a 3 × 3 patch of nine narrow voxel columns whose sampled heights add finer stepped relief without changing ecology or hydrology. Ecological state owns their shared top color; exposed sides use world-scaled pixel variation and elevation-sensitive rock strata. The Astronaut and ground animals follow a continuous presentation surface beneath those steps, so movement stays smooth while the landscape remains blocky. Boundary Ecological Cells now shed stranded water out of the Crash Basin instead of forming permanent edge puddles. The blocked spring is presently a situated terrain cue, not yet a renewable-flow mechanic; spring opening and re-closing remain separate interaction questions.
 
-Hoodoos stand around the Crash Basin (`hoodoo_field.gd`): banded rust-coloured spires of the previous biosphere's undecayed remains, most wearing a tilted cap boulder, placed in small seeded groups that stay clear of the wreck, the named landmarks, the water-holding lows and the spring's watercourse. The tallest stands over the blocked Headwall spring. They are objects on Ecological Cells rather than terrain, so drainage is unchanged; the Astronaut collides with them, but animals and ecology ignore them for now. The colony dismantling them is not built yet.
+Hoodoos stand around the Crash Basin (`hoodoo_field.gd`): banded rust-coloured spires of the previous biosphere's undecayed remains, most wearing a tilted cap boulder, placed in small seeded groups that stay clear of the wreck, the named landmarks, the water-holding lows and the spring's watercourse. The tallest stands over the blocked Headwall spring. They are objects on Ecological Cells rather than terrain, so drainage is unchanged; the Astronaut collides with them, and other animals still pass through them. The colony eats them (see below).
 
 The Astronaut is drawn by `astronaut_figure.gd`: a toy-like white suit with a large domed helmet, dark visor and orange trim, built from simple rounded shapes. Its walk is animated in code from the distance actually travelled, so the legs stop when movement is blocked and the planted foot does not slide; standing still, it breathes slightly. It is presentation only; collision and movement are unchanged.
 
@@ -150,6 +150,26 @@ The greybox is now one connected, enlarged Crash Basin with five gradient-based 
 The Drainage Spine is initially dry. A real water input can produce a temporary deterministic Drainage Pulse: only moisture above local retention moves downhill, carrying a small amount of mobile nutrients. Shade and living cover retain more locally. Press **J** after recovering the scanner to inspect a coarse Basin Survey of visited zones and last-observed equipment; it pauses time, explicitly marks stale evidence, and supplies no route or objective.
 
 All landform blocks, labels, colors, route spacing, and transport rates are throwaway fixtures. The playtest asks whether landmark navigation, paired-site comparison, route choice, cross-zone equipment movement, and ecological transfer make the basin feel like one causal place.
+
+## Hoodoo devouring question (#39)
+
+Branch: `prototype/hoodoo-devouring`. Does the player see the colony taking a hoodoo apart, and later recognise the spire over the Headwall spring as the same material, so that the spring opening reads as something the colony did?
+
+```sh
+/Applications/Godot.app/Contents/MacOS/Godot --path prototypes/godot-first-interaction -- --hoodoo-devouring
+```
+
+Its title is **HOODOO DEVOURING PROTOTYPE**. It starts an established colony high on the Headwall, two cells from the spring spire, with a small plant patch on the other side. The Headwall is dry: the fixture starts the fungus garden well watered, and **Space** keeps it damp. **WASD** moves, **J** pauses, **R** restarts; the other controls work as usual.
+
+- Each hoodoo holds **old matter** in its Ecological Cell, 0.1 per metre of height; the spring spire holds the ecology's own spring seal (0.5). Nothing in the ecology wears it down: water, weather and time leave it alone.
+- A worker on a cell with nothing living to cut breaks off a piece of old matter (0.006, twice a plant load, because it is brittle) and carries it home, where it joins the nest's Detritus and feeds the fungus. Workers notice a hoodoo from the next cell, as they notice plants, and recruit to it by scent the same way. Plants come first on a cell that has both, so the colony keeps cutting plants and the two sources compete.
+- Carried hoodoo pieces are rust-coloured; clipped plants stay green. A spire shortens and narrows as it is eaten, drops its cap below 70% and ends as a low stub. The spring spire goes entirely, and then the spring runs: 0.05 surface water per tick at the Headwall, down the existing watercourse, and the label reads SPRING RUNNING.
+- The colony's reach is unchanged. In ordinary play the nearest sleeping queen is 11 cells from the spring and workers stay within 6 cells of the nest, so the spring cannot open yet; the fixture places the nest within reach. How the colony reaches the spring in ordinary play is an open decision.
+- In ordinary play the workers start by eating the queen's own hoodoo, which stands beside the nest.
+
+Measured headlessly: a colony beside a queen's hoodoo eats it (0.35) to nothing within about 5 minutes, then moves on to the rest of the group. In the fixture the spire is half gone after about 3 minutes and the spring opens after about 5.
+
+**Playtest gate:** without F9 or coaching, the player says the workers are breaking down a hoodoo, and connects the spring running to the colony eating the spire. Automated checks establish transport, conservation, the seal and the flow, not comprehension.
 
 ## Colony foraging question (#29)
 
@@ -276,6 +296,8 @@ The captured idle-opening failure can be replayed headlessly:
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/succession_order_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/reversible_animal_residency_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/animal_arrival_pacing_test.gd
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/hoodoo_field_test.gd
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/hoodoo_devouring_test.gd
 ```
 
 The checks verify the opening, movement, grazer behavior, scanner evidence, replay record, toolkit economy, basin traversal, survival pacing, disturbance recovery, shared animal authority, fixed-hive worker transport, and the bounded habitat-search frame cost. Habitat checks demonstrate that roles settle independently from sustained local support, distant basin-wide counts cannot qualify them, brief fluctuations do not cause settlement or departure, sustained collapse causes departure without death, and habitat recovery permits return. The pacing check verifies that watering produces an immediate held local reading, a queen sleeps until fungus grows beside her hoodoo, visibly stirs and opens her chamber over tens of seconds before founding the colony beside the hoodoo, and dies if the fungus fails while she wakes. Integrated checks additionally verify Detritus-dependent fungus, separate pioneer requirements for rooted mats, pollination-gated canopy, the producer/consumer sulfur pathway, reproduction without spontaneous biomass, distinct colony/vector/engineer effects, seeded weather that produces ecological disturbances plus ecosystem-enabled First Rain without a fixed schedule or Presence trigger, and an end-to-end route from finite watering and transplantation through every terrestrial and aquatic role.

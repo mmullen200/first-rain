@@ -9,8 +9,8 @@ var failed := false
 func _init() -> void:
 	var ecology = EcologyGrid.new()
 	var simulation = AnimalSimulation.new(ecology, 41)
-	var hive_cell := Vector2i(4, 4)
-	var forage_cell := Vector2i(8, 4)
+	var hive_cell := Vector2i(4, 12)
+	var forage_cell := Vector2i(8, 12)
 	ecology.add_resources(forage_cell, {"moss": 0.42, "rhizome": 0.42})
 	_assert(simulation.register_agent("colony", "colony:1", {"cell": hive_cell, "hunger": 0.9}), "colony registration failed")
 	var initial_plant: float = ecology.resource_amount(forage_cell, "moss") + ecology.resource_amount(forage_cell, "rhizome")

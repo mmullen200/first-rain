@@ -22,6 +22,8 @@ const COLONY_STEP_TICKS := 18
 const COLONY_REST_TICKS := 3
 const COLONY_RANGE := 6
 const COLONY_LOAD := 0.003
+# Old hoodoo matter is brittle and breaks off in bigger pieces than a clipped plant.
+const COLONY_HOODOO_LOAD := 0.006
 const DIRECTIONS := [
 	Vector2i(1, 0), Vector2i(1, 1), Vector2i(0, 1), Vector2i(-1, 1),
 	Vector2i(-1, 0), Vector2i(-1, -1), Vector2i(0, -1), Vector2i(1, -1)
@@ -877,6 +879,16 @@ func _step_colony(agent_id: String) -> void:
 			_check_transfer(gathered, float(worker["load"]), "%s_plant_to_worker" % worker["id"])
 			_emit("organism.colony_plant_gathered", agent_id, {"worker_id": worker["id"], "cell": cell, "resource": resource, "amount": gathered, "home_cell": home, "followed_trail": worker["following"]})
 			continue
+		# Where there is nothing living to cut, a worker breaks a piece off a
+		# hoodoo. The last crumbs are taken too, so a spire can be eaten away.
+		if cell != home and ecology.resource_amount(cell, "old_matter") > 0.0001:
+			var broken: float = ecology.consume_resource(cell, "old_matter", COLONY_HOODOO_LOAD)
+			worker["load"] = broken
+			worker["resource"] = "old_matter"
+			_begin_colony_return(worker, home)
+			_check_transfer(broken, float(worker["load"]), "%s_hoodoo_to_worker" % worker["id"])
+			_emit("organism.colony_hoodoo_gathered", agent_id, {"worker_id": worker["id"], "cell": cell, "amount": broken, "remaining": ecology.resource_amount(cell, "old_matter"), "home_cell": home, "followed_trail": worker["following"]})
+			continue
 		if path.size() >= 36:
 			_begin_colony_return(worker, home)
 			continue
@@ -953,7 +965,7 @@ func _colony_search_step(worker: Dictionary, home: Vector2i, scent: Dictionary) 
 		if not bool(worker["scout"]):
 			weight *= 1.0 + pow(float(scent.get(candidate, 0.0)) * 12.0, 2.0)
 		# Only immediately adjacent food is sensed, never a range-wide target.
-		if candidate != home and maxf(ecology.resource_amount(candidate, "moss"), ecology.resource_amount(candidate, "rhizome")) >= COLONY_LOAD:
+		if candidate != home and (maxf(ecology.resource_amount(candidate, "moss"), ecology.resource_amount(candidate, "rhizome")) >= COLONY_LOAD or ecology.resource_amount(candidate, "old_matter") > 0.0001):
 			weight *= 20.0
 		candidates.append(candidate)
 		weights.append(weight)

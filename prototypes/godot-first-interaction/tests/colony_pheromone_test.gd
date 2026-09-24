@@ -24,7 +24,7 @@ func _run_foraging(fixture_seed: int) -> void:
 	for y in range(ecology.HEIGHT):
 		for x in range(ecology.WIDTH):
 			var cell := Vector2i(x, y)
-			for resource in ["moss", "rhizome", "dead_biomass", "toxicity"]:
+			for resource in ["moss", "rhizome", "dead_biomass", "toxicity", "old_matter"]:
 				ecology.consume_resource(cell, resource, 100.0)
 	var simulation = AnimalSimulation.new(ecology, fixture_seed)
 	var home := Vector2i(8, 8)
