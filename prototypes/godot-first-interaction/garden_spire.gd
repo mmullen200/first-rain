@@ -1,221 +1,259 @@
 extends Node3D
 
 # THROWAWAY PROTOTYPE.
-# The colony's hanging fungus garden: a spiral terraced tower the workers grow
-# over the nest from chewed fibre and hoodoo matter. A ramp winds up around a
-# twisted three-strand column; fungus beds sit on its terraces, strands of
-# fungus hang from its edges and amber fruiting caps glow along it. It is open
-# because the fungus needs air and shade, and it is only as tall as the garden
-# is large: set_growth() reveals it from the ground up and takes it back down
-# when the garden fails. Presentation only; the garden amount lives in the
-# colony's authoritative state.
+# The colony's hanging fungus garden, grown like tree rings. Each terrace is
+# laid from one record in the colony's authoritative state (see
+# animal_simulation.gd, _grow_colony_terraces) and keeps the circumstances it
+# was laid in:
+#   heading       -> the terrace reaches out toward where the food came from
+#   richness      -> plenty lays wide terraces with long hanging strands;
+#                    lean times lay narrow, pinched ones
+#   hoodoo_share  -> rust-coloured when the colony lived on hoodoo, pale
+#                    green-tan when it lived on cut plants
+#   damp_heading  -> the tower leans a little further toward the damp side
+#   seed          -> small irregularities, so two similar lives still differ
+# Two ramps wind through each other around a twisted three-strand column.
+# Terraces are added and lost from the top, so a regrown tower comes back
+# different. Presentation only.
 
-const SEED := 20260924
-const HEIGHT := 3.4
-const TURNS := 2.2
+const TERRACE_RISE := 0.23
+const BASE_LIFT := 0.3
 const BASE_RADIUS := 1.0
-const TOP_RADIUS := 0.34
-# Two ramps wind through each other like a double staircase, half a turn
-# apart, each wobbling out of step with the other.
+const TOP_RADIUS := 0.36
+const MAX_TERRACES := 14
 const RAMPS := 2
-const SEGMENTS := 22
-const SAMPLES_PER_SEGMENT := 4
-const RAMP_WIDTH := 0.42
-const RAMP_THICKNESS := 0.09
+const SAMPLES := 8
+const RAMP_THICKNESS := 0.08
+const APPEAR_SECONDS := 3.0
+const FALL_SECONDS := 2.0
+const PLANT_FIBRE := Color("a39c6c")
+const HOODOO_FIBRE := Color("b2623a")
 
-var segments: Array[Node3D] = []
-var segment_heights: Array[float] = []
-var column_strands: Array[MeshInstance3D] = []
+var records: Array = []
+var terrace_nodes: Array[Node3D] = []
+var centres: Array[Vector3] = []
+var start_angles: Array[float] = []
+var spans: Array[float] = []
+var falling: Array[Node3D] = []
 var drapes: Array[Node3D] = []
-var growth := 0.0
-var shown_growth := 0.0
+var column: Node3D
 var sway_time := 0.0
 
-var fibre_material: StandardMaterial3D
 var bed_material: StandardMaterial3D
 var drape_material: StandardMaterial3D
 var cap_material: StandardMaterial3D
+var mound_material: StandardMaterial3D
 
 
 func _init() -> void:
 	name = "GardenSpire"
-	fibre_material = _material(Color("b38863"), 0.88)
 	bed_material = _material(Color("7d4fc9"), 0.55, Color("6a3fd0"), 0.9)
 	drape_material = _material(Color("c7b3ea"), 0.6, Color("8e6ad8"), 0.45)
 	cap_material = _material(Color("f0b04d"), 0.4, Color("e08a2a"), 1.1)
-	_build()
-	set_growth(0.0)
-
-
-# Fraction of the tower that stands, 0 (just the mound) to 1 (full spire).
-func set_growth(fraction: float) -> void:
-	growth = clampf(fraction, 0.0, 1.0)
-
-
-func _process(delta: float) -> void:
-	sway_time += delta
-	# Growth and die-back show as the tower rising or sinking, not popping.
-	shown_growth = move_toward(shown_growth, growth, delta * 0.08)
-	_apply_growth()
-	var pulse := 0.75 + 0.25 * sin(sway_time * 1.3)
-	bed_material.emission_energy_multiplier = 0.9 * pulse * clampf(shown_growth * 3.0, 0.0, 1.0)
-	cap_material.emission_energy_multiplier = 1.1 * (0.85 + 0.15 * sin(sway_time * 2.1 + 1.0))
-	for index in range(drapes.size()):
-		var drape: Node3D = drapes[index]
-		drape.rotation.z = sin(sway_time * 0.9 + float(index) * 0.7) * 0.07
-		drape.rotation.x = cos(sway_time * 0.7 + float(index) * 1.3) * 0.05
-
-
-func _apply_growth() -> void:
-	var revealed := shown_growth * float(SEGMENTS)
-	for index in range(segments.size()):
-		var segment := segments[index]
-		var amount := clampf(revealed - segment_heights[index] * float(SEGMENTS), 0.0, 1.0)
-		segment.visible = amount > 0.0
-		segment.scale = Vector3.ONE * lerpf(0.35, 1.0, amount)
-	var column_height := clampf(shown_growth * 1.08, 0.04, 1.0)
-	for strand in column_strands:
-		strand.scale = Vector3(1.0, column_height, 1.0)
-
-
-func _build() -> void:
-	var rng := RandomNumberGenerator.new()
-	rng.seed = SEED
-	# The squat chewed-fibre mound the colony starts with.
+	mound_material = _material(Color("a88a66"), 0.9)
 	var mound := MeshInstance3D.new()
 	var mound_mesh := SphereMesh.new()
 	mound_mesh.radius = 0.55
 	mound_mesh.height = 0.5
 	mound.mesh = mound_mesh
 	mound.scale = Vector3(1.0, 0.55, 1.0)
-	mound.material_override = fibre_material
+	mound.material_override = mound_material
 	add_child(mound)
-
-	# Three strands twisting around each other up the middle.
-	for strand_index in range(3):
-		var points: Array[Vector3] = []
-		for step in range(41):
-			var t := float(step) / 40.0
-			var angle := TAU * (float(strand_index) / 3.0) + t * TAU * 1.6
-			var radius := lerpf(0.26, 0.07, t)
-			points.append(Vector3(cos(angle) * radius, t * HEIGHT, sin(angle) * radius))
-		var strand := MeshInstance3D.new()
-		strand.mesh = _tube(points, 0.07, 0.028)
-		strand.material_override = fibre_material
-		add_child(strand)
-		column_strands.append(strand)
-
-	for ramp_index in range(RAMPS):
-		for segment_index in range(SEGMENTS):
-			_build_segment(rng, ramp_index, segment_index)
+	column = Node3D.new()
+	column.name = "Column"
+	add_child(column)
 
 
-func _build_segment(rng: RandomNumberGenerator, ramp_index: int, segment_index: int) -> void:
-	var segment := Node3D.new()
-	segment.name = "Terrace_%d_%02d" % [ramp_index, segment_index]
-	add_child(segment)
-	segments.append(segment)
-	var t0 := float(segment_index) / float(SEGMENTS)
-	var t1 := float(segment_index + 1) / float(SEGMENTS)
-	segment_heights.append(t0)
-	var phase := PI * float(ramp_index)
-	var centre := _ramp_point(lerpf(t0, t1, 0.5), phase)
-	# Scale each piece about its own middle so it grows out of the ramp.
-	segment.position = centre
-	var ramp := MeshInstance3D.new()
-	ramp.mesh = _ramp_mesh(t0, t1, centre, phase)
-	ramp.material_override = fibre_material
-	segment.add_child(ramp)
+# Height of the top of the standing terraces, for placing labels above it.
+func top_height() -> float:
+	return BASE_LIFT + float(terrace_nodes.size()) * TERRACE_RISE
 
-	# A rib back to the column keeps the ramp open to the air.
-	if segment_index % 2 == 0:
-		var hub := Vector3(0.0, centre.y - 0.18, 0.0) - centre
-		var rib := MeshInstance3D.new()
-		rib.mesh = _tube([Vector3(0.0, -0.02, 0.0), hub * 0.5 + Vector3(0.0, -0.08, 0.0), hub], 0.022, 0.012)
-		rib.material_override = fibre_material
-		segment.add_child(rib)
 
-	# Fungus beds lie along the terrace top.
-	var bed := MeshInstance3D.new()
-	var bed_mesh := SphereMesh.new()
-	bed_mesh.radius = RAMP_WIDTH * 0.4
-	bed_mesh.height = 0.14
-	bed.mesh = bed_mesh
-	bed.position = Vector3(0.0, RAMP_THICKNESS * 0.6, 0.0)
-	# Stretch each bed along the ramp so the terrace reads as one planting.
-	bed.scale = Vector3(1.9, 0.5, 1.0)
-	bed.rotation.y = -(_ramp_angle(lerpf(t0, t1, 0.5)) + phase + PI * 0.5)
-	bed.material_override = bed_material
-	segment.add_child(bed)
+# Terraces only ever change at the top, so keep the common prefix, drop what
+# is gone, and grow what is new.
+func set_terraces(new_records: Array) -> void:
+	var keep := 0
+	while keep < mini(records.size(), new_records.size()) and records[keep] == new_records[keep]:
+		keep += 1
+	if keep == records.size() and keep == new_records.size():
+		return
+	while terrace_nodes.size() > keep:
+		var gone: Node3D = terrace_nodes.pop_back()
+		gone.set_meta("fall", 0.0)
+		falling.append(gone)
+		centres.pop_back()
+		start_angles.pop_back()
+		spans.pop_back()
+	records = new_records.duplicate(true)
+	for index in range(keep, mini(records.size(), MAX_TERRACES)):
+		_add_terrace(index, records[index])
+	_rebuild_column()
 
-	# Strands of fungus hang from the outer edge: the hanging garden.
-	var outward := Vector3(centre.x, 0.0, centre.z).normalized()
-	for drape_index in range(rng.randi_range(2, 4)):
-		var length := rng.randf_range(0.25, 0.85) * lerpf(1.25, 0.7, t0)
+
+func _process(delta: float) -> void:
+	sway_time += delta
+	for node in terrace_nodes:
+		var age := float(node.get_meta("age", APPEAR_SECONDS)) + delta
+		node.set_meta("age", age)
+		node.scale = Vector3.ONE * lerpf(0.2, 1.0, clampf(age / APPEAR_SECONDS, 0.0, 1.0))
+	for node in falling.duplicate():
+		var fall := float(node.get_meta("fall")) + delta
+		node.set_meta("fall", fall)
+		node.scale = Vector3.ONE * maxf(0.01, 1.0 - fall / FALL_SECONDS)
+		if fall >= FALL_SECONDS:
+			falling.erase(node)
+			node.queue_free()
+	var pulse := 0.75 + 0.25 * sin(sway_time * 1.3)
+	bed_material.emission_energy_multiplier = 0.9 * pulse
+	cap_material.emission_energy_multiplier = 1.1 * (0.85 + 0.15 * sin(sway_time * 2.1 + 1.0))
+	for index in range(drapes.size() - 1, -1, -1):
+		var drape := drapes[index]
+		if not is_instance_valid(drape) or drape.is_queued_for_deletion():
+			drapes.remove_at(index)
+			continue
+		drape.rotation.z = sin(sway_time * 0.9 + float(index) * 0.7) * 0.07
+		drape.rotation.x = cos(sway_time * 0.7 + float(index) * 1.3) * 0.05
+
+
+func _add_terrace(index: int, record: Dictionary) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(record["seed"])
+	var richness := float(record["richness"])
+	var heading := float(record["heading"])
+	var damp := float(record["damp_heading"])
+	var previous_centre := centres[-1] if not centres.is_empty() else Vector3.ZERO
+	var previous_angle := start_angles[-1] if not start_angles.is_empty() else rng.randf_range(0.0, TAU)
+	var previous_span := spans[-1] if not spans.is_empty() else 0.0
+	# The spine drifts toward the damp side and toward the food, so the tower
+	# bends over its height the way the colony's life went.
+	var drift := Vector3(cos(damp), 0.0, sin(damp)) * 0.035 + Vector3(cos(heading), 0.0, sin(heading)) * 0.025 * richness
+	var centre := Vector3(previous_centre.x, BASE_LIFT + float(index) * TERRACE_RISE, previous_centre.z) + drift
+	var start_angle := previous_angle + previous_span
+	# Each terrace winds less than half a turn per ramp, leaving gaps so the two
+	# ramps read as a spiral rather than stacked plates.
+	var span := TAU * rng.randf_range(0.3, 0.45)
+	centres.append(centre)
+	start_angles.append(start_angle)
+	spans.append(span)
+
+	var node := Node3D.new()
+	node.name = "Terrace_%02d" % index
+	node.position = centre
+	node.set_meta("age", 0.0)
+	add_child(node)
+	terrace_nodes.append(node)
+	var fibre := _material(PLANT_FIBRE.lerp(HOODOO_FIBRE, float(record["hoodoo_share"])).darkened(rng.randf_range(0.0, 0.12)), 0.88)
+	var height_fraction := float(index) / float(MAX_TERRACES - 1)
+	var radius := lerpf(BASE_RADIUS, TOP_RADIUS, pow(height_fraction, 0.8)) * lerpf(0.6, 1.15, richness) * rng.randf_range(0.92, 1.08)
+	var width := lerpf(0.16, 0.44, richness)
+	for ramp in range(RAMPS):
+		_add_arc(node, rng, start_angle + PI * float(ramp), span, radius, width, heading, richness, fibre)
+
+
+# One ramp arc: a band rising one terrace as it winds, pushed further out on
+# the side facing the food.
+func _add_arc(node: Node3D, rng: RandomNumberGenerator, arc_start: float, span: float, radius: float, width: float, heading: float, richness: float, fibre: StandardMaterial3D) -> void:
+	var points: Array = []
+	for step in range(SAMPLES + 1):
+		var f := float(step) / float(SAMPLES)
+		var angle := arc_start + span * f
+		var reach := radius * (1.0 + 0.35 * cos(angle - heading))
+		var outward := Vector3(cos(angle), 0.0, sin(angle))
+		points.append([outward * reach + Vector3.UP * (f * TERRACE_RISE), outward, angle])
+	var band := MeshInstance3D.new()
+	band.mesh = _band_mesh(points, width)
+	band.material_override = fibre
+	node.add_child(band)
+
+	# A rib back to the spine keeps the ramp open to the air.
+	var mid: Array = points[SAMPLES / 2]
+	var mid_point: Vector3 = mid[0]
+	var rib := MeshInstance3D.new()
+	rib.mesh = _tube([mid_point + Vector3.DOWN * 0.03, mid_point * 0.5 + Vector3.DOWN * 0.1, Vector3(0.0, -0.12, 0.0)], 0.022, 0.012)
+	rib.material_override = fibre
+	node.add_child(rib)
+
+	var beds := 1 + roundi(3.0 * richness)
+	for bed_index in range(beds):
+		var at: Array = points[clampi(roundi((float(bed_index) + 0.5) / float(beds) * SAMPLES), 0, SAMPLES)]
+		var bed := MeshInstance3D.new()
+		var bed_mesh := SphereMesh.new()
+		bed_mesh.radius = width * 0.42
+		bed_mesh.height = 0.13
+		bed.mesh = bed_mesh
+		bed.position = Vector3(at[0]) + Vector3.UP * RAMP_THICKNESS * 0.6
+		bed.scale = Vector3(1.7, 0.5, 1.0)
+		bed.rotation.y = -(float(at[2]) + PI * 0.5)
+		bed.material_override = bed_material
+		node.add_child(bed)
+
+	for drape_index in range(roundi(1.0 + 4.0 * richness)):
+		var at: Array = points[rng.randi_range(0, SAMPLES)]
+		var length := rng.randf_range(0.12, 0.2) + rng.randf_range(0.2, 0.65) * richness
+		var pivot := Node3D.new()
+		pivot.position = Vector3(at[0]) + Vector3(at[1]) * (width * 0.5 + 0.01) + Vector3.DOWN * RAMP_THICKNESS * 0.5
+		node.add_child(pivot)
 		var drape := MeshInstance3D.new()
 		var cone := CylinderMesh.new()
-		cone.top_radius = rng.randf_range(0.018, 0.03)
+		cone.top_radius = rng.randf_range(0.016, 0.03)
 		cone.bottom_radius = 0.003
 		cone.height = length
 		cone.radial_segments = 6
 		drape.mesh = cone
-		var along := rng.randf_range(-0.08, 0.08)
-		var edge := outward * (RAMP_WIDTH * 0.5 + 0.01) + outward.cross(Vector3.UP) * along
-		var pivot := Node3D.new()
-		pivot.position = edge + Vector3(0.0, -RAMP_THICKNESS * 0.5, 0.0)
-		segment.add_child(pivot)
 		drape.position = Vector3(0.0, -length * 0.5, 0.0)
 		drape.material_override = drape_material
 		pivot.add_child(drape)
 		drapes.append(pivot)
 
-	# Amber fruiting caps on every few terraces, like lamps.
-	if rng.randf() < 0.45:
+	if rng.randf() < 0.2 + 0.5 * richness:
+		var at: Array = points[rng.randi_range(1, SAMPLES - 1)]
 		var cap := MeshInstance3D.new()
 		var cap_mesh := SphereMesh.new()
 		cap_mesh.radius = rng.randf_range(0.045, 0.075)
 		cap_mesh.height = cap_mesh.radius * 1.1
 		cap.mesh = cap_mesh
-		cap.position = Vector3(0.0, RAMP_THICKNESS * 0.6 + 0.05, 0.0) + outward * rng.randf_range(-0.08, 0.06)
+		cap.position = Vector3(at[0]) + Vector3.UP * (RAMP_THICKNESS * 0.6 + 0.05)
 		cap.scale = Vector3(1.0, 0.6, 1.0)
 		cap.material_override = cap_material
-		segment.add_child(cap)
-		var stalk := MeshInstance3D.new()
-		var stalk_mesh := CylinderMesh.new()
-		stalk_mesh.top_radius = 0.012
-		stalk_mesh.bottom_radius = 0.018
-		stalk_mesh.height = 0.06
-		stalk.mesh = stalk_mesh
-		stalk.position = cap.position + Vector3(0.0, -0.035, 0.0)
-		stalk.material_override = drape_material
-		segment.add_child(stalk)
+		node.add_child(cap)
 
 
-# The ramp's centre line: a helix whose radius shrinks with height and
-# wobbles, and which leans a little, so the tower reads as grown, not built.
-func _ramp_point(t: float, phase: float) -> Vector3:
-	var angle := _ramp_angle(t) + phase
-	var radius := lerpf(BASE_RADIUS, TOP_RADIUS, pow(t, 0.8)) * (1.0 + 0.14 * sin(t * TAU * 3.0 + 0.6 + phase * 1.7))
-	var lean := Vector3(0.16, 0.0, -0.08) * t * t
-	var rise := 0.3 + t * (HEIGHT - 0.4) + phase / TAU * (HEIGHT / TURNS) * 0.5
-	return Vector3(cos(angle) * radius, rise, sin(angle) * radius) + lean
+# Three strands twisting up through every terrace's centre.
+func _rebuild_column() -> void:
+	for child in column.get_children():
+		child.queue_free()
+	var path: Array[Vector3] = [Vector3.ZERO]
+	for centre in centres:
+		path.append(centre)
+	if centres.is_empty():
+		path.append(Vector3(0.0, BASE_LIFT, 0.0))
+	path.append(path[-1] + Vector3.UP * TERRACE_RISE)
+	var fibre := _material(Color("9a7a58"), 0.88)
+	for strand_index in range(3):
+		var points: Array[Vector3] = []
+		var steps := (path.size() - 1) * 5
+		for step in range(steps + 1):
+			var f := float(step) / float(steps) * float(path.size() - 1)
+			var low := mini(floori(f), path.size() - 2)
+			var along: Vector3 = path[low].lerp(path[low + 1], f - float(low))
+			var t := along.y / maxf(0.01, path[-1].y)
+			var angle := TAU * float(strand_index) / 3.0 + t * TAU * 1.6
+			var twist := lerpf(0.26, 0.07, t)
+			points.append(along + Vector3(cos(angle), 0.0, sin(angle)) * twist)
+		var strand := MeshInstance3D.new()
+		strand.mesh = _tube(points, 0.07, 0.028)
+		strand.material_override = fibre
+		column.add_child(strand)
 
 
-func _ramp_angle(t: float) -> float:
-	return t * TAU * TURNS
-
-
-# A flat band swept along the helix between t0 and t1, in segment-local space.
-func _ramp_mesh(t0: float, t1: float, origin: Vector3, phase: float) -> ArrayMesh:
+func _band_mesh(points: Array, width: float) -> ArrayMesh:
 	var tool := SurfaceTool.new()
 	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var rings: Array = []
-	for step in range(SAMPLES_PER_SEGMENT + 1):
-		var t := lerpf(t0, t1, float(step) / float(SAMPLES_PER_SEGMENT))
-		var centre := _ramp_point(t, phase) - origin
-		var outward := Vector3(cos(_ramp_angle(t) + phase), 0.0, sin(_ramp_angle(t) + phase))
-		var width := RAMP_WIDTH * lerpf(1.0, 0.65, t)
-		var half := RAMP_THICKNESS * 0.5
+	var half := RAMP_THICKNESS * 0.5
+	for point in points:
+		var centre: Vector3 = point[0]
+		var outward: Vector3 = point[1]
 		var outer := centre + outward * width * 0.5
 		var inner := centre - outward * width * 0.5
 		rings.append([inner + Vector3.UP * half, outer + Vector3.UP * half, outer - Vector3.UP * half, inner - Vector3.UP * half, outward])

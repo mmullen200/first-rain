@@ -158,13 +158,21 @@ Question: does the colony read as a fungus farmer whose success you can see from
 
 The colony no longer eats what its workers bring home. Every nine ticks it tends the pile on its nest into a **garden** held in the colony's own state (`animal_simulation.gd`, `_colony_tend`): up to 0.06 of carried plant or hoodoo matter moves into the garden, the colony eats a share of the garden (1% plus up to 2% more when hungry), returning most of it to the ground as nutrients, and 0.5% of the garden seeds living fungus onto the nest ground. A founding or re-waking queen plants a 0.06 pellet of the old fungus. The garden therefore settles at a size set by how much food comes home: a colony living off one hoodoo holds about 0.05, one with watered plants in reach grows far larger, and one with nothing to bring home eats its garden down. A colony stays while its garden holds 0.02 or more; below that it falls back on nearby wild fungus and then seals itself back into its hoodoo. Every transfer is conservation-checked; animal snapshot version is now 8.
 
-Over the nest stands the **hanging garden** (`garden_spire.gd`): two ramps winding through each other up a twisted three-strand column, about 3.4 m tall at full size, with glowing violet fungus beds along each terrace, strands of fungus hanging from the edges, amber fruiting caps and thin ribs that keep it open to the air. It is as tall as the garden is large (full at 0.3) and rises or sinks slowly as the garden changes, so a thriving colony is visible from across the basin and a failing one visibly shrinks. The spire is presentation only; nothing about its shape feeds back into the simulation yet (no shade, no harvesting from it).
+Over the nest stands the **hanging garden** (`garden_spire.gd`): two ramps winding through each other up a twisted three-strand column, with glowing violet fungus beds, strands of fungus hanging from the edges, amber fruiting caps and thin ribs that keep it open to the air. It grows **like tree rings**, so no two colonies grow the same tower. Every 0.013 of garden lays one terrace (up to 14, about 3.5 m), one per tending, and each terrace is laid from a record the colony keeps in its authoritative state (`_grow_colony_terraces`, animal snapshot version 9):
+
+- **Heading:** the terrace reaches out toward where recent food came from, taken from workers' recent deliveries weighted by amount. A colony that changes food source twists at that height.
+- **Richness:** recent intake against 0.08. Plenty lays wide terraces with long hanging strands and more beds; lean times lay narrow, pinched ones, so a near-failure leaves a thin waist.
+- **Hoodoo share:** rust-coloured terraces when the colony lived on hoodoo, pale green-tan when it lived on cut plants.
+- **Damp heading:** the spine drifts toward the dampest neighbouring cell.
+- **Seed:** from the nest cell, ring index and tick, for small irregularities.
+
+A terrace is lost from the top only once the garden falls 1.5 rings below the level that laid it, so a garden wobbling around a threshold does not flicker. A regrown tower records its new circumstances, so it comes back different. The queen's pellet lays the first plain rings, before any food has come home. A colony living off one hoodoo shows about four terraces; the full tower needs plenty of plants in reach. The spire is presentation only; nothing about its shape feeds back into the simulation yet (no shade, no harvesting from it).
 
 **Playtest gate:** without F9, the player can tell a thriving colony from a struggling one by its garden, and says the colony is growing fungus rather than eating plants.
 
 ## Queen waking start
 
-Starts beside the first queen's hoodoo with a watered fungus garden already growing, to watch a queen stir, open her chamber and found the colony without the long setup:
+Starts beside the first queen's hoodoo with a watered fungus garden already growing and a damp planted patch a few cells to one side, to watch a queen stir, open her chamber and found the colony without the long setup:
 
 ```sh
 /Applications/Godot.app/Contents/MacOS/Godot --path prototypes/godot-first-interaction -- --queen-waking

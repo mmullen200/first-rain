@@ -7,7 +7,7 @@ extends RefCounted
 # observe snapshots/events. Species choose intentions internally; presentation
 # nodes never decide ecological outcomes.
 
-const SNAPSHOT_VERSION := 8
+const SNAPSHOT_VERSION := 9
 const JUVENILE_MATURATION_TICKS := 1800
 const PARENT_SENSE_RADIUS := 4
 const PARENT_MEMORY_TICKS := 120
@@ -33,6 +33,15 @@ const COLONY_GARDEN_SPILL := 0.005
 const COLONY_GARDEN_EAT_SHARE := 0.01
 const COLONY_GARDEN_HUNGRY_SHARE := 0.02
 const COLONY_FOUNDING_PELLET := 0.06
+# The hanging garden grows like tree rings: every COLONY_GARDEN_PER_TERRACE of
+# garden lays one terrace, which records where the food was coming from, how
+# rich it was, how much of it was hoodoo, and which side was dampest. Terraces
+# are laid and lost one per tending, from the top.
+const COLONY_GARDEN_PER_TERRACE := 0.013
+const COLONY_MAX_TERRACES := 14
+const COLONY_TERRACE_HOLD := 1.5
+const COLONY_RICH_INTAKE := 0.08
+const COLONY_INTAKE_MEMORY := 0.9
 # Old hoodoo matter is hard: each trip chips off only a crumb, so a spire
 # takes a long time to come down.
 const COLONY_HOODOO_LOAD := 0.0006
@@ -110,6 +119,10 @@ func register_agent(species: String, stable_id: String, initial_state := {}) -> 
 		"parent_memory_ticks": int(initial_state.get("parent_memory_ticks", 0)),
 		"brood": float(initial_state.get("brood", 0.0)),
 		"garden": float(initial_state.get("garden", COLONY_FOUNDING_PELLET if species == "colony" else 0.0)),
+		"terraces": initial_state.get("terraces", []).duplicate(true),
+		"food_intake": 0.0,
+		"hoodoo_intake": 0.0,
+		"food_direction": Vector2.ZERO,
 		"pollen_load": float(initial_state.get("pollen_load", 0.0)),
 		"pollen_donor": initial_state.get("pollen_donor", Vector2i(-1, -1)),
 		"pollen_kind": String(initial_state.get("pollen_kind", "")),
@@ -813,12 +826,69 @@ func _colony_tend(agent_id: String) -> void:
 	garden -= spilled
 	_check_transfer(spilled, float(spill.get("fungus", 0.0)), "%s_garden_to_ground" % agent_id)
 	agent["garden"] = maxf(0.0, garden)
+	_grow_colony_terraces(agent, home_cell)
+	agent["food_intake"] = float(agent["food_intake"]) * COLONY_INTAKE_MEMORY
+	agent["hoodoo_intake"] = float(agent["hoodoo_intake"]) * COLONY_INTAKE_MEMORY
+	agent["food_direction"] = Vector2(agent["food_direction"]) * COLONY_INTAKE_MEMORY
 	agent["hunger"] = maxf(0.0, float(agent["hunger"]) - eaten * 5.0)
 	agent["brood"] = minf(1.0, float(agent["brood"]) + metabolic_loss * 0.5)
 	agent["state"] = "tending garden"
 	agent["move_cooldown"] = 8
 	agents[agent_id] = agent
 	_emit("organism.colony_garden_tended", agent_id, {"cell": home_cell, "tended": tended, "eaten": eaten, "nutrients": deposited, "metabolic_loss": metabolic_loss, "spilled_fungus": spilled, "garden": agent["garden"]})
+
+
+# Remember recent deliveries: how much, how much of it was hoodoo, and from
+# which direction, weighted by amount.
+func _record_colony_intake(agent: Dictionary, worker: Dictionary, amount: float) -> void:
+	agent["food_intake"] = float(agent["food_intake"]) + amount
+	if String(worker["resource"]) == "old_matter":
+		agent["hoodoo_intake"] = float(agent["hoodoo_intake"]) + amount
+	var offset := Vector2(Vector2i(worker.get("source_cell", agent["home_cell"])) - Vector2i(agent["home_cell"]))
+	if offset.length() > 0.0:
+		agent["food_direction"] = Vector2(agent["food_direction"]) + offset.normalized() * amount
+
+
+# One terrace laid or lost per tending, so the tower rises and falls a ring at
+# a time and each ring records the colony's circumstances when it was laid.
+func _grow_colony_terraces(agent: Dictionary, home_cell: Vector2i) -> void:
+	var terraces: Array = agent["terraces"]
+	var rings_worth := float(agent["garden"]) / COLONY_GARDEN_PER_TERRACE
+	# A ring is only lost once the garden falls well below the level that laid
+	# it, so a garden wobbling around a threshold doesn't flicker its top.
+	if rings_worth < float(terraces.size()) - COLONY_TERRACE_HOLD:
+		terraces.pop_back()
+		return
+	if mini(COLONY_MAX_TERRACES, floori(rings_worth)) <= terraces.size():
+		return
+	var intake := float(agent["food_intake"])
+	var direction := Vector2(agent["food_direction"])
+	var seed := hash([home_cell.x, home_cell.y, terraces.size(), tick])
+	var heading: float
+	if direction.length() > 0.000001:
+		heading = direction.angle()
+	elif not terraces.is_empty():
+		heading = float(terraces[-1]["heading"])
+	else:
+		heading = float(seed % 6283) / 1000.0
+	terraces.append({
+		"heading": heading,
+		"richness": clampf(intake / COLONY_RICH_INTAKE, 0.0, 1.0),
+		"hoodoo_share": clampf(float(agent["hoodoo_intake"]) / intake, 0.0, 1.0) if intake > 0.000001 else 0.0,
+		"damp_heading": _dampest_heading(home_cell),
+		"seed": seed
+	})
+
+
+func _dampest_heading(cell: Vector2i) -> float:
+	var best := Vector2i(1, 0)
+	var best_moisture := -1.0
+	for offset in [Vector2i(1, 0), Vector2i(1, 1), Vector2i(0, 1), Vector2i(-1, 1), Vector2i(-1, 0), Vector2i(-1, -1), Vector2i(0, -1), Vector2i(1, -1)]:
+		var moisture: float = ecology.resource_amount(_bounded_cell(cell + offset), "moisture")
+		if moisture > best_moisture:
+			best_moisture = moisture
+			best = offset
+	return Vector2(best).angle()
 
 
 # Workers and scent belong to the colony snapshot. No scene node selects food.
@@ -832,6 +902,7 @@ func _reset_colony_workers(agent: Dictionary) -> void:
 			"cell": home, "previous_cell": home, "heading": DIRECTIONS[index % 8],
 			"phase": "returning" if load > 0.0 else "searching", "load": load,
 			"resource": String(old_workers[index]["resource"]) if index < old_workers.size() else "",
+			"source_cell": old_workers[index].get("source_cell", home) if index < old_workers.size() else home,
 			"path": [home], "cooldown": index % COLONY_STEP_TICKS, "move_ticks": COLONY_STEP_TICKS,
 			"scout": index % 6 == 0, "following": false})
 	agent["workers"] = workers
@@ -888,6 +959,7 @@ func _step_colony(agent_id: String) -> void:
 					worker["load"] = 0.0
 				_check_transfer(offered, deposited + float(worker["load"]), "%s_worker_to_hive" % worker["id"])
 				if deposited > 0.0:
+					_record_colony_intake(agent, worker, deposited)
 					_emit("organism.colony_plant_returned", agent_id, {"worker_id": worker["id"], "home_cell": home, "source_resource": worker["resource"], "amount": deposited})
 				if float(worker["load"]) <= 0.000001 and not bool(agent["recalling"]):
 					worker["phase"] = "searching"
@@ -903,6 +975,7 @@ func _step_colony(agent_id: String) -> void:
 		if cell != home and ecology.resource_amount(cell, resource) >= COLONY_LOAD:
 			var gathered: float = ecology.consume_resource(cell, resource, COLONY_LOAD)
 			worker["load"] = gathered
+			worker["source_cell"] = cell
 			worker["resource"] = resource
 			_begin_colony_return(worker, home)
 			_check_transfer(gathered, float(worker["load"]), "%s_plant_to_worker" % worker["id"])
@@ -914,6 +987,7 @@ func _step_colony(agent_id: String) -> void:
 			var broken: float = ecology.consume_resource(cell, "old_matter", COLONY_HOODOO_LOAD)
 			worker["load"] = broken
 			worker["resource"] = "old_matter"
+			worker["source_cell"] = cell
 			_begin_colony_return(worker, home)
 			_check_transfer(broken, float(worker["load"]), "%s_hoodoo_to_worker" % worker["id"])
 			_emit("organism.colony_hoodoo_gathered", agent_id, {"worker_id": worker["id"], "cell": cell, "amount": broken, "remaining": ecology.resource_amount(cell, "old_matter"), "home_cell": home, "followed_trail": worker["following"]})

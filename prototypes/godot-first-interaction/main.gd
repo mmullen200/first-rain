@@ -45,10 +45,8 @@ const QUEEN_WAKE_FUNGUS := 0.01
 const COLONY_GARDEN_FUNGUS := 0.004
 const QUEEN_SCENT_RADIUS := 2
 const QUEEN_CHAMBER_OPENING_OBSERVATIONS := 5
-# A colony stays while its tended garden holds; the spire over the nest stands
-# full at COLONY_GARDEN_FULL.
+# A colony stays while its tended garden holds.
 const COLONY_GARDEN_KEEP := 0.02
-const COLONY_GARDEN_FULL := 0.3
 const ANIMAL_SETTLEMENTS := {
 	"colony:1": "colony",
 	"vector:1": "vector",
@@ -392,6 +390,18 @@ func _seed_queen_waking_fixture() -> void:
 				continue
 			ecology.add_resources(cell, {"dead_biomass": 0.4, "fungus": 0.2})
 			ecology.moisture[y * ecology.WIDTH + x] = 0.6
+	# A damp planted patch off to one side, so the colony that wakes has food
+	# coming from one direction and its garden has a history to record.
+	for y in range(queen.y - 1, queen.y + 2):
+		for x in range(queen.x + 3, queen.x + 5):
+			var cell := Vector2i(x, y)
+			if cell in hoodoo_field.hoodoo_cells or not ecology.is_inside_basin(cell):
+				continue
+			var index: int = y * ecology.WIDTH + x
+			ecology.add_resources(cell, {"moss": 0.5, "rhizome": 0.4, "nutrients": 0.3})
+			ecology.moisture[index] = 0.9
+			ecology.temperature[index] = 0.4
+			ecology.toxicity[index] = 0.03
 	ecology_started = true
 	var stand := queen + Vector2i(1, 2)
 	var world: Vector2 = ecology.world_position(stand.x, stand.y)
@@ -416,7 +426,7 @@ func _seed_hoodoo_devouring_fixture() -> void:
 		ecology.moisture[index] = 0.55
 		ecology.temperature[index] = 0.4
 		ecology.toxicity[index] = 0.05
-	animal_simulation.register_agent("colony", "colony:1", {"cell": home, "garden": 0.35})
+	animal_simulation.register_agent("colony", "colony:1", {"cell": home})
 	ecology_started = true
 	var stand := home + Vector2i(1, 2)
 	var world: Vector2 = ecology.world_position(stand.x, stand.y)
@@ -2358,9 +2368,8 @@ func _update_ecological_animal_markers() -> void:
 			body.scale = Vector3(1.5, 0.6, 1.0) if int(agent["hunt_cooldown"]) > AnimalSimulation.HUNT_RECOVERY_TICKS - 4 else Vector3.ONE
 		if stable_id == "colony:1":
 			_update_colony_worker_stream(agent)
-			var garden_growth := clampf(float(agent.get("garden", 0.0)) / COLONY_GARDEN_FULL, 0.0, 1.0)
-			garden_spire.set_growth(garden_growth)
-			label.position.y = 0.58 + GardenSpire.HEIGHT * garden_spire.shown_growth
+			garden_spire.set_terraces(agent.get("terraces", []))
+			label.position.y = 0.33 + garden_spire.top_height()
 	_update_colony_prospect_visual()
 
 
