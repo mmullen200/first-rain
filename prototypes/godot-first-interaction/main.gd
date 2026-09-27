@@ -19,6 +19,9 @@ const VOLUNTARY_RECOVERY_SECONDS := 2.0
 const FORCED_RECOVERY_SECONDS := 10.0
 const LAST_WATER_HOLD_SECONDS := 0.75
 const SHIP_WATER_PRODUCTION_SECONDS := 12.0
+# Placeholder shown on the ship screen only: the reclaimer does not yet wear out.
+const RECLAIMER_DISPLAY_WEAR_PER_SECOND := 1.0 / 5400.0
+const SHIP_SCREEN_REACH := 2.4
 const MAX_WATER_DOSES := 10
 const HABITAT_SEARCH_CELLS_PER_TICK := 48
 const FIELD_TIME_SCALE := 12.0
@@ -69,6 +72,9 @@ var astronaut: CharacterBody3D
 var astronaut_figure: Node3D
 var hoodoo_field: Node3D
 var camera: Camera3D
+var spaceplane: Node3D
+var consulting_ship_screen := false
+var ship_screen_refresh := 0.0
 var ecology
 var animal_simulation
 var weather_simulation
@@ -138,6 +144,7 @@ var shade_placed_cell := Vector2i(-1, -1)
 var clump_marker: MeshInstance3D
 var carried_clump: Dictionary = {}
 var ship_water_production_elapsed := 0.0
+var reclaimer_running_time := 0.0
 var presence_root: Node3D
 var presence_target := Vector3(24.0, 1.3, -3.5)
 var presence_signal_ring: MeshInstance3D
@@ -258,7 +265,7 @@ func _ready() -> void:
 		_set_status("Violet fungus is spreading at the foot of a hoodoo. The dark plug at its base looks like a sealed door.", 5.0)
 	if "--hoodoo-devouring" in OS.get_cmdline_user_args():
 		_set_status("A colony has opened its nest high on the Headwall, a stone's throw from the great spire over the dry spring.", 5.0)
-	_set_status("A fixed mound stands between separated living patches." if "--colony-foraging" in OS.get_cmdline_user_args() else "The crash has stopped. The ship is dead, but an emergency cache still blinks beneath the broken wing.")
+	_set_status("A fixed mound stands between separated living patches." if "--colony-foraging" in OS.get_cmdline_user_args() else "The crash has stopped. The ship is dead, but an emergency cache still blinks inside its open cabin.")
 	if "--predator-ecology" in OS.get_cmdline_user_args():
 		_set_status("Red tracks cross the feeding ground. Farther east, another predator noses through dark remains.", 5.0)
 	if "--vector-pollination" in OS.get_cmdline_user_args():
@@ -486,6 +493,7 @@ func _physics_process(delta: float) -> void:
 	_update_exposure(delta)
 	_update_hunger(delta)
 	_update_ship_water_production(delta)
+	_update_ship_screen(delta)
 	_update_ecology(delta)
 	_update_ecology_grid(delta)
 	_update_grazer(delta)
@@ -584,26 +592,25 @@ func _build_world() -> void:
 	# Wreckage sits on the surveyed 6.9 m flank above the Shelter Bowl.
 	var wreck_world: Vector2 = ecology.world_position(EcologyGridModel.WRECK_CELL.x, EcologyGridModel.WRECK_CELL.y)
 	var wreck_height: float = ecology.terrain_height(EcologyGridModel.WRECK_CELL)
-	# The spaceplane lies just west of the start, nose toward the camera and
-	# clear of the scanner panel. It is mirrored so the side that lost its wing
-	# faces the start, with the torn wing propped over the emergency cache.
-	var spaceplane: Node3D = WreckSpaceplane.new()
-	spaceplane.position = Vector3(wreck_world.x - 4.2, wreck_height, wreck_world.y + 0.9)
-	spaceplane.rotation.y = 0.52
-	spaceplane.scale.x = -spaceplane.scale.x
+	# The spaceplane lies northwest of the start along the slope's contour, so
+	# its cabin floor is nearly level, with its open hatch facing the start and
+	# the camera. The emergency cache blinks at the back of the cabin.
+	spaceplane = WreckSpaceplane.new()
+	var spaceplane_world := wreck_world + Vector2(-4.5, -2.0)
+	spaceplane.position = Vector3(spaceplane_world.x, _terrain_surface_height(spaceplane_world) + 0.05, spaceplane_world.y)
+	spaceplane.rotation.y = -1.15
 	add_child(spaceplane)
-	var cache_world := Vector2(wreck_world.x - 0.15, wreck_world.y + 1.38)
-	var cache_height: float = ecology.terrain_height(ecology.world_to_cell(cache_world))
-	emergency_cache = _create_box(Vector3(cache_world.x, cache_height + 0.25, cache_world.y), Vector3(0.9, 0.45, 0.62), Color("8e7048"), Vector3(0.0, 0.16, 0.0))
+	var cache_position: Vector3 = spaceplane.cabin_point(Vector3(0.5, WreckSpaceplane.FLOOR_Y, -1.4))
+	emergency_cache = _create_box(cache_position + Vector3(0.0, 0.25, 0.0), Vector3(0.9, 0.45, 0.62), Color("8e7048"), Vector3(0.0, spaceplane.rotation.y + 0.16, 0.0))
 	emergency_cache.name = "EmergencyCache"
 	var cache_light := OmniLight3D.new()
 	cache_light.name = "CacheBeacon"
-	cache_light.position = Vector3(cache_world.x, cache_height + 0.62, cache_world.y)
+	cache_light.position = cache_position + Vector3(0.0, 0.62, 0.0)
 	cache_light.light_color = Color("e7a34f")
 	cache_light.light_energy = 1.5
 	cache_light.omni_range = 1.35
 	add_child(cache_light)
-	_create_world_label("EMERGENCY CACHE", Vector3(cache_world.x, cache_height + 0.68, cache_world.y), Color("ffd18b"), 0.0055)
+	_create_world_label("EMERGENCY CACHE", cache_position + Vector3(0.0, 0.68, 0.0), Color("ffd18b"), 0.0055)
 
 	# The sheltered hollow reads through shade, darker ground, and surrounding stones.
 	var shelter_panel_color := Color("555b59")
@@ -1387,12 +1394,15 @@ func _move_astronaut(delta: float) -> void:
 		input.y += 1.0
 
 	input = input.normalized()
+	if consulting_ship_screen and input.length() > 0.1:
+		consulting_ship_screen = false
 	var previous_flat := Vector2(astronaut.position.x, astronaut.position.z)
 	astronaut.velocity = Vector3(input.x * WALK_SPEED, 0.0, input.y * WALK_SPEED)
 	astronaut.move_and_slide()
 	astronaut.position.x = clamp(astronaut.position.x, WORLD_MIN_X, WORLD_MAX_X)
 	astronaut.position.z = clamp(astronaut.position.z, WORLD_MIN_Z, WORLD_MAX_Z)
-	astronaut.position.y = _terrain_surface_height(Vector2(astronaut.position.x, astronaut.position.z)) + 0.02
+	var ground := _terrain_surface_height(Vector2(astronaut.position.x, astronaut.position.z)) + 0.02
+	astronaut.position.y = spaceplane.standing_height(astronaut.position, ground)
 	visited_zones[_current_zone()] = true
 	if delta > 0.0:
 		# Animate from actual travel so walking into a wall or the map edge stands still.
@@ -1428,6 +1438,73 @@ func _update_camera() -> void:
 	var focus := astronaut.global_position + Vector3(0.0, 0.55, 0.0)
 	camera.global_position = focus + Vector3(8.8, 10.8, 10.5)
 	camera.look_at(focus, Vector3.UP)
+	# Inside the spaceplane the view moves to a camera in the cabin.
+	if spaceplane == null:
+		return
+	var inside: bool = spaceplane.is_inside(astronaut.global_position)
+	if not inside:
+		consulting_ship_screen = false
+	var active: Camera3D = camera
+	if consulting_ship_screen:
+		active = spaceplane.console_camera
+	elif inside:
+		active = spaceplane.interior_camera
+	if not active.current:
+		active.make_current()
+	# Clear the readouts overlapping the screen while it is being consulted.
+	for panel in [scanner_card, water_label, exposure_label, hunger_label, time_label, ecosystem_label, weather_label, zone_label]:
+		if panel != null:
+			panel.visible = not consulting_ship_screen
+
+
+func _near_ship_screen() -> bool:
+	return spaceplane.is_inside(astronaut.global_position) and _flat_distance(astronaut.global_position, spaceplane.screen_position()) < SHIP_SCREEN_REACH
+
+
+func _toggle_ship_screen() -> void:
+	consulting_ship_screen = not consulting_ship_screen
+	if consulting_ship_screen:
+		_refresh_ship_screen()
+		_set_status("The cockpit screen still runs on the reclaimer's power. Move to step back.")
+
+
+func _update_ship_screen(delta: float) -> void:
+	ship_screen_refresh -= delta
+	if ship_screen_refresh > 0.0 or not spaceplane.is_inside(astronaut.global_position):
+		return
+	ship_screen_refresh = 0.25
+	_refresh_ship_screen()
+
+
+func _refresh_ship_screen() -> void:
+	var integrity := clampf(1.0 - reclaimer_running_time * RECLAIMER_DISPLAY_WEAR_PER_SECOND, 0.0, 1.0)
+	var wear_per_minute := RECLAIMER_DISPLAY_WEAR_PER_SECOND * 60.0
+	var hunger_text := "FED"
+	if hunger >= 75.0:
+		hunger_text = "SURVIVAL PRESSURE"
+	elif hunger >= 45.0:
+		hunger_text = "MEAL NEEDED SOON"
+	var weather := "%s  HUM %d%%" % [String(weather_simulation.state).replace("_", " "), roundi(weather_simulation.humidity * 100.0)]
+	if disturbance_state == "warning":
+		weather = "DUST FRONT IN %dS" % ceili(disturbance_timer)
+	elif disturbance_state == "active":
+		weather = "DUST FRONT OVERHEAD"
+	spaceplane.show_status({
+		"field_time": field_time * FIELD_TIME_SCALE,
+		"reclaimer_running": cache_opened,
+		"next_dose": 1.0 if water_doses >= MAX_WATER_DOSES else ship_water_production_elapsed / SHIP_WATER_PRODUCTION_SECONDS,
+		"dose_seconds": SHIP_WATER_PRODUCTION_SECONDS,
+		"water": water_doses,
+		"water_capacity": MAX_WATER_DOSES,
+		"integrity": integrity,
+		"wear_per_minute": wear_per_minute,
+		"shutdown_minutes": integrity / wear_per_minute,
+		"exposure": exposure,
+		"hunger": hunger_text,
+		"rations": ration_packs,
+		"fresh_food": fresh_food,
+		"weather": weather,
+	})
 
 
 func _update_nearby_interactions() -> void:
@@ -1482,6 +1559,8 @@ func _update_nearby_interactions() -> void:
 			prompt_label.text = "The film is unusual, but bare eyes reveal little."
 	elif near_refuge:
 		prompt_label.text = "F  scan standing water" if refuge_watered else "F  scan the bare depression     SPACE  commit water here"
+	elif _near_ship_screen():
+		prompt_label.text = "Move to step back from the ship screen" if consulting_ship_screen else "E  consult the ship status screen"
 	elif cache_opened and _at_wreck() and exposure > 0.5:
 		prompt_label.text = "E  recover at the wreck while the ecosystem continues"
 	elif cache_opened and _at_wreck():
@@ -1521,7 +1600,7 @@ func _update_hunger(delta: float) -> void:
 
 
 func _at_wreck() -> bool:
-	return _flat_distance(astronaut.global_position, Vector3(-5.4, 0.0, -3.1)) < 2.55
+	return _flat_distance(astronaut.global_position, Vector3(-5.4, 0.0, -3.1)) < 2.55 or (spaceplane != null and spaceplane.is_inside(astronaut.global_position))
 
 
 func _toggle_field_review() -> void:
@@ -2998,6 +3077,9 @@ func _interact() -> void:
 	if near_cache:
 		_open_emergency_cache()
 		return
+	if _near_ship_screen():
+		_toggle_ship_screen()
+		return
 	if nearest_harvest_cell.x >= 0:
 		_harvest_fruiting()
 		return
@@ -3178,9 +3260,11 @@ func _update_ship_water_production(delta: float) -> void:
 	if not cache_opened:
 		return
 	if water_doses >= MAX_WATER_DOSES:
+		reclaimer_running_time += delta
 		water_doses = MAX_WATER_DOSES
 		ship_water_production_elapsed = 0.0
 		return
+	reclaimer_running_time += delta
 	ship_water_production_elapsed += delta
 	while ship_water_production_elapsed >= SHIP_WATER_PRODUCTION_SECONDS and water_doses < MAX_WATER_DOSES:
 		ship_water_production_elapsed -= SHIP_WATER_PRODUCTION_SECONDS
