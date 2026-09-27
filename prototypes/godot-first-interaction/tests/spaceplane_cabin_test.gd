@@ -35,21 +35,41 @@ func _run() -> void:
 		_fail("the emergency cache is not inside the cabin")
 		return
 
-	# At the cockpit, E consults the ship screen and moving steps back.
-	scene.astronaut.position = plane.cabin_point(Vector3(0.0, plane.FLOOR_Y, 0.2))
+	# Inside, W walks away from the cabin camera, toward the cockpit.
+	scene.astronaut.position = plane.cabin_point(Vector3(0.0, plane.FLOOR_Y, -1.2))
 	await physics_frame
+	var before_z: float = plane._world_to_body(scene.astronaut.global_position).z
+	_press(KEY_W, true)
+	for i in range(20):
+		await physics_frame
+	_press(KEY_W, false)
+	await physics_frame
+	var walked: Vector3 = plane._world_to_body(scene.astronaut.global_position) - Vector3(0.0, 0.0, before_z)
+	if walked.z < 0.3 or absf(walked.x) > 0.1:
+		_fail("inside the cabin W does not walk toward the cockpit: %s" % walked)
+		return
+
+	# Walking up to the cockpit brings up the ship screen; stepping back puts it away.
 	scene._open_emergency_cache()
-	scene._interact()
+	_press(KEY_W, true)
+	for i in range(120):
+		await physics_frame
+		if scene.consulting_ship_screen:
+			break
+	_press(KEY_W, false)
+	await physics_frame
 	await physics_frame
 	if not scene.consulting_ship_screen or not plane.console_camera.current:
-		_fail("E at the cockpit did not bring up the ship screen")
+		_fail("walking up to the cockpit did not bring up the ship screen")
 		return
 	_press(KEY_S, true)
-	for i in range(3):
+	for i in range(60):
 		await physics_frame
 	_press(KEY_S, false)
-	if scene.consulting_ship_screen:
-		_fail("moving did not step back from the ship screen")
+	await physics_frame
+	await physics_frame
+	if scene.consulting_ship_screen or not plane.interior_camera.current:
+		_fail("stepping back did not return from the ship screen to the cabin view")
 		return
 	print("PASS: the spaceplane cabin is entered through its hatch, shelters the astronaut, holds the cache, and shows the ship screen")
 	quit(0)

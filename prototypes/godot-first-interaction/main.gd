@@ -21,7 +21,10 @@ const LAST_WATER_HOLD_SECONDS := 0.75
 const SHIP_WATER_PRODUCTION_SECONDS := 12.0
 # Placeholder shown on the ship screen only: the reclaimer does not yet wear out.
 const RECLAIMER_DISPLAY_WEAR_PER_SECOND := 1.0 / 5400.0
-const SHIP_SCREEN_REACH := 2.4
+# Walking this close to the cockpit screen brings it up; stepping back past
+# the wider distance puts it away, so the view does not flicker at the edge.
+const SHIP_SCREEN_REACH := 2.2
+const SHIP_SCREEN_RELEASE := 2.5
 const MAX_WATER_DOSES := 10
 const HABITAT_SEARCH_CELLS_PER_TICK := 48
 const FIELD_TIME_SCALE := 12.0
@@ -1394,10 +1397,16 @@ func _move_astronaut(delta: float) -> void:
 		input.y += 1.0
 
 	input = input.normalized()
-	if consulting_ship_screen and input.length() > 0.1:
-		consulting_ship_screen = false
+	# Inside the spaceplane, keys follow the cabin camera: W walks away from
+	# it, toward the cockpit. Outside they keep their fixed map directions.
+	var direction := Vector3(input.x, 0.0, input.y)
+	var view := get_viewport().get_camera_3d()
+	if spaceplane != null and view != null and view != camera:
+		var right := Vector3(view.global_basis.x.x, 0.0, view.global_basis.x.z).normalized()
+		var forward := Vector3(-view.global_basis.z.x, 0.0, -view.global_basis.z.z).normalized()
+		direction = right * input.x - forward * input.y
 	var previous_flat := Vector2(astronaut.position.x, astronaut.position.z)
-	astronaut.velocity = Vector3(input.x * WALK_SPEED, 0.0, input.y * WALK_SPEED)
+	astronaut.velocity = direction * WALK_SPEED
 	astronaut.move_and_slide()
 	astronaut.position.x = clamp(astronaut.position.x, WORLD_MIN_X, WORLD_MAX_X)
 	astronaut.position.z = clamp(astronaut.position.z, WORLD_MIN_Z, WORLD_MAX_Z)
@@ -1409,7 +1418,7 @@ func _move_astronaut(delta: float) -> void:
 		var travelled := Vector2(astronaut.position.x, astronaut.position.z).distance_to(previous_flat)
 		astronaut_figure.animate(delta, travelled / delta)
 	if input.length() > 0.1:
-		astronaut.rotation.y = lerp_angle(astronaut.rotation.y, atan2(input.x, input.y), 0.24)
+		astronaut.rotation.y = lerp_angle(astronaut.rotation.y, atan2(direction.x, direction.z), 0.24)
 	if analysis_lens_enabled:
 		var current_cell: Vector2i = ecology.world_to_cell(Vector2(astronaut.position.x, astronaut.position.z))
 		if current_cell != lens_anchor_cell:
@@ -1442,8 +1451,13 @@ func _update_camera() -> void:
 	if spaceplane == null:
 		return
 	var inside: bool = spaceplane.is_inside(astronaut.global_position)
-	if not inside:
+	var screen_distance := _flat_distance(astronaut.global_position, spaceplane.screen_position())
+	if not inside or screen_distance > SHIP_SCREEN_RELEASE:
 		consulting_ship_screen = false
+	elif screen_distance < SHIP_SCREEN_REACH and not consulting_ship_screen:
+		consulting_ship_screen = true
+		_refresh_ship_screen()
+		_set_status("The cockpit screen still runs on the reclaimer's power. Step back to leave it.")
 	var active: Camera3D = camera
 	if consulting_ship_screen:
 		active = spaceplane.console_camera
@@ -1455,17 +1469,6 @@ func _update_camera() -> void:
 	for panel in [scanner_card, water_label, exposure_label, hunger_label, time_label, ecosystem_label, weather_label, zone_label]:
 		if panel != null:
 			panel.visible = not consulting_ship_screen
-
-
-func _near_ship_screen() -> bool:
-	return spaceplane.is_inside(astronaut.global_position) and _flat_distance(astronaut.global_position, spaceplane.screen_position()) < SHIP_SCREEN_REACH
-
-
-func _toggle_ship_screen() -> void:
-	consulting_ship_screen = not consulting_ship_screen
-	if consulting_ship_screen:
-		_refresh_ship_screen()
-		_set_status("The cockpit screen still runs on the reclaimer's power. Move to step back.")
 
 
 func _update_ship_screen(delta: float) -> void:
@@ -1559,8 +1562,8 @@ func _update_nearby_interactions() -> void:
 			prompt_label.text = "The film is unusual, but bare eyes reveal little."
 	elif near_refuge:
 		prompt_label.text = "F  scan standing water" if refuge_watered else "F  scan the bare depression     SPACE  commit water here"
-	elif _near_ship_screen():
-		prompt_label.text = "Move to step back from the ship screen" if consulting_ship_screen else "E  consult the ship status screen"
+	elif consulting_ship_screen:
+		prompt_label.text = "Ship status screen     S  step back"
 	elif cache_opened and _at_wreck() and exposure > 0.5:
 		prompt_label.text = "E  recover at the wreck while the ecosystem continues"
 	elif cache_opened and _at_wreck():
@@ -3076,9 +3079,6 @@ func _water_nearby_patch() -> void:
 func _interact() -> void:
 	if near_cache:
 		_open_emergency_cache()
-		return
-	if _near_ship_screen():
-		_toggle_ship_screen()
 		return
 	if nearest_harvest_cell.x >= 0:
 		_harvest_fruiting()
