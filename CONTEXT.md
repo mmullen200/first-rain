@@ -129,7 +129,7 @@ A dam-building animal whose autonomous changes to water flow create and disrupt 
 _Avoid_: Beaver, dam tool, water generator
 
 **Wreck Shelter**:
-The compact area beneath and immediately around the wreck where the Astronaut can deliberate and recover while its remaining support functions endure, without extending that protection into the living basin.
+The compact area inside the wreck's cabin and immediately around the wreck where the Astronaut can deliberate and recover while its remaining support functions endure, without extending that protection into the living basin.
 _Avoid_: Base zone, safe level
 
 **Animal Stewardship**:
