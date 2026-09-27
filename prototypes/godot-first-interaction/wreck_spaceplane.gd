@@ -4,10 +4,13 @@ extends Node3D
 # The crashed spaceplane: a lifting-body shuttle with a white tiled upper hull,
 # black heat-shield belly and nose cap, a canted outboard wing each side and a
 # central tail fin. It came down nose-first and slewed onto its right side; the
-# right wing tore off and lies propped beside the hull. Presentation only: it
+# right wing tore off and leans against the hull. Presentation only: it
 # has no collision and no gameplay state. Nose faces local +Z, the ground is
-# y = 0, and the right side is local -X.
+# y = 0, and the right side is local -X. Dimensions below are drawn at model
+# scale and the whole wreck is enlarged by SIZE, so it is about 10.5 m long
+# and its cabin is tall enough to hold the astronaut.
 
+const SIZE := 1.75
 const LENGTH := 6.0
 const HALF_WIDTH := 1.1
 const TOP_HEIGHT := 0.95
@@ -32,6 +35,7 @@ var scorch_material: StandardMaterial3D
 
 func _init() -> void:
 	name = "WreckSpaceplane"
+	scale = Vector3.ONE * SIZE
 	hull_material = _material(Color.WHITE, 0.5)
 	hull_material.vertex_color_use_as_albedo = true
 	white_material = _material(HULL_WHITE, 0.55)
@@ -76,8 +80,8 @@ func _build() -> void:
 
 	var torn_wing := Node3D.new()
 	torn_wing.name = "TornWing"
-	torn_wing.position = Vector3(-2.35, 0.05, 0.35)
-	torn_wing.rotation = Vector3(0.0, 2.55, 0.42)
+	torn_wing.position = Vector3(-1.2, 1.1, 2.0)
+	torn_wing.rotation = Vector3(0.0, 2.55, -0.42)
 	add_child(torn_wing)
 	_build_wing(torn_wing, 1.0, 1.9, 0.22, 1.0)
 

@@ -584,11 +584,13 @@ func _build_world() -> void:
 	# Wreckage sits on the surveyed 6.9 m flank above the Shelter Bowl.
 	var wreck_world: Vector2 = ecology.world_position(EcologyGridModel.WRECK_CELL.x, EcologyGridModel.WRECK_CELL.y)
 	var wreck_height: float = ecology.terrain_height(EcologyGridModel.WRECK_CELL)
-	# The spaceplane lies just north of the start, nose toward the camera, with
-	# its torn right wing propped over the emergency cache.
+	# The spaceplane lies just west of the start, nose toward the camera and
+	# clear of the scanner panel. It is mirrored so the side that lost its wing
+	# faces the start, with the torn wing propped over the emergency cache.
 	var spaceplane: Node3D = WreckSpaceplane.new()
-	spaceplane.position = Vector3(wreck_world.x - 0.3, wreck_height, wreck_world.y - 1.45)
-	spaceplane.rotation.y = 1.32
+	spaceplane.position = Vector3(wreck_world.x - 4.2, wreck_height, wreck_world.y + 0.9)
+	spaceplane.rotation.y = 0.52
+	spaceplane.scale.x = -spaceplane.scale.x
 	add_child(spaceplane)
 	var cache_world := Vector2(wreck_world.x - 0.15, wreck_world.y + 1.38)
 	var cache_height: float = ecology.terrain_height(ecology.world_to_cell(cache_world))
