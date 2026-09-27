@@ -82,6 +82,8 @@ const AnimalSimulation = preload("res://animal_simulation.gd")
 const WeatherSimulation = preload("res://weather_simulation.gd")
 const AstronautFigure = preload("res://astronaut_figure.gd")
 const WreckSpaceplane = preload("res://wreck_spaceplane.gd")
+const VectorSwarm = preload("res://vector_swarm.gd")
+const GilaGlider = preload("res://gila_glider.gd")
 const HoodooField = preload("res://hoodoo_field.gd")
 const GardenSpire = preload("res://garden_spire.gd")
 const SleeperField = preload("res://sleeper_field.gd")
@@ -1165,7 +1167,9 @@ func _build_ecological_animal_markers() -> void:
 		marker.visible = false
 		var body: Node3D
 		if String(stable_id).begins_with("predator"):
-			body = _build_gila_glider(specification[1])
+			body = GilaGlider.new(specification[1])
+		elif String(stable_id).begins_with("vector"):
+			body = VectorSwarm.new()
 		else:
 			var shape := MeshInstance3D.new()
 			if stable_id == "colony:1":
@@ -1247,80 +1251,6 @@ func _build_ecological_animal_markers() -> void:
 	colony_prospect_label.outline_size = 7
 	colony_prospect_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	colony_prospect_root.add_child(colony_prospect_label)
-
-
-# The predator: a heavy, beaded lizard like a gila monster, black with
-# salmon bands, with a thick fat-storing tail and small wings folded along its
-# flanks. It cannot fly, only glide, and spreads the wings (named "Wings") only
-# while it glides in on a dust front or climbs back out. Faces +Z.
-func _build_gila_glider(band_color: Color) -> Node3D:
-	var lizard := Node3D.new()
-	lizard.name = "Lizard"
-	var dark := _material(Color("201a18"), 0.9)
-	var band := _material(band_color.lerp(Color("e07a5c"), 0.6), 0.85, Color("4a1a10"))
-	var parts := [
-		# [radius, scale, position, banded]: a low, wide body, a dark wedge
-		# of a head, and a tail almost as long again, thick where it joins.
-		[0.2, Vector3(1.05, 0.42, 1.55), Vector3(0.0, 0.0, 0.0), false],
-		[0.13, Vector3(1.1, 0.55, 1.35), Vector3(0.0, -0.01, 0.4), false],
-		[0.16, Vector3(1.0, 0.6, 1.8), Vector3(0.0, -0.03, -0.42), false],
-		[0.12, Vector3(1.0, 0.6, 1.8), Vector3(0.0, -0.05, -0.68), false],
-		[0.08, Vector3(1.0, 0.6, 1.9), Vector3(0.0, -0.07, -0.9), false],
-		[0.05, Vector3(1.0, 0.6, 2.0), Vector3(0.0, -0.08, -1.06), false],
-		# Beaded salmon blotches, broken and uneven rather than neat stripes.
-		[0.09, Vector3(1.3, 0.35, 0.8), Vector3(-0.07, 0.07, 0.18), true],
-		[0.08, Vector3(1.2, 0.35, 0.9), Vector3(0.08, 0.07, 0.02), true],
-		[0.1, Vector3(1.4, 0.35, 0.7), Vector3(-0.03, 0.07, -0.16), true],
-		[0.07, Vector3(1.0, 0.35, 0.8), Vector3(0.09, 0.06, -0.26), true],
-		[0.08, Vector3(1.5, 0.4, 0.7), Vector3(0.0, 0.03, -0.47), true],
-		[0.06, Vector3(1.5, 0.45, 0.8), Vector3(0.0, 0.0, -0.74), true],
-		[0.04, Vector3(1.5, 0.5, 0.9), Vector3(0.0, -0.04, -0.95), true],
-		[0.05, Vector3(1.2, 0.4, 1.0), Vector3(0.0, 0.05, 0.44), true],
-	]
-	for side in [-1.0, 1.0]:
-		for front in [-1.0, 1.0]:
-			# Sprawled legs, splayed out from the flanks.
-			parts.append([0.06, Vector3(2.0, 0.6, 0.9), Vector3(side * 0.25, -0.08, front * 0.17), false])
-			parts.append([0.04, Vector3(1.2, 0.5, 1.4), Vector3(side * 0.36, -0.12, front * 0.19 + 0.03), false])
-	for part in parts:
-		var piece := MeshInstance3D.new()
-		var mesh := SphereMesh.new()
-		mesh.radius = part[0]
-		mesh.height = part[0] * 2.0
-		mesh.radial_segments = 12
-		mesh.rings = 6
-		piece.mesh = mesh
-		piece.scale = part[1]
-		piece.position = part[2]
-		piece.material_override = band if part[3] else dark
-		lizard.add_child(piece)
-	var wings := Node3D.new()
-	wings.name = "Wings"
-	wings.position = Vector3(0.0, 0.07, 0.1)
-	for side in [-1.0, 1.0]:
-		var wing := MeshInstance3D.new()
-		var wing_mesh := SphereMesh.new()
-		wing_mesh.radius = 0.2
-		wing_mesh.height = 0.4
-		wing.mesh = wing_mesh
-		wing.scale = Vector3(1.0, 0.05, 0.6)
-		wing.position = Vector3(side * 0.24, 0.0, -0.02)
-		wing.material_override = _material(Color("5e2b22"), 0.8, Color("2a0c08"))
-		wing.set_meta("side", side)
-		wings.add_child(wing)
-	lizard.add_child(wings)
-	_set_wing_spread(lizard, 0.0)
-	return lizard
-
-
-# 0 folds the wings flat on the back; 1 spreads them out sideways to glide.
-func _set_wing_spread(lizard: Node3D, spread: float) -> void:
-	for wing in lizard.get_node("Wings").get_children():
-		var side: float = wing.get_meta("side")
-		wing.position = Vector3(side * lerpf(0.06, 0.3, spread), lerpf(0.04, 0.0, spread), lerpf(-0.08, -0.02, spread))
-		wing.rotation.z = side * lerpf(-0.12, -0.12, spread)
-		wing.rotation.y = side * lerpf(-0.35, 0.0, spread)
-		wing.scale = Vector3(lerpf(0.45, 1.2, spread), 0.05, lerpf(0.75, 0.6, spread))
 
 
 func _build_disturbance() -> void:
@@ -2799,11 +2729,12 @@ func _update_vector_markers(delta: float) -> void:
 		var height := 0.45 if agent["state"] == "feeding" else 0.9
 		marker.position = marker.position.move_toward(Vector3(world.x, _terrain_surface_height(world) + height, world.y), delta * 2.0)
 		marker.position.y = maxf(marker.position.y, _terrain_surface_height(Vector2(marker.position.x, marker.position.z)) + 0.4)
-		var body: MeshInstance3D = marker.get_child(0)
+		var swarm: Node3D = marker.get_child(0)
 		var color := Color("f5b0de") if agent["pollen_kind"] == "canopy" and agent["pollen_load"] > 0.0 else Color("e9d36a")
-		if body.get_meta("pollen_color", Color.TRANSPARENT) != color:
-			body.material_override = _material(color, 0.6)
-			body.set_meta("pollen_color", color)
+		if swarm.get_meta("pollen_color", Color.TRANSPARENT) != color:
+			swarm.set_color(color)
+			swarm.set_meta("pollen_color", color)
+		swarm.animate(delta, marker.global_position, agent["state"] == "feeding")
 
 
 func _add_grazer_marker(id: String) -> void:
@@ -2855,6 +2786,8 @@ func _update_ground_animal_markers(delta: float) -> void:
 		var speed := 1.15 if species == "predator" and String(agent["state"]) in ["hunting", "retreating"] else GROUND_ANIMAL_MOVE_SPEED
 		if not predator_flights.has(id):
 			_move_ground_actor(marker, world, 0.25, speed, delta)
+			if species == "predator":
+				marker.get_child(0).animate(delta)
 	_update_predator_flights(delta)
 
 
@@ -2865,7 +2798,7 @@ func _update_predator_flights(delta: float) -> void:
 	for stable_id in predator_flights.keys():
 		var flight: Dictionary = predator_flights[stable_id]
 		var marker: Node3D = animal_markers[stable_id]
-		var lizard: Node3D = marker.get_child(0)
+		var lizard = marker.get_child(0)
 		var remaining := float(flight["time"])
 		var landing := remaining > 0.0
 		remaining = maxf(0.0, remaining - delta) if landing else minf(0.0, remaining + delta)
@@ -2874,13 +2807,18 @@ func _update_predator_flights(delta: float) -> void:
 		var along := ground + Vector2(-PREDATOR_GLIDE_RUN * airborne if landing else PREDATOR_GLIDE_RUN * airborne, 0.0)
 		marker.visible = true
 		marker.position = Vector3(along.x, _terrain_surface_height(along) + 0.25 + airborne * PREDATOR_GLIDE_HEIGHT, along.y)
+		# Head first along the glide path: nose down coming in, up climbing out,
+		# with a slow bank from side to side while airborne.
 		marker.rotation.y = PI * 0.5
-		marker.rotation.z = -0.25 * airborne if landing else 0.2 * airborne
-		_set_wing_spread(lizard, clampf(airborne * 3.0, 0.0, 1.0))
+		marker.rotation.x = atan2(PREDATOR_GLIDE_HEIGHT, PREDATOR_GLIDE_RUN) * (1.0 if landing else -1.0) * clampf(airborne * 4.0, 0.0, 1.0)
+		marker.rotation.z = 0.14 * sin(field_time * 1.7) * airborne
+		lizard.set_wing_spread(clampf(airborne * 3.0, 0.0, 1.0))
+		lizard.animate(delta)
 		if (landing and remaining <= 0.0) or (not landing and remaining >= 0.0):
 			predator_flights.erase(stable_id)
+			marker.rotation.x = 0.0
 			marker.rotation.z = 0.0
-			_set_wing_spread(lizard, 0.0)
+			lizard.set_wing_spread(0.0)
 			if not landing:
 				marker.visible = false
 		else:
