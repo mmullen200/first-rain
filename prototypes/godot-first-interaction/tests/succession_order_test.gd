@@ -22,16 +22,26 @@ func _run() -> void:
 	# current local support rather than from a hard-coded predecessor.
 	var queen: Vector2i = scene.hoodoo_field.queen_cells[0]
 	_seed_patch(scene, queen, {"fungus": 0.2, "dead_biomass": 0.2}, 1)
-	var flower_patch := Vector2i(4, 12)
+	var flower_patch: Vector2i = scene.sleeper_field.cells_for("vector")[0] + Vector2i(-1, 1)
 	scene.ecology.add_resources(flower_patch, {"ground_bloom": 0.16})
 	scene.ecology.add_resources(flower_patch + Vector2i(2, 0), {"ground_bloom": 0.16})
-	var grazer_patch := Vector2i(3, 13)
-	_seed_patch(scene, grazer_patch, {"moss": 0.15, "rhizome": 0.15}, 1)
-	scene.ecology.add_shade(scene.ecology.world_position(grazer_patch.x + 2, grazer_patch.y), 0.8, 1.5)
+	var grazer_patches := _closest_pair(scene.sleeper_field.cells_for("grazer"))
+	for grazer_patch in grazer_patches:
+		_seed_patch(scene, grazer_patch, {"moss": 0.15, "rhizome": 0.15}, 1)
+		scene.ecology.add_shade(scene.ecology.world_position(grazer_patch.x + 2, grazer_patch.y), 0.8, 1.5)
+		scene.ecology.add_resources(grazer_patch + Vector2i(2, 0), {"canopy": 0.22})
 	var engineer_patch: Vector2i = scene.ecology.CHANNEL_CELL
 	_seed_patch(scene, engineer_patch, {"surface_water": 0.18, "rhizome": 0.14, "aquatic_consumer": 0.12}, 1)
-	scene.ecology.add_resources(grazer_patch + Vector2i(2, 0), {"canopy": 0.22})
-	_advance_search_attempts(scene, 520)
+	for ignored in range(520):
+		for grazer_patch in grazer_patches:
+			_soak(scene, grazer_patch)
+		scene._seed_integrated_animals()
+	# The predator drifts in the high air until a dust front brings it down.
+	scene.disturbance_state = "warning"
+	scene.disturbance_timer = 0.0
+	scene._update_disturbance(0.01)
+	while scene.disturbance_state != "passed":
+		scene._update_disturbance(0.1)
 	_assert(_living_species(scene) == ["colony", "grazer", "grazer", "predator", "vector", "wetland_engineer"], "simultaneously supported roles should all establish without a global checklist")
 
 	if failed:
@@ -126,9 +136,22 @@ func _assert_canopy_waits_for_pollination() -> void:
 	_assert(ecology.developing_seeds.is_empty(), "germination alone must not create new sexually produced seeds")
 
 
-func _advance_search_attempts(scene, attempts := 40) -> void:
-	for ignored in range(attempts):
-		scene._seed_integrated_animals()
+func _closest_pair(cells: Array[Vector2i]) -> Array[Vector2i]:
+	var best: Array[Vector2i] = []
+	var best_distance := 1 << 30
+	for a in range(cells.size()):
+		for b in range(a + 1, cells.size()):
+			var distance := maxi(absi(cells[a].x - cells[b].x), absi(cells[a].y - cells[b].y))
+			if distance < best_distance:
+				best_distance = distance
+				best = [cells[a], cells[b]]
+	return best
+
+
+func _soak(scene, center: Vector2i) -> void:
+	for y in range(center.y - 1, center.y + 2):
+		for x in range(center.x - 1, center.x + 2):
+			scene.ecology.moisture[y * scene.ecology.WIDTH + x] = 0.5
 
 
 func _living_species(scene) -> Array[String]:

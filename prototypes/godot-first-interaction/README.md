@@ -1,6 +1,6 @@
 # First Rain: opening vertical-slice prototype
 
-Throwaway Godot vertical slice for deciding whether the opening teaches movement, finite supplies, scientific observation, ecological intervention, recovery, cultivation, and the first sighting of the Presence through embodied play. The current branch asks whether sustained local Habitat Support makes animal arrivals, departures, and returns read as reversible ecology rather than a basin-wide progression tree, while the standing-water sulfur pathway remains a distinct requirement for First Rain.
+Throwaway Godot vertical slice for deciding whether the opening teaches movement, finite supplies, scientific observation, ecological intervention, recovery, cultivation, and the first sighting of the Presence through embodied play. The current branch asks whether every animal reads as woken where it slept, by the ground changing around it, rather than arriving from outside (see Every animal wakes, #43), while the standing-water sulfur pathway remains a distinct requirement for First Rain.
 
 ## Run
 
@@ -21,7 +21,7 @@ Open `project.godot` in Godot 4.6 and press **F6/F5**, or run:
 - **C** — send a suit-light signal toward a nearby ecological subject
 - **J** — open or close the pause-only Basin Survey and detailed field record
 - **V** — cycle the scanner lens through off, nearby moisture/toxicity, and elevation/downhill flow
-- **Space** — spend one water dose on a nearby moss patch
+- **Space** — spend one water dose on a nearby moss patch, or soak the ground where you stand
 - **Q** — spend one water dose on the astronaut when exposure is meaningful
 - **Z** — eat carried fresh food first, otherwise a finite ration
 - **R** — restart the experiment
@@ -29,7 +29,7 @@ Open `project.godot` in Godot 4.6 and press **F6/F5**, or run:
 
 ## Question under test
 
-Can the player explain at least one animal arrival and one later departure from visible local habitat change without describing species as permanently unlocked stages, while also recognizing that aquatic producers plus consumers—not terrestrial greening alone—supply the volatile sulfur contribution required for First Rain?
+Can the player explain at least one animal waking and one later return to dormancy from visible local habitat change without describing species as permanently unlocked stages, while also recognizing that aquatic producers plus consumers—not terrestrial greening alone—supply the volatile sulfur contribution required for First Rain?
 
 Moss behavior, water quantities, environmental variables, timing, and the loose shade panel are disposable test fixtures. The current intervention response deliberately holds long enough to read: the Field Scanner reports rising local moisture and a responding dormant-life trace while explicitly withholding confirmation of living moss. They do not settle the later rule-set, survival-balance, feedback-tool, or toolkit decisions.
 
@@ -119,9 +119,38 @@ Animal settlement uses local habitat shape instead of fixed destinations, a shar
 
 Qualifying habitat must persist across repeated observations before settlement, with slower persistence requirements for animals whose arrival should carry more weight. The colony does not arrive. It sleeps as queens in sealed chambers at the foot of several hoodoos, each marked by a dark plug at the base (`hoodoo_field.gd`). Each queen is surveyed at the same cadence as a full habitat sweep (about eleven seconds). When living fungus within two cells of her hoodoo stays above a waking scent, she stirs after two surveys (SEALED CHAMBER / QUEEN STIRRING), her chamber cracks open after five (CHAMBER OPENING / NO COLONY YET), and after eight (about ninety seconds) she founds the colony on the neighbouring cell with the most fungus. If the fungus drops below the waking scent while she is stirring, she has woken too early and dies, leaving a husk at the chamber mouth. Queens far from fungus keep sleeping. An established colony needs a weaker, continuing fungus garden; if it fails, the colony withdraws and its queen seals herself back in to wake again later. Only one colony can exist at a time in the current fixed roster. This follows `First Rain — Waking the Colony — Research 2026-09-23` in the project wiki: queens wake on their partner's scent like *Striga* seeds, and not all wake, like annual killifish eggs.
 
-Each resident remains associated with its local range; mobile foraging is bounded around it. If support stays below the same habitat threshold through a grace period, the animal leaves for the Regional Ecology without dying. Recovery can support its later return. The fixed Eusocial Colony hive follows the same rule while present: the nest stays in one place while workers forage. Sustained habitat loss recalls all workers, stops new gathering and waits for their loads to return before withdrawal. Renewed support cancels recall.
+Each resident remains associated with its local range; mobile foraging is bounded around it. If support stays below the same habitat threshold through a grace period, the animal goes dormant without dying (see below) and can wake again. The fixed Eusocial Colony hive follows the same rule while present: the nest stays in one place while workers forage. Sustained habitat loss recalls all workers, stops new gathering and waits for their loads to return before withdrawal. Renewed support cancels recall.
 
-This remains a provisional colonization slice using a small fixed roster. The colony now wakes from a dormant queen; other animals still appear directly at a selected destination and are to be made dormant in turn. Resident attraction or conflict and fully resource-supported population size remain separate playable questions.
+This remains a provisional slice using a small fixed roster: two grazers, one vector, one engineer and two predators can wake (grazers born in the basin add to that). Resident attraction or conflict and fully resource-supported population size remain separate playable questions.
+
+## Every animal wakes (#43)
+
+Branch: `prototype/waking-animals`. Does every animal read as something woken in the basin rather than something that walked in, and can the player tell what woke it from what they see around the spot where it rose?
+
+Nothing arrives any more. Besides the queens, the map holds sleepers (`sleeper_field.gd`), placed from a fixed seed but only in ground that suits each kind, each with a small marker and no label while it sleeps:
+
+- **Grazers** lie buried in grey, stone-like shells, in pairs two cells apart, never in a hollow that holds water or on a drainage spine. One pair always sleeps just east of the Shelter Bowl. A shell wakes when forage beside cover grows within three cells of it **and its own ground stays soaked**: the shell remembers the wettest its ground has been, fading each tick (half-life about 45 s), so two or three waterings in a row are needed.
+- **Flying vectors** wait as pale pupal cases in the soil, one set always west of the Shelter Bowl. Pupae wake when separated flowering patches bloom within reach.
+- **Wetland engineers** lie in dark, dried mud casings on drainage spines, one always in the channel bed through Long Meadow. A casing wakes when flowing water, aquatic consumers and plants come together within reach.
+- **Predators** have no sleeper on the ground. They drift in the high air; that is their dormancy. The predator is a heavy, beaded lizard like a gila monster (user, 2026-09-27: *"a kind of lizard creature with a large tail and small wings. Not something all powerful but it's like a gila monster that can sometimes glide"*): black with salmon blotches, a thick tail almost as long as its body, sprawled legs and small rust wings folded on its back. When a heat-and-dust front enters the basin and two grazers live near each other, one predator rides the front and **glides down out of the dust as it passes over the grazers' range**, on a long slant from the west with its wings spread, and folds them as it lands. One comes down per front. It cannot fly; gliding at other times is not built yet.
+
+Every sleeper senses only ground within three cells of where it lies, on the same distributed habitat sweep that used to search the whole basin, so each is surveyed about every eleven seconds. It stirs after two surveys (the marker rocks and a label reads STONE SHELL / PUPAE / MUD CASING — STIRRING), then wakes after its species' count (grazer 5, vector 4, engineer 6). It rises **where it slept** and walks to the habitat that woke it; the marker disappears. If what woke it fails while it stirs, it dies there, leaving a pale flattened husk; its body goes to the ground as Detritus. Only two grazers, one vector and one engineer can be awake at once, so the other sleepers of a kind stay asleep, and a name lost to death is not reused.
+
+When an animal's habitat fails through the grace period, it **goes back to sleep where it stands**: its sleeper marker moves there, and the same habitat returning around that spot wakes it again. A colony seals its queen back into her hoodoo, as before. A predator whose grazers are gone climbs back into the high air and can come down again on a later front. Nothing leaves for the Regional Ecology; how dormancy fits with the Regional Ecology exchanging organisms is still open.
+
+**Watering any ground:** SPACE away from the named patches and the refuge now pours one dose on the ground where the Astronaut stands, from the same finite ship water (decided 2026-09-27, so a buried grazer's shell can be soaked). Ground whose 3 × 3 moisture is already 0.3 or more refuses it, so a dose is not wasted on wet ground; the last dose still needs a hold.
+
+Start beside the buried grazer pair east of the Shelter Bowl:
+
+```sh
+/Applications/Godot.app/Contents/MacOS/Godot --path prototypes/godot-first-interaction -- --waking-animals
+```
+
+Its title is **WAKING ANIMALS PROTOTYPE**. Moss, rooted mats and cover grow around the two shells but their ground is dry: SPACE beside them soaks it. To the west, flowers bloom around a set of pupae. Once both grazers are awake the weather is nudged into one dust front (about 14 s of warning) so the predator can come down without a long wait. Measured headlessly, watering every 15 s: the shells and pupae stir at about 21 s, the vector wakes at 43 s, both grazers at 54 s, and the predator glides in at 74 s. Ordinary controls apply; **R** restarts.
+
+Sleepers are recorded in evidence checkpoints (`sleepers`), and F9 shows `organism.<species>_stirring`, `_died_waking`, `_established`/`_returned` (with the cell it rose from) and `_dormant`, plus `organism.predator_riding_front` when a front picks one up. Counts, reach, soak memory, fall time and marker looks are disposable.
+
+**Playtest gate:** without F9 or coaching, the player says of at least two different animals that it woke up where it was and names what woke it, and says the predator came down with the storm. Automated checks establish placement, waking, dying, sleeping again and the dust landing, not comprehension.
 
 Habitat search is distributed across deterministic ecology ticks using one frozen ecological snapshot. This preserves whole-basin comparison without placing a full multi-species neighborhood sweep in one rendered frame.
 
@@ -328,6 +357,7 @@ The captured idle-opening failure can be replayed headlessly:
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/hoodoo_field_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/hoodoo_devouring_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/colony_garden_test.gd
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/waking_animals_test.gd
 ```
 
 The checks verify the opening, movement, grazer behavior, scanner evidence, replay record, toolkit economy, basin traversal, survival pacing, disturbance recovery, shared animal authority, fixed-hive worker transport, and the bounded habitat-search frame cost. Habitat checks demonstrate that roles settle independently from sustained local support, distant basin-wide counts cannot qualify them, brief fluctuations do not cause settlement or departure, sustained collapse causes departure without death, and habitat recovery permits return. The pacing check verifies that watering produces an immediate held local reading, a queen sleeps until fungus grows beside her hoodoo, visibly stirs and opens her chamber over tens of seconds before founding the colony beside the hoodoo, and dies if the fungus fails while she wakes. Integrated checks additionally verify Detritus-dependent fungus, separate pioneer requirements for rooted mats, pollination-gated canopy, the producer/consumer sulfur pathway, reproduction without spontaneous biomass, distinct colony/vector/engineer effects, seeded weather that produces ecological disturbances plus ecosystem-enabled First Rain without a fixed schedule or Presence trigger, and an end-to-end route from finite watering and transplantation through every terrestrial and aquatic role.
