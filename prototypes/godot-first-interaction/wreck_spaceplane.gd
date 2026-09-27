@@ -79,13 +79,14 @@ func _init() -> void:
 	_build()
 
 
-# True when a world position is inside the cabin, past the hatch.
-func is_inside(world: Vector3) -> bool:
+# True when a world position is inside the cabin, past the hatch. A smaller
+# inset counts the doorway too, for leaving with some hysteresis.
+func is_inside(world: Vector3, inset := 0.3) -> bool:
 	var local := _world_to_body(world)
 	var t := _t_at(local.z)
 	if t < float(CABIN_STATIONS.x) / STATIONS or local.z > CONSOLE_Z - CONSOLE_DEPTH * 0.5:
 		return false
-	return absf(local.x) < _half_width(t) - 0.3
+	return absf(local.x) < _half_width(t) - inset
 
 
 # Height the Astronaut stands at: the cabin floor inside, a short ramp through

@@ -71,6 +71,17 @@ func _run() -> void:
 	if scene.consulting_ship_screen or not plane.interior_camera.current:
 		_fail("stepping back did not return from the ship screen to the cabin view")
 		return
+	# Walking out through the hatch and back in switches the view once each
+	# way, without flickering between the cabin and overhead cameras.
+	for direction in [-1.0, 1.0]:
+		var start_x: float = hatch_width - 0.6 if direction > 0.0 else hatch_width + 0.6
+		scene.astronaut.position = plane.cabin_point(Vector3(start_x, plane.FLOOR_Y, hatch_z))
+		await physics_frame
+		await physics_frame
+		var switches := await _count_view_switches(scene, plane, Vector3(direction, 0.0, 0.0), 90)
+		if switches != 1:
+			_fail("crossing the hatch %s switched the view %d times" % ["outward" if direction > 0.0 else "inward", switches])
+			return
 	print("PASS: the spaceplane cabin is entered through its hatch, shelters the astronaut, holds the cache, and shows the ship screen")
 	quit(0)
 
@@ -98,6 +109,36 @@ func _walk_in(scene, plane, start: Vector3, frames: int) -> bool:
 	_press(best, false)
 	await physics_frame
 	return entered
+
+
+# Holds the key whose on-screen direction best matches the given cabin-frame
+# direction, as seen from the camera active at the start, and counts how often
+# the active camera changes.
+func _count_view_switches(scene, plane, cabin_direction: Vector3, frames: int) -> int:
+	var here: Vector3 = scene.astronaut.global_position
+	var along: Vector3 = plane.cabin_point(plane._world_to_body(here) + cabin_direction) - here
+	var view: Camera3D = scene.get_viewport().get_camera_3d()
+	var wanted := Vector2(along.x, along.z).normalized()
+	var keys := {KEY_W: Vector2(0.0, -1.0), KEY_S: Vector2(0.0, 1.0), KEY_A: Vector2(-1.0, 0.0), KEY_D: Vector2(1.0, 0.0)}
+	if view != scene.camera:
+		var right := Vector2(view.global_basis.x.x, view.global_basis.x.z).normalized()
+		var forward := Vector2(-view.global_basis.z.x, -view.global_basis.z.z).normalized()
+		keys = {KEY_W: forward, KEY_S: -forward, KEY_A: -right, KEY_D: right}
+	var best := KEY_W
+	for candidate in keys:
+		if wanted.dot(keys[candidate]) > wanted.dot(keys[best]):
+			best = candidate
+	_press(best, true)
+	var switches := 0
+	for i in range(frames):
+		await physics_frame
+		var now: Camera3D = scene.get_viewport().get_camera_3d()
+		if now != view:
+			switches += 1
+			view = now
+	_press(best, false)
+	await physics_frame
+	return switches
 
 
 func _press(keycode: Key, pressed: bool) -> void:

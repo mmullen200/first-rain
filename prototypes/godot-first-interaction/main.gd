@@ -77,6 +77,13 @@ var hoodoo_field: Node3D
 var camera: Camera3D
 var spaceplane: Node3D
 var consulting_ship_screen := false
+# The cabin view begins once the astronaut is well inside and ends once they
+# are back out past the hull, so standing in the doorway does not flicker.
+var in_cabin_view := false
+# Held keys keep the direction they had when pressed, even if the camera
+# switches mid-step; a change of keys takes the current camera's directions.
+var control_camera: Camera3D
+var control_keys := Vector2.ZERO
 var ship_screen_refresh := 0.0
 var ecology
 var animal_simulation
@@ -1400,7 +1407,10 @@ func _move_astronaut(delta: float) -> void:
 	# Inside the spaceplane, keys follow the cabin camera: W walks away from
 	# it, toward the cockpit. Outside they keep their fixed map directions.
 	var direction := Vector3(input.x, 0.0, input.y)
-	var view := get_viewport().get_camera_3d()
+	if input != control_keys or control_camera == null:
+		control_keys = input
+		control_camera = get_viewport().get_camera_3d()
+	var view := control_camera
 	if spaceplane != null and view != null and view != camera:
 		var right := Vector3(view.global_basis.x.x, 0.0, view.global_basis.x.z).normalized()
 		var forward := Vector3(-view.global_basis.z.x, 0.0, -view.global_basis.z.z).normalized()
@@ -1450,7 +1460,11 @@ func _update_camera() -> void:
 	# Inside the spaceplane the view moves to a camera in the cabin.
 	if spaceplane == null:
 		return
-	var inside: bool = spaceplane.is_inside(astronaut.global_position)
+	if in_cabin_view:
+		in_cabin_view = spaceplane.is_inside(astronaut.global_position, 0.0)
+	else:
+		in_cabin_view = spaceplane.is_inside(astronaut.global_position)
+	var inside := in_cabin_view
 	var screen_distance := _flat_distance(astronaut.global_position, spaceplane.screen_position())
 	if not inside or screen_distance > SHIP_SCREEN_RELEASE:
 		consulting_ship_screen = false
