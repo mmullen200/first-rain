@@ -144,7 +144,9 @@ func register_agent(species: String, stable_id: String, initial_state := {}) -> 
 	return true
 
 
-func set_agent_presence(stable_id: String, present: bool, habitat_cell := Vector2i(-1, -1)) -> bool:
+# A returning animal wakes where it slept (`start_cell`) and walks to its
+# habitat; without one it starts at the habitat itself.
+func set_agent_presence(stable_id: String, present: bool, habitat_cell := Vector2i(-1, -1), start_cell := Vector2i(-1, -1)) -> bool:
 	if not agents.has(stable_id):
 		return false
 	var agent: Dictionary = agents[stable_id]
@@ -156,7 +158,7 @@ func set_agent_presence(stable_id: String, present: bool, habitat_cell := Vector
 			destination = _bounded_cell(habitat_cell)
 		if agent["species"] == "predator" and not predator_territory_available(destination, stable_id):
 			return false
-		agent["cell"] = destination
+		agent["cell"] = _bounded_cell(start_cell) if start_cell.x >= 0 and start_cell.y >= 0 else destination
 		agent["habitat_cell"] = destination
 		agent["state"] = {
 			"grazer": "seeking",
@@ -182,6 +184,25 @@ func set_agent_presence(stable_id: String, present: bool, habitat_cell := Vector
 	_emit("organism.departed", stable_id, {"species": agent["species"], "cell": agent["habitat_cell"]})
 	if agent["species"] == "predator":
 		_emit("organism.territory_released", stable_id, {"cell": agent["habitat_cell"]})
+	return true
+
+
+# A sleeping animal that stirs and then loses what woke it dies where it lay;
+# its body goes to the ground as Detritus.
+func die_while_waking(stable_id: String, cell: Vector2i) -> bool:
+	if not agents.has(stable_id):
+		return false
+	var agent: Dictionary = agents[stable_id]
+	if not bool(agent["alive"]) or bool(agent.get("present", true)):
+		return false
+	var body := float(agent["body_biomass"])
+	var deposited := _deposit_to_environment(_bounded_cell(cell), "dead_biomass", body, stable_id)
+	agent["body_biomass"] = body - deposited
+	agent["alive"] = false
+	agent["state"] = "dead"
+	agent["cell"] = _bounded_cell(cell)
+	agents[stable_id] = agent
+	_emit("organism.died", stable_id, {"cause": "woke_too_early", "cell": agent["cell"]})
 	return true
 
 

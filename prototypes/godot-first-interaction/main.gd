@@ -53,15 +53,29 @@ const QUEEN_SCENT_RADIUS := 2
 const QUEEN_CHAMBER_OPENING_OBSERVATIONS := 5
 # A colony stays while its tended garden holds.
 const COLONY_GARDEN_KEEP := 0.02
-const ANIMAL_SETTLEMENTS := {
-	"colony:1": "colony",
-	"vector:1": "vector",
-	"grazer:1": "grazer",
-	"grazer:2": "grazer",
-	"engineer:1": "wetland_engineer",
-	"predator:1": "predator",
-	"predator:2": "predator"
+# The names each sleeping species can wake into. The colony wakes from a
+# queen (colony:1) and predators come down with a dust front.
+const SLEEPER_ROSTER := {
+	"grazer": ["grazer:1", "grazer:2"],
+	"vector": ["vector:1"],
+	"wetland_engineer": ["engineer:1"]
 }
+const PREDATOR_ROSTER := ["predator:1", "predator:2"]
+const SLEEPER_STIRRING_OBSERVATIONS := 2
+# A sleeper senses habitat this many cells from where it lies.
+const SLEEPER_REACH := 3
+# A buried grazer also needs its own ground soaked. Its shell remembers the
+# wettest its ground has been, fading each tick, so one watering keeps it
+# soaked for about half a minute and it needs two or three in a row to wake.
+const GRAZER_SOAK_MOISTURE := 0.25
+const GRAZER_SOAK_MEMORY := 0.995
+# Ground this wet (3 x 3 average) refuses another poured dose.
+const GROUND_SOAKED_MOISTURE := 0.3
+# A predator's glide out of the dust front, or back into the wind: seconds,
+# distance along the ground and starting height, in world units.
+const PREDATOR_FALL_SECONDS := 2.4
+const PREDATOR_GLIDE_RUN := 9.0
+const PREDATOR_GLIDE_HEIGHT := 5.0
 const EcologyGridModel = preload("res://ecology_grid.gd")
 const EvidenceRecorder = preload("res://evidence_recorder.gd")
 const AnimalSimulation = preload("res://animal_simulation.gd")
@@ -70,10 +84,12 @@ const AstronautFigure = preload("res://astronaut_figure.gd")
 const WreckSpaceplane = preload("res://wreck_spaceplane.gd")
 const HoodooField = preload("res://hoodoo_field.gd")
 const GardenSpire = preload("res://garden_spire.gd")
+const SleeperField = preload("res://sleeper_field.gd")
 
 var astronaut: CharacterBody3D
 var astronaut_figure: Node3D
 var hoodoo_field: Node3D
+var sleeper_field: Node3D
 var camera: Camera3D
 var spaceplane: Node3D
 var consulting_ship_screen := false
@@ -200,10 +216,17 @@ var worker_hoodoo_material: StandardMaterial3D
 var habitat_search_species: Array[String] = []
 var habitat_search_cursor := 0
 var habitat_search_scores: Dictionary = {}
-var habitat_search_best: Dictionary = {}
 var habitat_search_snapshot: Dictionary = {}
 var drainage_affinity_cache := PackedFloat32Array()
-var arrival_habitat_support: Dictionary = {}
+# One entry per sleeper_field sleeper: {"state": dormant|stirring|awake|dead,
+# "observations": int, "agent_id": String}.
+var sleeper_states: Array[Dictionary] = []
+# The predator the current dust front will drop: {"id", "habitat"}.
+var predator_descent: Dictionary = {}
+# Predator id -> {"time": seconds left gliding in (positive) or climbing away
+# (negative), "ground": the world spot it lands on or leaves from}.
+var predator_flights: Dictionary = {}
+var waking_fixture_storm_pending := false
 var unsupported_residency_ticks: Dictionary = {}
 # Hoodoo cell -> {"state": dormant|stirring|founded|dead, "observations": int}.
 var dormant_queens: Dictionary = {}
@@ -243,6 +266,7 @@ func _ready() -> void:
 	_build_ecology_grid()
 	_build_world()
 	_build_hoodoos()
+	_build_sleepers()
 	_build_spatial_landmarks()
 	_build_astronaut()
 	_build_patches()
@@ -268,8 +292,10 @@ func _ready() -> void:
 		_seed_vector_fixture()
 	if "--wetland-engineer" in OS.get_cmdline_user_args():
 		_seed_engineer_fixture()
+	if "--waking-animals" in OS.get_cmdline_user_args():
+		_seed_waking_fixture()
 	evidence.begin_run(1, _evidence_snapshot())
-	if "--colony-foraging" in OS.get_cmdline_user_args() or "--hoodoo-devouring" in OS.get_cmdline_user_args() or "--queen-waking" in OS.get_cmdline_user_args() or "--predator-ecology" in OS.get_cmdline_user_args() or "--vector-pollination" in OS.get_cmdline_user_args() or "--wetland-engineer" in OS.get_cmdline_user_args():
+	if "--colony-foraging" in OS.get_cmdline_user_args() or "--hoodoo-devouring" in OS.get_cmdline_user_args() or "--queen-waking" in OS.get_cmdline_user_args() or "--predator-ecology" in OS.get_cmdline_user_args() or "--vector-pollination" in OS.get_cmdline_user_args() or "--wetland-engineer" in OS.get_cmdline_user_args() or "--waking-animals" in OS.get_cmdline_user_args():
 		_open_emergency_cache()
 	if "--queen-waking" in OS.get_cmdline_user_args():
 		_set_status("Violet fungus is spreading at the foot of a hoodoo. The dark plug at its base looks like a sealed door.", 5.0)
@@ -282,6 +308,8 @@ func _ready() -> void:
 		_set_status("A small flying animal pauses among pale blossoms. Other flowering patches stand across the gaps.", 5.0)
 	if "--wetland-engineer" in OS.get_cmdline_user_args():
 		_set_status("Water murmurs through one shallow runnel. A perched pool waits behind a narrow dry lip.", 5.0)
+	if "--waking-animals" in OS.get_cmdline_user_args():
+		_set_status("Two grey humps lie half sunk in dry ground beside a patch of moss and cover. To the west, pale cases poke up among blossoms.", 5.0)
 
 
 func _seed_engineer_fixture() -> void:
@@ -455,6 +483,64 @@ func _seed_hoodoo_devouring_fixture() -> void:
 	_update_ecological_animal_markers()
 
 
+# Starts beside the pair of buried grazers east of the Shelter Bowl, with
+# forage and cover planted around them but their ground left dry, and
+# flowers blooming around the pupae to the west. Once both grazers are awake
+# the weather is nudged into one dust front, so the predator can come down
+# without a long wait.
+func _seed_waking_fixture() -> void:
+	var shells: Array[Vector2i] = sleeper_field.cells_for("grazer").slice(0, 2)
+	var west := mini(shells[0].x, shells[1].x)
+	var east := maxi(shells[0].x, shells[1].x)
+	for y in range(shells[0].y - 2, shells[0].y + 3):
+		for x in range(west - 2, east + 3):
+			var cell := Vector2i(x, y)
+			var index: int = y * ecology.WIDTH + x
+			ecology.moisture[index] = 0.18
+			ecology.temperature[index] = 0.38
+			ecology.toxicity[index] = 0.02
+			ecology.nutrients[index] = 0.45
+			if y == shells[0].y + 2:
+				ecology.add_resources(cell, {"canopy": 0.4})
+			elif absi(y - shells[0].y) <= 1:
+				ecology.add_resources(cell, {"moss": 0.3, "rhizome": 0.3})
+	var pupae: Vector2i = sleeper_field.cells_for("vector")[0]
+	for y in range(pupae.y - 1, pupae.y + 3):
+		for x in range(pupae.x - 2, pupae.x + 3):
+			var index: int = y * ecology.WIDTH + x
+			ecology.moisture[index] = 0.6
+			ecology.temperature[index] = 0.35
+			ecology.toxicity[index] = 0.02
+			ecology.nutrients[index] = 0.55
+	for cell in [pupae + Vector2i(-2, 1), pupae + Vector2i(1, 2)]:
+		ecology.add_resources(cell, {"rhizome": 0.55, "ground_bloom": 0.45})
+	ecology._step_reproduction()
+	for cell in ecology.flower_stores:
+		ecology.flower_stores[cell]["nectar"] += ecology.consume_resource(cell, ecology.flower_kind(cell), 0.025)
+	ecology_started = true
+	waking_fixture_storm_pending = true
+	var stand := Vector2i(east + 1, shells[0].y + 1)
+	var world: Vector2 = ecology.world_position(stand.x, stand.y)
+	astronaut.position = Vector3(world.x, ecology.terrain_height(stand) + 0.02, world.y)
+	camera.position = astronaut.position + Vector3(8.8, 10.8, 10.5)
+	camera.look_at(astronaut.position)
+	_refresh_ecology_visuals()
+
+
+func _bring_waking_fixture_storm() -> void:
+	if not waking_fixture_storm_pending or disturbance_state not in ["quiet", "passed"]:
+		return
+	for stable_id in ["grazer:1", "grazer:2"]:
+		var agent: Dictionary = animal_simulation.agent_state(stable_id)
+		if agent.is_empty() or not bool(agent["alive"]) or not bool(agent.get("present", true)):
+			return
+	waking_fixture_storm_pending = false
+	disturbance_state = "warning"
+	disturbance_timer = 14.0
+	disturbance_event_id = evidence.record_event(ecology.tick, "environment.dust_window_detected", "regional_atmosphere", [], weather_simulation.snapshot())
+	_set_status("Pressure falls while hot crosswinds lift dust from bare ground to the west. The flame turns toward the advancing haze.")
+
+
 func _seed_predator_fixture() -> void:
 	for center in [Vector2i(6, 9), Vector2i(17, 9)]:
 		for y in range(center.y - 2, center.y + 3):
@@ -512,6 +598,8 @@ func _physics_process(delta: float) -> void:
 	_update_ground_animal_markers(delta)
 	_update_colony_worker_visual()
 	_update_colony_prospect_visual()
+	sleeper_field.animate(delta)
+	_bring_waking_fixture_storm()
 	_update_disturbance(delta)
 	_update_presence()
 	_update_presence_signals(delta)
@@ -826,6 +914,15 @@ func _build_hoodoos() -> void:
 		dormant_queens[cell] = {"state": "dormant", "observations": 0}
 
 
+func _build_sleepers() -> void:
+	sleeper_field = SleeperField.new()
+	add_child(sleeper_field)
+	sleeper_field.build(ecology, hoodoo_field.hoodoo_cells, _drainage_affinity_snapshot())
+	for index in range(sleeper_field.sleepers.size()):
+		sleeper_states.append({"state": "dormant", "observations": 0, "agent_id": "", "soak": 0.0})
+		sleeper_field.show_state(index, "dormant", ecology)
+
+
 func _build_spatial_landmarks() -> void:
 	spring_label = _create_terrain_label("THE HEADWALL  /  SPRING BLOCKED", EcologyGridModel.HEADWALL_SPRING_CELL, Color("d9c49a"))
 	_create_terrain_label("TOXIC VENT", EcologyGridModel.TOXIC_VENT_CELL, Color("e1ac70"))
@@ -1008,6 +1105,8 @@ func _build_grazer() -> void:
 	grazer_root.name = "PrototypeGrazer"
 	grazer_root.position = Vector3(world.x, ecology.terrain_height(grazer_cell) + 0.28, world.y)
 	grazer_target_position = grazer_root.position
+	# Hidden until a buried shell wakes; the sleepers show where grazers lie.
+	grazer_root.visible = false
 	add_child(grazer_root)
 
 	grazer_body = MeshInstance3D.new()
@@ -1064,20 +1163,25 @@ func _build_ecological_animal_markers() -> void:
 		var marker := Node3D.new()
 		marker.name = "AnimalMarker_" + String(stable_id).replace(":", "_")
 		marker.visible = false
-		var body := MeshInstance3D.new()
-		if stable_id == "colony:1":
-			var hive_mesh := CylinderMesh.new()
-			hive_mesh.top_radius = 0.18
-			hive_mesh.bottom_radius = 0.34
-			hive_mesh.height = 0.24
-			hive_mesh.radial_segments = 12
-			body.mesh = hive_mesh
+		var body: Node3D
+		if String(stable_id).begins_with("predator"):
+			body = _build_gila_glider(specification[1])
 		else:
-			var mesh := SphereMesh.new()
-			mesh.radius = 0.2
-			mesh.height = 0.36
-			body.mesh = mesh
-		body.material_override = _material(specification[1], 0.58, specification[1].darkened(0.45))
+			var shape := MeshInstance3D.new()
+			if stable_id == "colony:1":
+				var hive_mesh := CylinderMesh.new()
+				hive_mesh.top_radius = 0.18
+				hive_mesh.bottom_radius = 0.34
+				hive_mesh.height = 0.24
+				hive_mesh.radial_segments = 12
+				shape.mesh = hive_mesh
+			else:
+				var mesh := SphereMesh.new()
+				mesh.radius = 0.2
+				mesh.height = 0.36
+				shape.mesh = mesh
+			shape.material_override = _material(specification[1], 0.58, specification[1].darkened(0.45))
+			body = shape
 		marker.add_child(body)
 		if stable_id == "colony:1":
 			# The garden's own mound replaces the plain hive marker.
@@ -1145,6 +1249,80 @@ func _build_ecological_animal_markers() -> void:
 	colony_prospect_root.add_child(colony_prospect_label)
 
 
+# The predator: a heavy, beaded lizard like a gila monster, black with
+# salmon bands, with a thick fat-storing tail and small wings folded along its
+# flanks. It cannot fly, only glide, and spreads the wings (named "Wings") only
+# while it glides in on a dust front or climbs back out. Faces +Z.
+func _build_gila_glider(band_color: Color) -> Node3D:
+	var lizard := Node3D.new()
+	lizard.name = "Lizard"
+	var dark := _material(Color("201a18"), 0.9)
+	var band := _material(band_color.lerp(Color("e07a5c"), 0.6), 0.85, Color("4a1a10"))
+	var parts := [
+		# [radius, scale, position, banded]: a low, wide body, a dark wedge
+		# of a head, and a tail almost as long again, thick where it joins.
+		[0.2, Vector3(1.05, 0.42, 1.55), Vector3(0.0, 0.0, 0.0), false],
+		[0.13, Vector3(1.1, 0.55, 1.35), Vector3(0.0, -0.01, 0.4), false],
+		[0.16, Vector3(1.0, 0.6, 1.8), Vector3(0.0, -0.03, -0.42), false],
+		[0.12, Vector3(1.0, 0.6, 1.8), Vector3(0.0, -0.05, -0.68), false],
+		[0.08, Vector3(1.0, 0.6, 1.9), Vector3(0.0, -0.07, -0.9), false],
+		[0.05, Vector3(1.0, 0.6, 2.0), Vector3(0.0, -0.08, -1.06), false],
+		# Beaded salmon blotches, broken and uneven rather than neat stripes.
+		[0.09, Vector3(1.3, 0.35, 0.8), Vector3(-0.07, 0.07, 0.18), true],
+		[0.08, Vector3(1.2, 0.35, 0.9), Vector3(0.08, 0.07, 0.02), true],
+		[0.1, Vector3(1.4, 0.35, 0.7), Vector3(-0.03, 0.07, -0.16), true],
+		[0.07, Vector3(1.0, 0.35, 0.8), Vector3(0.09, 0.06, -0.26), true],
+		[0.08, Vector3(1.5, 0.4, 0.7), Vector3(0.0, 0.03, -0.47), true],
+		[0.06, Vector3(1.5, 0.45, 0.8), Vector3(0.0, 0.0, -0.74), true],
+		[0.04, Vector3(1.5, 0.5, 0.9), Vector3(0.0, -0.04, -0.95), true],
+		[0.05, Vector3(1.2, 0.4, 1.0), Vector3(0.0, 0.05, 0.44), true],
+	]
+	for side in [-1.0, 1.0]:
+		for front in [-1.0, 1.0]:
+			# Sprawled legs, splayed out from the flanks.
+			parts.append([0.06, Vector3(2.0, 0.6, 0.9), Vector3(side * 0.25, -0.08, front * 0.17), false])
+			parts.append([0.04, Vector3(1.2, 0.5, 1.4), Vector3(side * 0.36, -0.12, front * 0.19 + 0.03), false])
+	for part in parts:
+		var piece := MeshInstance3D.new()
+		var mesh := SphereMesh.new()
+		mesh.radius = part[0]
+		mesh.height = part[0] * 2.0
+		mesh.radial_segments = 12
+		mesh.rings = 6
+		piece.mesh = mesh
+		piece.scale = part[1]
+		piece.position = part[2]
+		piece.material_override = band if part[3] else dark
+		lizard.add_child(piece)
+	var wings := Node3D.new()
+	wings.name = "Wings"
+	wings.position = Vector3(0.0, 0.07, 0.1)
+	for side in [-1.0, 1.0]:
+		var wing := MeshInstance3D.new()
+		var wing_mesh := SphereMesh.new()
+		wing_mesh.radius = 0.2
+		wing_mesh.height = 0.4
+		wing.mesh = wing_mesh
+		wing.scale = Vector3(1.0, 0.05, 0.6)
+		wing.position = Vector3(side * 0.24, 0.0, -0.02)
+		wing.material_override = _material(Color("5e2b22"), 0.8, Color("2a0c08"))
+		wing.set_meta("side", side)
+		wings.add_child(wing)
+	lizard.add_child(wings)
+	_set_wing_spread(lizard, 0.0)
+	return lizard
+
+
+# 0 folds the wings flat on the back; 1 spreads them out sideways to glide.
+func _set_wing_spread(lizard: Node3D, spread: float) -> void:
+	for wing in lizard.get_node("Wings").get_children():
+		var side: float = wing.get_meta("side")
+		wing.position = Vector3(side * lerpf(0.06, 0.3, spread), lerpf(0.04, 0.0, spread), lerpf(-0.08, -0.02, spread))
+		wing.rotation.z = side * lerpf(-0.12, -0.12, spread)
+		wing.rotation.y = side * lerpf(-0.35, 0.0, spread)
+		wing.scale = Vector3(lerpf(0.45, 1.2, spread), 0.05, lerpf(0.75, 0.6, spread))
+
+
 func _build_disturbance() -> void:
 	dust_front = _create_box(Vector3(-7.0, 1.15, 10.0), Vector3(0.5, 2.3, 34.0), Color("b97845"))
 	dust_front.name = "HeatDustFront"
@@ -1186,6 +1364,8 @@ func _build_interface() -> void:
 		title.text = "FIRST RAIN  /  COLONY FORAGING PROTOTYPE"
 	elif "--hoodoo-devouring" in OS.get_cmdline_user_args():
 		title.text = "FIRST RAIN  /  HOODOO DEVOURING PROTOTYPE"
+	elif "--waking-animals" in OS.get_cmdline_user_args():
+		title.text = "FIRST RAIN  /  WAKING ANIMALS PROTOTYPE"
 	title.add_theme_font_size_override("font_size", 15)
 	title.add_theme_color_override("font_color", Color("e9b36e"))
 	canvas.add_child(title)
@@ -1380,6 +1560,7 @@ func _evidence_snapshot() -> Dictionary:
 		"grazer": {"awake": grazer_awake, "state": grazer_state, "cell": grazer_cell},
 		"animals": animal_simulation.snapshot(),
 		"queens": dormant_queens.duplicate(true),
+		"sleepers": _sleeper_snapshot(),
 		"weather": weather_simulation.snapshot(),
 		"disturbance": disturbance_state
 	}
@@ -1586,6 +1767,8 @@ func _update_nearby_interactions() -> void:
 		prompt_label.text = "The wreck's blinking cache may contain usable instruments."
 	else:
 		prompt_label.text = "Look for surfaces that seem almost—but not quite—alive."
+		if cache_opened:
+			prompt_label.text += "     SPACE  soak this ground"
 	var current_cell: Vector2i = ecology.world_to_cell(Vector2(astronaut.position.x, astronaut.position.z))
 	var current_sample: Dictionary = ecology.cell_snapshot(current_cell.x, current_cell.y)
 	if not carried_clump.is_empty():
@@ -1670,21 +1853,21 @@ func _basin_survey_text() -> String:
 
 
 func _request_water_intervention() -> void:
-	if water_doses != 1 or (nearest_patch == "" and not near_refuge):
+	if water_doses != 1 or not cache_opened:
 		_water_nearby_patch()
 		return
 	if last_water_hold_active:
 		return
 	last_water_hold_active = true
 	last_water_hold_timer = 0.0
-	last_water_hold_target = "refuge" if near_refuge else nearest_patch
+	last_water_hold_target = _water_target()
 	_set_status("This is the last water dose currently available. Hold SPACE to commit it; the wreck is still producing.")
 
 
 func _update_last_water_hold(delta: float) -> void:
 	if not last_water_hold_active:
 		return
-	var current_target := "refuge" if near_refuge else nearest_patch
+	var current_target := _water_target()
 	if not Input.is_key_pressed(KEY_SPACE) or current_target != last_water_hold_target:
 		last_water_hold_active = false
 		last_water_hold_timer = 0.0
@@ -1873,46 +2056,135 @@ func _update_ecology_grid(delta: float) -> void:
 func _seed_integrated_animals() -> void:
 	_update_resident_habitat_support()
 	_update_dormant_queens()
-	var candidates: Dictionary = {}
+	_update_sleepers()
+
+
+# Nothing walks into the basin. Every sleeper senses only the ground within
+# SLEEPER_REACH of where it lies, on the same distributed habitat scan that
+# once searched the whole basin, so each is surveyed about every eleven
+# seconds, like a queen. It stirs after two surveys and wakes after its
+# species' count; if what woke it fails while it stirs, it dies.
+func _update_sleepers() -> void:
+	for index in range(sleeper_states.size()):
+		if String(sleeper_field.sleepers[index]["species"]) == "grazer":
+			var sleeper: Dictionary = sleeper_states[index]
+			sleeper["soak"] = maxf(float(sleeper["soak"]) * GRAZER_SOAK_MEMORY, _local_moisture(sleeper_field.sleepers[index]["cell"]))
 	var species_to_search: Array[String] = []
-	for stable_id in ANIMAL_SETTLEMENTS:
-		var species := String(ANIMAL_SETTLEMENTS[stable_id])
-		if species == "colony":
-			# The colony never arrives from outside; it wakes from a queen.
-			continue
-		var agent: Dictionary = animal_simulation.agent_state(stable_id)
-		if not agent.is_empty() and (not bool(agent["alive"]) or bool(agent.get("present", true))):
-			arrival_habitat_support.erase(stable_id)
-			continue
-		candidates[stable_id] = species
-		if species not in species_to_search:
-			species_to_search.append(species)
-	if candidates.is_empty():
+	for species in SLEEPER_ROSTER:
+		for index in range(sleeper_states.size()):
+			var sleeper: Dictionary = sleeper_states[index]
+			if String(sleeper_field.sleepers[index]["species"]) != species or String(sleeper["state"]) not in ["dormant", "stirring"]:
+				continue
+			if not String(sleeper["agent_id"]).is_empty() or not _free_sleeper_id(species).is_empty():
+				species_to_search.append(species)
+				break
+	if species_to_search.is_empty():
 		_reset_habitat_search()
 		return
-	var habitats := _continue_arrival_habitat_search(species_to_search)
-	if habitats.is_empty():
+	var scores := _continue_arrival_habitat_search(species_to_search)
+	if scores.is_empty():
 		return
-	for stable_id in candidates:
-		var species := String(candidates[stable_id])
-		var habitat: Dictionary = habitats.get(species, {})
-		if habitat.is_empty():
-			arrival_habitat_support.erase(stable_id)
+	for index in range(sleeper_states.size()):
+		var sleeper: Dictionary = sleeper_states[index]
+		var species := String(sleeper_field.sleepers[index]["species"])
+		var state := String(sleeper["state"])
+		if state not in ["dormant", "stirring"] or not scores.has(species):
 			continue
-		var previous: Dictionary = arrival_habitat_support.get(stable_id, {})
-		var observations := 1
-		var same_site := not previous.is_empty() and _cell_distance(previous["cell"], habitat["cell"]) <= 1
-		if same_site:
-			observations = int(previous["observations"]) + 1
-		arrival_habitat_support[stable_id] = {
-			"cell": habitat["cell"],
-			"observations": observations,
-			"habitat": habitat
-		}
-		var required_observations := int(ARRIVAL_SUPPORT_OBSERVATIONS.get(species, 4))
-		if observations >= required_observations:
-			_register_ecological_role(species, stable_id, habitat)
-			arrival_habitat_support.erase(stable_id)
+		var cell: Vector2i = sleeper_field.sleepers[index]["cell"]
+		var habitat := {} if species == "grazer" and float(sleeper["soak"]) < GRAZER_SOAK_MOISTURE else _sleeper_habitat(species, cell, scores[species])
+		if habitat.is_empty():
+			if state == "stirring":
+				_sleeper_died(index)
+			else:
+				sleeper["observations"] = 0
+				if not animal_simulation.agents.has(String(sleeper["agent_id"])):
+					sleeper["agent_id"] = ""
+			continue
+		if String(sleeper["agent_id"]).is_empty():
+			var free_id := _free_sleeper_id(species)
+			if free_id.is_empty():
+				continue
+			sleeper["agent_id"] = free_id
+		sleeper["observations"] = int(sleeper["observations"]) + 1
+		var observations := int(sleeper["observations"])
+		if observations == SLEEPER_STIRRING_OBSERVATIONS:
+			sleeper["state"] = "stirring"
+			sleeper_field.show_state(index, "stirring", ecology)
+			var stirring_text := {
+				"grazer": ["A buried stone-like shell stirs — its ground is soaked and forage grows close by", "The grey hump in the soaked ground rocks slightly. Something inside is waking to the forage around it."],
+				"vector": ["Pupae in the soil twitch when flowers bloom around them", "The pale cases in the soil twitch among the blossoms."],
+				"wetland_engineer": ["A dried mud casing softens when water flows back past it", "Water is running past the cracked mud casing in the old bed. It shifts."]
+			}
+			_add_discovery(String(stirring_text[species][0]))
+			_set_status(String(stirring_text[species][1]))
+			evidence.record_event(ecology.tick, "organism.%s_stirring" % species, String(sleeper["agent_id"]), [], {"cell": cell, "habitat_cell": habitat["cell"], "habitat_score": habitat["score"]})
+		if observations >= int(ARRIVAL_SUPPORT_OBSERVATIONS[species]):
+			sleeper["state"] = "awake"
+			sleeper["observations"] = 0
+			sleeper_field.show_state(index, "awake", ecology)
+			_register_ecological_role(species, String(sleeper["agent_id"]), habitat, cell)
+
+
+# The best ground within reach of a sleeper, taken from the finished scan and
+# then checked against the ecology as it is now.
+func _sleeper_habitat(species: String, cell: Vector2i, scores: PackedFloat32Array) -> Dictionary:
+	var best := Vector2i(-1, -1)
+	var best_score := -1.0
+	for y in range(maxi(0, cell.y - SLEEPER_REACH), mini(ecology.HEIGHT, cell.y + SLEEPER_REACH + 1)):
+		for x in range(maxi(0, cell.x - SLEEPER_REACH), mini(ecology.WIDTH, cell.x + SLEEPER_REACH + 1)):
+			var score: float = scores[y * ecology.WIDTH + x]
+			if score > best_score:
+				best_score = score
+				best = Vector2i(x, y)
+	if best_score < 0.0:
+		return {}
+	return _habitat_at_cell(species, best)
+
+
+func _local_moisture(cell: Vector2i) -> float:
+	var total := 0.0
+	var count := 0
+	for y in range(maxi(0, cell.y - 1), mini(ecology.HEIGHT, cell.y + 2)):
+		for x in range(maxi(0, cell.x - 1), mini(ecology.WIDTH, cell.x + 2)):
+			total += ecology.moisture[y * ecology.WIDTH + x]
+			count += 1
+	return total / float(count)
+
+
+# A species' next unused name. Dead animals keep theirs, so a roster can run
+# out.
+func _free_sleeper_id(species: String) -> String:
+	for stable_id in SLEEPER_ROSTER[species]:
+		if animal_simulation.agents.has(stable_id):
+			continue
+		var claimed := false
+		for sleeper in sleeper_states:
+			if String(sleeper["agent_id"]) == stable_id:
+				claimed = true
+				break
+		if not claimed:
+			return stable_id
+	return ""
+
+
+func _sleeper_died(index: int) -> void:
+	var sleeper: Dictionary = sleeper_states[index]
+	var species := String(sleeper_field.sleepers[index]["species"])
+	var cell: Vector2i = sleeper_field.sleepers[index]["cell"]
+	var stable_id := String(sleeper["agent_id"])
+	if animal_simulation.agents.has(stable_id):
+		animal_simulation.die_while_waking(stable_id, cell)
+	sleeper["state"] = "dead"
+	sleeper["agent_id"] = ""
+	sleeper_field.show_state(index, "dead", ecology)
+	var died_text := {
+		"grazer": "The shell in the ground has stopped moving. The forage around it failed before it could get out.",
+		"vector": "The pupae have gone still and pale. The flowers around them faded too soon.",
+		"wetland_engineer": "The mud casing has dried hard again with the animal still inside. The water stopped too soon."
+	}
+	_set_status(String(died_text[species]))
+	_add_discovery("Woke too early — a sleeping animal stirred, lost what woke it, and died")
+	evidence.record_event(ecology.tick, "organism.%s_died_waking" % species, stable_id, [], {"cell": cell, "cause": "habitat_lost_while_waking"})
 
 
 # One survey of every sleeping queen, at the same cadence as a full habitat
@@ -2065,66 +2337,103 @@ func _habitat_at_cell(species: String, cell: Vector2i, habitat_snapshot: Diction
 	return {"cell": cell, "score": score, "evidence": local_evidence}
 
 
+# Nothing leaves the basin. A colony seals its queen back into her hoodoo, a
+# predator climbs back into the high air, and every other animal goes back to
+# sleep where it stands and can wake there again.
 func _depart_ecological_role(stable_id: String, species: String, habitat_cell: Vector2i) -> void:
 	if species == "colony" and not animal_simulation.recall_colony(stable_id, true):
 		# Recall every worker and finish conserved loads before withdrawing.
 		unsupported_residency_ticks[stable_id] = DEPARTURE_GRACE_TICKS - 1
 		return
+	var lying_at: Vector2i = animal_simulation.agent_state(stable_id).get("cell", habitat_cell)
 	if not animal_simulation.set_agent_presence(stable_id, false):
 		return
 	unsupported_residency_ticks.erase(stable_id)
-	arrival_habitat_support.erase(stable_id)
 	if species == "colony" and dormant_queens.has(colony_queen_cell):
 		# The queen returns to her chamber and sleeps until fungus returns.
 		dormant_queens[colony_queen_cell] = {"state": "dormant", "observations": 0}
+	elif species == "predator":
+		var marker: Node3D = animal_markers[stable_id]
+		predator_flights[stable_id] = {"time": -PREDATOR_FALL_SECONDS, "ground": Vector2(marker.position.x, marker.position.z)}
+	else:
+		_sleep_again(stable_id, species, lying_at)
 	var names := {
 		"colony": "The fungus garden has failed. The workers draw back into the hoodoo and the chamber seals over again.",
-		"vector": "The repeated crossings stop after the nearby flowering patches fade.",
-		"grazer": "Tracks leave the forage edge after food and cover no longer hold together here.",
-		"wetland_engineer": "The wetland animal leaves after flowing water, aquatic consumers, and building plants cease overlapping.",
-		"predator": "The predator's tracks leave the basin after the local grazer range collapses."
+		"vector": "With the flowers gone, the flying animal settles into the soil and goes still in a new case.",
+		"grazer": "With food and cover gone, the grazer presses itself into the ground and its shell closes over.",
+		"wetland_engineer": "The water has stopped. The wetland animal curls up in the mud, and the mud dries hard around it.",
+		"predator": "With the grazers gone, the lizard runs, spreads its small wings into the wind and is carried off, up into the high air."
 	}
-	_set_status(names.get(species, "Animal activity leaves after its local habitat collapses."))
-	_add_discovery("Animal departure — local habitat can lose a resident; settlement is not a permanent unlock")
-	evidence.record_event(ecology.tick, "organism.%s_departed" % species, stable_id, [], {"cell": habitat_cell, "cause": "local_habitat_collapse"})
+	_set_status(names.get(species, "An animal goes still after its local habitat collapses."))
+	_add_discovery("Going dormant — when its ground fails an animal sleeps where it is and can wake again; settlement is not a permanent unlock")
+	evidence.record_event(ecology.tick, "organism.%s_dormant" % species, stable_id, [], {"cell": lying_at, "cause": "local_habitat_collapse"})
 
 
+# The sleeper that owned this animal moves to where it lies down. An animal
+# woken by a fixture has no sleeper yet, so it gets one.
+func _sleep_again(stable_id: String, species: String, cell: Vector2i) -> void:
+	var index := -1
+	for candidate in range(sleeper_states.size()):
+		if String(sleeper_states[candidate]["agent_id"]) == stable_id:
+			index = candidate
+			break
+	if index < 0:
+		index = sleeper_field.add_sleeper(species, cell, ecology)
+		sleeper_states.append({"state": "dormant", "observations": 0, "agent_id": stable_id, "soak": 0.0})
+	sleeper_field.sleepers[index]["cell"] = cell
+	sleeper_states[index]["state"] = "dormant"
+	sleeper_states[index]["observations"] = 0
+	sleeper_states[index]["soak"] = 0.0
+	sleeper_field.show_state(index, "dormant", ecology)
+
+
+func _sleeper_snapshot() -> Array:
+	var snapshot := []
+	for index in range(sleeper_states.size()):
+		var entry: Dictionary = sleeper_states[index].duplicate()
+		entry["species"] = sleeper_field.sleepers[index]["species"]
+		entry["cell"] = sleeper_field.sleepers[index]["cell"]
+		snapshot.append(entry)
+	return snapshot
+
+
+# Scores every cell for each species from one frozen snapshot, a slice per
+# tick. Returns nothing until the sweep is complete, then one score per cell
+# per species (-1 where the habitat does not qualify).
 func _continue_arrival_habitat_search(species: Array[String]) -> Dictionary:
+	var cell_count: int = ecology.WIDTH * ecology.HEIGHT
 	if habitat_search_species != species or habitat_search_snapshot.is_empty():
 		habitat_search_species = species.duplicate()
 		habitat_search_cursor = 0
 		habitat_search_scores.clear()
-		habitat_search_best.clear()
 		habitat_search_snapshot = ecology.full_snapshot()
 		habitat_search_snapshot["drainage_affinity"] = _drainage_affinity_snapshot()
 		for candidate in species:
-			if candidate != "predator":
-				habitat_search_scores[candidate] = -1.0
-	var cell_count: int = ecology.WIDTH * ecology.HEIGHT
+			var scores := PackedFloat32Array()
+			scores.resize(cell_count)
+			scores.fill(-1.0)
+			habitat_search_scores[candidate] = scores
 	var end_cursor: int = mini(habitat_search_cursor + HABITAT_SEARCH_CELLS_PER_TICK, cell_count)
-	for flat_index in range(habitat_search_cursor, end_cursor):
-		var cell := Vector2i(flat_index % ecology.WIDTH, floori(float(flat_index) / float(ecology.WIDTH)))
-		var evidence_by_radius := {}
-		for candidate in habitat_search_scores:
-			var radius := 3 if candidate == "vector" else 2
-			if not evidence_by_radius.has(radius):
-				evidence_by_radius[radius] = _local_habitat_evidence(cell, radius, candidate == "vector", habitat_search_snapshot)
-			var evidence: Dictionary = evidence_by_radius[radius]
-			var score := _species_habitat_score(candidate, evidence)
-			if score > float(habitat_search_scores[candidate]):
-				habitat_search_scores[candidate] = score
-				habitat_search_best[candidate] = {"cell": cell, "score": score, "evidence": evidence}
+	var evidence_by_radius := {}
+	for candidate in habitat_search_species:
+		var radius := 3 if candidate == "vector" else 2
+		if not evidence_by_radius.has(radius):
+			var slice: Array[Dictionary] = []
+			for flat_index in range(habitat_search_cursor, end_cursor):
+				var cell := Vector2i(flat_index % ecology.WIDTH, floori(float(flat_index) / float(ecology.WIDTH)))
+				slice.append(_local_habitat_evidence(cell, radius, candidate == "vector", habitat_search_snapshot))
+			evidence_by_radius[radius] = slice
+		var slice_evidence: Array[Dictionary] = evidence_by_radius[radius]
+		# Take the array out of the dictionary so writes do not copy it.
+		var scores: PackedFloat32Array = habitat_search_scores[candidate]
+		habitat_search_scores[candidate] = PackedFloat32Array()
+		for offset in range(slice_evidence.size()):
+			scores[habitat_search_cursor + offset] = _species_habitat_score(candidate, slice_evidence[offset])
+		habitat_search_scores[candidate] = scores
 	habitat_search_cursor = end_cursor
 	if habitat_search_cursor < cell_count:
 		return {}
-	var completed := {}
-	for candidate in species:
-		if candidate == "predator":
-			completed[candidate] = _best_predator_arrival_habitat()
-		elif float(habitat_search_scores[candidate]) >= 0.0:
-			completed[candidate] = habitat_search_best[candidate]
-		else:
-			completed[candidate] = {}
+	var completed := habitat_search_scores.duplicate()
 	_reset_habitat_search()
 	return completed
 
@@ -2133,7 +2442,6 @@ func _reset_habitat_search() -> void:
 	habitat_search_species.clear()
 	habitat_search_cursor = 0
 	habitat_search_scores.clear()
-	habitat_search_best.clear()
 	habitat_search_snapshot.clear()
 
 
@@ -2401,38 +2709,40 @@ func _cell_distance(a: Vector2i, b: Vector2i) -> int:
 	return maxi(absi(a.x - b.x), absi(a.y - b.y))
 
 
-func _register_ecological_role(species: String, stable_id: String, habitat: Dictionary) -> void:
+# `start_cell` is where the animal slept or landed; it walks from there to its
+# habitat. Without one it starts on the habitat itself (fixtures).
+func _register_ecological_role(species: String, stable_id: String, habitat: Dictionary, start_cell := Vector2i(-1, -1)) -> void:
 	if stable_id == "grazer:1":
-		_awaken_first_grazer(habitat)
+		_awaken_first_grazer(habitat, start_cell)
 		return
 	var cell: Vector2i = habitat["cell"]
+	var start: Vector2i = start_cell if start_cell.x >= 0 else cell
 	var returning: bool = animal_simulation.agents.has(stable_id)
 	if returning:
-		if not animal_simulation.set_agent_presence(stable_id, true, cell):
+		if not animal_simulation.set_agent_presence(stable_id, true, cell, start):
 			return
 	else:
-		var initial := {"cell": cell, "habitat_cell": cell, "hunger": 0.35, "body_biomass": 0.8}
-		if stable_id == "grazer:2" and animal_simulation.agents.has("grazer:1"):
-			initial.merge({"juvenile": true, "parents": ["grazer:1"], "parent_id": "grazer:1", "body_biomass": 0.4}, true)
+		var initial := {"cell": start, "habitat_cell": cell, "hunger": 0.35, "body_biomass": 0.8}
 		if not animal_simulation.register_agent(species, stable_id, initial):
 			return
 	unsupported_residency_ticks[stable_id] = 0
 	animal_roles_announced[stable_id] = true
 	var arrival_observations := {
 		"colony": "A queen breaks out of her hoodoo beside the living fungus and plants the pellet of old fungus she carried; tiny workers soon trace one route outward",
-		"vector": "Flying animal — repeated crossings begin between separated ground-layer blossoms",
-		"wetland_engineer": "Large wetland animal — tracks gather beside shallow water and nearby plant growth",
-		"grazer": "Second grazer — another animal settles into a concentrated forage patch",
-		"predator": "Predator — fresh tracks converge on the grazers' range"
+		"vector": "Flying animal — climbs out of a pupal case in the soil where flowers bloom around it, then crosses between separated blossoms",
+		"wetland_engineer": "Large wetland animal — breaks out of a dried mud casing once water runs through its old bed again",
+		"grazer": "Second grazer — a buried shell cracks open in soaked ground beside forage and cover",
+		"predator": "Predator — a heavy, banded lizard glides down out of the dust front onto the grazers' range; it had been drifting in the high air"
 	}
 	var observation := String(arrival_observations.get(species, "New animal activity appears in a changed habitat"))
 	_add_discovery(observation)
-	if returning:
-		_set_status("Local habitat recovers. " + observation)
+	if returning and species != "predator":
+		_set_status("It wakes again where it slept. " + observation)
 	else:
 		_set_status(observation)
 	evidence.record_event(ecology.tick, "organism.%s_%s" % [species, "returned" if returning else "established"], stable_id, [], {
 		"cell": cell,
+		"start_cell": start,
 		"habitat_score": habitat["score"],
 		"habitat_evidence": habitat["evidence"]
 	})
@@ -2447,6 +2757,9 @@ func _update_ecological_animal_markers() -> void:
 	for stable_id in animal_markers:
 		var marker: Node3D = animal_markers[stable_id]
 		var agent: Dictionary = animal_simulation.agent_state(stable_id)
+		if predator_flights.has(stable_id) and float(predator_flights[stable_id]["time"]) < 0.0 and not agent.is_empty() and bool(agent["alive"]):
+			# Still climbing back into the high air.
+			continue
 		if agent.is_empty() or not bool(agent["alive"]) or not bool(agent.get("present", true)):
 			marker.visible = false
 			continue
@@ -2466,7 +2779,7 @@ func _update_ecological_animal_markers() -> void:
 			marker.get_child(0).scale = Vector3.ONE * (lerpf(0.65, 1.0, maturity) if bool(agent.get("juvenile", false)) else 1.0)
 		if agent["species"] == "predator":
 			_update_predator_tracks(stable_id, agent)
-			var body: MeshInstance3D = marker.get_child(0)
+			var body: Node3D = marker.get_child(0)
 			body.scale = Vector3(1.5, 0.6, 1.0) if int(agent["hunt_cooldown"]) > AnimalSimulation.HUNT_RECOVERY_TICKS - 4 else Vector3.ONE
 		if stable_id == "colony:1":
 			_update_colony_worker_stream(agent)
@@ -2540,7 +2853,38 @@ func _update_ground_animal_markers(delta: float) -> void:
 		var cell: Vector2i = agent["cell"]
 		var world: Vector2 = ecology.world_position(cell.x, cell.y)
 		var speed := 1.15 if species == "predator" and String(agent["state"]) in ["hunting", "retreating"] else GROUND_ANIMAL_MOVE_SPEED
-		_move_ground_actor(marker, world, 0.25, speed, delta)
+		if not predator_flights.has(id):
+			_move_ground_actor(marker, world, 0.25, speed, delta)
+	_update_predator_flights(delta)
+
+
+# The predator does not fly; it glides. Landing, it comes in on a long slant
+# from the west with the dust front, wings spread, and folds them on the
+# ground. Leaving, it runs, spreads its wings and is carried off east and up.
+func _update_predator_flights(delta: float) -> void:
+	for stable_id in predator_flights.keys():
+		var flight: Dictionary = predator_flights[stable_id]
+		var marker: Node3D = animal_markers[stable_id]
+		var lizard: Node3D = marker.get_child(0)
+		var remaining := float(flight["time"])
+		var landing := remaining > 0.0
+		remaining = maxf(0.0, remaining - delta) if landing else minf(0.0, remaining + delta)
+		var airborne := remaining / PREDATOR_FALL_SECONDS if landing else 1.0 + remaining / PREDATOR_FALL_SECONDS
+		var ground: Vector2 = flight["ground"]
+		var along := ground + Vector2(-PREDATOR_GLIDE_RUN * airborne if landing else PREDATOR_GLIDE_RUN * airborne, 0.0)
+		marker.visible = true
+		marker.position = Vector3(along.x, _terrain_surface_height(along) + 0.25 + airborne * PREDATOR_GLIDE_HEIGHT, along.y)
+		marker.rotation.y = PI * 0.5
+		marker.rotation.z = -0.25 * airborne if landing else 0.2 * airborne
+		_set_wing_spread(lizard, clampf(airborne * 3.0, 0.0, 1.0))
+		if (landing and remaining <= 0.0) or (not landing and remaining >= 0.0):
+			predator_flights.erase(stable_id)
+			marker.rotation.z = 0.0
+			_set_wing_spread(lizard, 0.0)
+			if not landing:
+				marker.visible = false
+		else:
+			flight["time"] = remaining
 
 
 func _move_ground_actor(actor: Node3D, target_world: Vector2, height_offset: float, speed: float, delta: float) -> void:
@@ -2681,21 +3025,24 @@ func _update_grazer(delta: float) -> void:
 		grazer_root.look_at(grazer_target_position, Vector3.UP)
 
 
-func _awaken_first_grazer(habitat: Dictionary) -> void:
+# The first grazer rises out of its shell at `start_cell` and walks to the
+# forage edge that woke it.
+func _awaken_first_grazer(habitat: Dictionary, start_cell := Vector2i(-1, -1)) -> void:
 	var cell: Vector2i = habitat["cell"]
+	var start: Vector2i = start_cell if start_cell.x >= 0 else cell
 	var returning: bool = animal_simulation.agents.has("grazer:1")
 	if returning:
-		if not animal_simulation.set_agent_presence("grazer:1", true, cell):
+		if not animal_simulation.set_agent_presence("grazer:1", true, cell, start):
 			return
 	else:
-		if not animal_simulation.register_agent("grazer", "grazer:1", {"cell": cell, "habitat_cell": cell, "hunger": 1.0}):
+		if not animal_simulation.register_agent("grazer", "grazer:1", {"cell": start, "habitat_cell": cell, "hunger": 1.0}):
 			return
 	unsupported_residency_ticks["grazer:1"] = 0
 	grazer_awake = true
 	grazer_root.visible = true
-	grazer_cell = cell
-	var world: Vector2 = ecology.world_position(cell.x, cell.y)
-	grazer_target_position = Vector3(world.x, ecology.terrain_height(cell) + 0.28, world.y)
+	grazer_cell = start
+	var world: Vector2 = ecology.world_position(start.x, start.y)
+	grazer_target_position = Vector3(world.x, ecology.terrain_height(start) + 0.28, world.y)
 	grazer_root.position = grazer_target_position
 	grazer_wake_event_id = evidence.record_event(ecology.tick, "organism.grazer_%s" % ("returned" if returning else "awakened"), "grazer:1", [], {
 		"cell": cell,
@@ -2708,12 +3055,12 @@ func _awaken_first_grazer(habitat: Dictionary) -> void:
 	grazer_head.material_override = _material(Color("f2c36d"), 0.48, Color("8f571c"))
 	grazer_label.visible = true
 	grazer_glow.visible = true
-	_add_discovery("Grazer — settles where concentrated forage meets established cover")
+	_add_discovery("Grazer — wakes from a buried shell where soaked ground meets forage and cover")
 	if returning:
-		_set_status("Forage and nearby cover recover. Grazer tracks return to the same kind of local edge that supported them before.")
+		_set_status("Forage and cover have come back around it. The grazer's shell opens where it went to sleep.")
 	else:
 		_presence_focus("grazer", grazer_root.position)
-		_set_status("A stone-like shell unfolds beside open forage and nearby cover. The flame moves beside it and repeats the same single pulse used at the moss.")
+		_set_status("A stone-like shell in the soaked ground unfolds beside open forage and nearby cover. The flame moves beside it and repeats the same single pulse used at the moss.")
 	evidence.checkpoint(ecology.tick, "episode_boundary", _evidence_snapshot())
 
 
@@ -2829,6 +3176,7 @@ func _update_disturbance(delta: float) -> void:
 			_add_discovery("Heat-and-dust front — dries cells and carries toxicity eastward")
 			_presence_warn_about(dust_front.position)
 			_set_status("The front enters the basin. The flame cuts across its path, recoils, and sounds three descending amber pulses.")
+			_plan_predator_descent()
 		return
 
 	disturbance_timer += delta
@@ -2837,6 +3185,7 @@ func _update_disturbance(delta: float) -> void:
 		ecology.apply_dust_front(disturbance_column)
 		disturbance_column += 1
 		_refresh_ecology_visuals()
+	_land_predator_from_dust()
 	if disturbance_column < EcologyGridModel.WIDTH:
 		var front_world: Vector2 = ecology.world_position(disturbance_column, int(EcologyGridModel.HEIGHT / 2))
 		dust_front.position.x = front_world.x
@@ -2846,6 +3195,43 @@ func _update_disturbance(delta: float) -> void:
 		evidence.record_event(ecology.tick, "environment.disturbance_passed", "heat_dust_front:1", [disturbance_event_id], ecology.summary())
 		evidence.checkpoint(ecology.tick, "episode_boundary", _evidence_snapshot())
 		_set_status("The front passes. Some bare cells are hot and toxic; connected moss and fungus begin recovering from retained moisture and nutrients.")
+
+
+# Predators drift in the high air; that is their dormancy. A dust front
+# brings one down, and only onto ground where grazers live.
+func _plan_predator_descent() -> void:
+	predator_descent = {}
+	var stable_id := ""
+	for candidate in PREDATOR_ROSTER:
+		var agent: Dictionary = animal_simulation.agent_state(candidate)
+		if agent.is_empty() or (bool(agent["alive"]) and not bool(agent.get("present", true))):
+			stable_id = candidate
+			break
+	if stable_id.is_empty():
+		return
+	var habitat := _best_predator_arrival_habitat()
+	if habitat.is_empty():
+		return
+	predator_descent = {"id": stable_id, "habitat": habitat}
+	evidence.record_event(ecology.tick, "organism.predator_riding_front", stable_id, [disturbance_event_id], {"cell": habitat["cell"]})
+
+
+# It drops out of the front as the dust passes over the grazers' range.
+func _land_predator_from_dust() -> void:
+	if predator_descent.is_empty():
+		return
+	var habitat: Dictionary = predator_descent["habitat"]
+	var cell: Vector2i = habitat["cell"]
+	if disturbance_column <= cell.x:
+		return
+	var stable_id := String(predator_descent["id"])
+	predator_descent = {}
+	_register_ecological_role("predator", stable_id, habitat)
+	if not bool(animal_simulation.agent_state(stable_id).get("present", false)):
+		return
+	var landing: Vector2 = ecology.world_position(cell.x, cell.y)
+	predator_flights[stable_id] = {"time": PREDATOR_FALL_SECONDS, "ground": landing}
+	_set_status("Something glides down out of the dust wall onto the grazers' ground: a heavy, banded lizard on small stiff wings. It lands hard and folds them.", 4.0)
 
 
 func _reveal_presence_nudge() -> void:
@@ -3053,7 +3439,7 @@ func _water_nearby_patch() -> void:
 			_set_status("Water settles into the terrain-bound depression as a finite pool. The flame repeats its focus pulse at the changing cells.", 2.6)
 		return
 	if nearest_patch == "":
-		_set_status("Water must be committed at a specific patch, not poured from a distance.")
+		_water_ground()
 		return
 	if water_doses <= 0:
 		_set_status("No water is ready. The wreck's water system is producing another dose.")
@@ -3088,6 +3474,45 @@ func _water_nearby_patch() -> void:
 		_set_status("The film darkens. The scanner detects dormant threads taking up moisture, but no living moss is confirmed yet.", 2.6)
 	elif not established:
 		_set_status("The film darkens and its dormant-life trace reacts—but heat is already stripping the moisture away.", 2.6)
+
+
+# What SPACE would water here: the refuge, a named patch, or the ground cell
+# underfoot.
+func _water_target() -> String:
+	if near_refuge:
+		return "refuge"
+	if nearest_patch != "":
+		return nearest_patch
+	var cell: Vector2i = ecology.world_to_cell(Vector2(astronaut.position.x, astronaut.position.z))
+	return "cell:%d,%d" % [cell.x, cell.y]
+
+
+# Water can be poured on any ground from the same finite doses; ground that is
+# still soaked refuses it, so a dose is not wasted. Soaking a buried grazer's
+# shell is one way to wake it.
+func _water_ground() -> void:
+	if water_doses <= 0:
+		_set_status("No water is ready. The wreck's water system is producing another dose.")
+		return
+	var world := Vector2(astronaut.position.x, astronaut.position.z)
+	var cell: Vector2i = ecology.world_to_cell(world)
+	if _local_moisture(cell) >= GROUND_SOAKED_MOISTURE:
+		_set_status("This ground is still soaked. Let it take up what it has before spending more water.")
+		return
+	var command_id := _record_command("water", "cell:%d,%d" % [cell.x, cell.y], {"doses": 1, "site": "ground"})
+	water_doses -= 1
+	ecology_started = true
+	ecology.add_water(world)
+	last_intervention_event_id = evidence.record_event(ecology.tick, "intervention.water_added", "cell:%d,%d" % [cell.x, cell.y], [command_id], {"site": "ground", "remaining_doses": water_doses})
+	evidence.checkpoint(ecology.tick, "player_intervention", _evidence_snapshot())
+	var beside_shell := false
+	for shell in sleeper_field.cells_for("grazer"):
+		if _cell_distance(shell, cell) <= 1:
+			beside_shell = true
+	if beside_shell:
+		_set_status("Water soaks into the ground around the grey buried hump. The soil darkens and holds it, for now.", 2.6)
+	else:
+		_set_status("Water soaks into the ground here and darkens it.", 2.6)
 
 
 func _interact() -> void:
