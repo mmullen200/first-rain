@@ -61,6 +61,7 @@ const EvidenceRecorder = preload("res://evidence_recorder.gd")
 const AnimalSimulation = preload("res://animal_simulation.gd")
 const WeatherSimulation = preload("res://weather_simulation.gd")
 const AstronautFigure = preload("res://astronaut_figure.gd")
+const WreckSpaceplane = preload("res://wreck_spaceplane.gd")
 const HoodooField = preload("res://hoodoo_field.gd")
 const GardenSpire = preload("res://garden_spire.gd")
 
@@ -583,9 +584,12 @@ func _build_world() -> void:
 	# Wreckage sits on the surveyed 6.9 m flank above the Shelter Bowl.
 	var wreck_world: Vector2 = ecology.world_position(EcologyGridModel.WRECK_CELL.x, EcologyGridModel.WRECK_CELL.y)
 	var wreck_height: float = ecology.terrain_height(EcologyGridModel.WRECK_CELL)
-	_create_box(Vector3(wreck_world.x - 0.8, wreck_height + 0.55, wreck_world.y - 0.7), Vector3(3.6, 1.05, 1.65), Color("697276"), Vector3(0.0, 0.28, 0.0))
-	_create_box(Vector3(wreck_world.x + 0.7, wreck_height + 0.28, wreck_world.y + 0.4), Vector3(4.7, 0.13, 1.2), Color("879095"), Vector3(0.0, -0.24, 0.05))
-	_create_box(Vector3(wreck_world.x - 1.1, wreck_height + 1.15, wreck_world.y - 0.55), Vector3(1.25, 0.52, 1.1), Color("29343b"), Vector3(0.0, 0.28, 0.0))
+	# The spaceplane lies just north of the start, nose toward the camera, with
+	# its torn right wing propped over the emergency cache.
+	var spaceplane: Node3D = WreckSpaceplane.new()
+	spaceplane.position = Vector3(wreck_world.x - 0.3, wreck_height, wreck_world.y - 1.45)
+	spaceplane.rotation.y = 1.32
+	add_child(spaceplane)
 	var cache_world := Vector2(wreck_world.x - 0.15, wreck_world.y + 1.38)
 	var cache_height: float = ecology.terrain_height(ecology.world_to_cell(cache_world))
 	emergency_cache = _create_box(Vector3(cache_world.x, cache_height + 0.25, cache_world.y), Vector3(0.9, 0.45, 0.62), Color("8e7048"), Vector3(0.0, 0.16, 0.0))
