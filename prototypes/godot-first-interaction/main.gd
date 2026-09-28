@@ -84,7 +84,7 @@ const AstronautFigure = preload("res://astronaut_figure.gd")
 const WreckSpaceplane = preload("res://wreck_spaceplane.gd")
 const VectorSwarm = preload("res://vector_swarm.gd")
 const GilaGlider = preload("res://gila_glider.gd")
-const Stoneback = preload("res://stoneback.gd")
+const GrazerFigure = preload("res://grazer_figure.gd")
 const HoodooField = preload("res://hoodoo_field.gd")
 const GardenSpire = preload("res://garden_spire.gd")
 const SleeperField = preload("res://sleeper_field.gd")
@@ -194,7 +194,7 @@ var last_astronaut_signal_timer := 0.0
 var refuge_signal_acknowledged := false
 
 var grazer_root: Node3D
-var grazer_body: Stoneback
+var grazer_body: GrazerFigure
 var grazer_label: Label3D
 var grazer_glow: OmniLight3D
 var grazer_awake := false
@@ -1109,14 +1109,14 @@ func _build_grazer() -> void:
 	grazer_root.visible = false
 	add_child(grazer_root)
 
-	# The stoneback stands with its feet on the ground below the root.
-	grazer_body = Stoneback.new()
+	# The grazer stands with its feet on the ground below the root.
+	grazer_body = GrazerFigure.new()
 	grazer_body.position.y = -0.28
 	grazer_root.add_child(grazer_body)
 
 	grazer_label = Label3D.new()
 	grazer_label.text = "GRAZER"
-	grazer_label.position = Vector3(0.0, 0.68, 0.0)
+	grazer_label.position = Vector3(0.0, 1.05, 0.0)
 	grazer_label.font_size = 30
 	grazer_label.pixel_size = 0.0045
 	grazer_label.modulate = Color("9ee8d8")
@@ -1154,7 +1154,7 @@ func _build_ecological_animal_markers() -> void:
 		if String(stable_id).begins_with("predator"):
 			body = GilaGlider.new(specification[1])
 		elif String(stable_id).begins_with("grazer"):
-			body = Stoneback.new()
+			body = GrazerFigure.new()
 			body.position.y = -0.25
 		elif String(stable_id).begins_with("vector"):
 			body = VectorSwarm.new()
@@ -1180,7 +1180,7 @@ func _build_ecological_animal_markers() -> void:
 			body.visible = false
 		var label := Label3D.new()
 		label.text = specification[0]
-		label.position.y = 0.58
+		label.position.y = 1.0 if String(stable_id).begins_with("grazer") else 0.58
 		label.font_size = 26
 		label.pixel_size = 0.0042
 		label.modulate = specification[1]
@@ -2728,12 +2728,12 @@ func _update_vector_markers(delta: float) -> void:
 func _add_grazer_marker(id: String) -> void:
 	var marker := Node3D.new()
 	marker.visible = false
-	var body := Stoneback.new()
+	var body := GrazerFigure.new()
 	body.position.y = -0.25
 	marker.add_child(body)
 	var label := Label3D.new()
 	label.text = "GRAZER"
-	label.position.y = 0.58
+	label.position.y = 1.0
 	label.font_size = 26
 	label.pixel_size = 0.0042
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
@@ -2752,10 +2752,10 @@ func _update_grazer_markers(delta: float) -> void:
 		var world: Vector2 = ecology.world_position(cell.x, cell.y)
 		var speed := 1.8 if agent["state"] == "fleeing" else (0.85 if agent["state"] == "following parent" else GRAZER_MOVE_SPEED)
 		_move_ground_actor(marker, world, 0.25, speed, delta)
-		var stoneback = marker.get_child(0)
-		if bool(agent.get("juvenile", false)) != stoneback.juvenile:
-			stoneback.set_juvenile(bool(agent.get("juvenile", false)))
-		stoneback.animate(delta, String(agent["state"]))
+		var figure = marker.get_child(0)
+		if bool(agent.get("juvenile", false)) != figure.juvenile:
+			figure.set_juvenile(bool(agent.get("juvenile", false)))
+		figure.animate(delta, String(agent["state"]))
 
 
 func _update_ground_animal_markers(delta: float) -> void:

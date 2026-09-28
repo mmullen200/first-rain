@@ -211,22 +211,17 @@ func _add_sleeper(species: String, cell: Vector2i, ecology, rng: RandomNumberGen
 	marker.add_child(body)
 	match species:
 		"grazer":
-			# A stoneback curled into a ball, its plates locked shut and crusted
-			# with dust, half sunk in the ground: the shell is the animal.
-			body.add_child(_ellipsoid(0.24, Vector3(1.0, 0.85, 1.12), Vector3(0.0, 0.1, 0.0), Color("6c6b63")))
-			for seam in range(5):
-				var along := -0.18 + 0.09 * float(seam)
-				var ring_radius := 0.24 * sqrt(1.0 - pow(along / 0.27, 2.0))
-				var ring := MeshInstance3D.new()
-				var torus := TorusMesh.new()
-				torus.inner_radius = ring_radius - 0.012
-				torus.outer_radius = ring_radius + 0.012
-				ring.mesh = torus
-				ring.rotation.x = PI * 0.5
-				ring.scale = Vector3(1.0, 1.0, 0.85)
-				ring.position = Vector3(0.0, 0.1, along)
-				ring.material_override = _material(Color("55534c"), 0.98)
-				body.add_child(ring)
+			# A grazer curled up asleep, neck wrapped round one side with its
+			# broad muzzle tucked by the tail, crusted grey with dust and half
+			# sunk in the ground.
+			body.add_child(_ellipsoid(0.5, Vector3(0.44, 0.3, 0.62), Vector3(0.0, 0.1, 0.0), Color("6c6b63")))
+			for bead in range(8):
+				var neck_angle := 0.3 + 0.36 * float(bead)
+				body.add_child(_ellipsoid(0.1 - 0.005 * float(bead), Vector3(1.0, 0.85, 1.25), Vector3(0.25 * sin(neck_angle), 0.08, 0.33 * cos(neck_angle)), Color("6f6c61")))
+			body.add_child(_ellipsoid(0.5, Vector3(0.24, 0.08, 0.13), Vector3(0.1, 0.06, -0.36), Color("75705f")))
+			for bead in range(7):
+				var tail_angle := -0.3 - 0.36 * float(bead)
+				body.add_child(_ellipsoid(0.085 - 0.009 * float(bead), Vector3(1.0, 0.8, 1.25), Vector3(0.25 * sin(tail_angle), 0.06, 0.33 * cos(tail_angle) * -1.0), Color("65665f")))
 		"vector":
 			# A few pale pupal cases poking up through the soil.
 			for pupa in range(3):
