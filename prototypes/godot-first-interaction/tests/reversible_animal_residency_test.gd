@@ -84,6 +84,8 @@ func _assert_arrival_and_departure_need_persistence() -> void:
 func _new_scene():
 	var scene = load("res://main.tscn").instantiate()
 	root.add_child(scene)
+	# These checks cover dying and going dormant, which the playtest setting turns off.
+	scene.set_life_persists(false)
 	await process_frame
 	return scene
 

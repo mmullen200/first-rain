@@ -34,6 +34,13 @@ const DAM_HEIGHT_SCALE := 2.0
 # in the ecology breaks them down; only the colony's workers remove them.
 const SPRING_SEAL_MATTER := 0.5
 const SPRING_FLOW := 0.05
+# While life_persists is set, living things never die out on their own:
+# drying, heat, toxicity, dust and ordinary turnover can thin a patch, but not
+# below LIFE_FLOOR once it has reached it (a thinner patch keeps what it has).
+# Animals eating, harvest, transplanting and seed-setting still take. Drop a
+# layer from PERSISTENT_LAYERS to let it die back again.
+const LIFE_FLOOR := 0.2
+const PERSISTENT_LAYERS := ["moss", "fungus", "fruiting", "microbial_crust", "rhizome", "canopy", "aquatic_producer", "aquatic_consumer"]
 
 var moisture := PackedFloat32Array()
 var elevation := PackedFloat32Array()
@@ -72,6 +79,7 @@ var habitat_shade := PackedFloat32Array()
 var equipment_shade_world := Vector2.ZERO
 var equipment_shade_active := false
 var tick := 0
+var life_persists := false
 
 
 func _init() -> void:
@@ -257,6 +265,7 @@ func _remove_stray_lows() -> void:
 
 
 func step() -> void:
+	var living_before := _living_layers() if life_persists else {}
 	var next_moisture: PackedFloat32Array = moisture.duplicate()
 	var next_temperature: PackedFloat32Array = temperature.duplicate()
 	var next_toxicity: PackedFloat32Array = toxicity.duplicate()
@@ -487,6 +496,8 @@ func step() -> void:
 	fungal_spores = next_fungal_spores
 	dam_material = next_dam_material
 	throughflow = next_throughflow
+	if life_persists:
+		_hold_life(living_before)
 	# The spring runs once its seal has been eaten away, and stays open.
 	var spring_index := _index(HEADWALL_SPRING_CELL.x, HEADWALL_SPRING_CELL.y)
 	if not spring_open and old_matter[spring_index] <= 0.0001:
@@ -843,13 +854,34 @@ func apply_dust_front(column: int) -> void:
 	for y in range(HEIGHT):
 		var index: int = _index(x, y)
 		var protection: float = clampf(moss[index] * 0.58 + fungus[index] * 0.22, 0.0, 0.72)
-		var moss_damage: float = moss[index] * (1.0 - protection) * 0.12
+		var moss_damage: float = minf(moss[index] * (1.0 - protection) * 0.12, moss[index] - _kept("moss", moss[index]))
 		moisture[index] = maxf(0.0, moisture[index] - 0.2 * (1.0 - protection))
 		temperature[index] = clampf(temperature[index] + 0.16, 0.0, 1.0)
 		toxicity[index] = clampf(toxicity[index] + 0.075 * (1.0 - protection), 0.0, 1.0)
 		moss[index] = maxf(0.0, moss[index] - moss_damage)
 		dead_biomass[index] = clampf(dead_biomass[index] + moss_damage, 0.0, 1.0)
-		fruiting[index] *= 0.72 + protection * 0.2
+		fruiting[index] = maxf(fruiting[index] * (0.72 + protection * 0.2), _kept("fruiting", fruiting[index]))
+
+
+# How much of a living layer must survive a loss while life persists.
+func _kept(layer: String, amount: float) -> float:
+	return minf(amount, LIFE_FLOOR) if life_persists and layer in PERSISTENT_LAYERS else 0.0
+
+
+func _living_layers() -> Dictionary:
+	var layers := {}
+	for layer in PERSISTENT_LAYERS:
+		layers[layer] = get(layer)
+	return layers
+
+
+func _hold_life(before: Dictionary) -> void:
+	for layer in PERSISTENT_LAYERS:
+		var was: PackedFloat32Array = before[layer]
+		var now: PackedFloat32Array = get(layer)
+		for index in range(now.size()):
+			now[index] = maxf(now[index], minf(was[index], LIFE_FLOOR))
+		set(layer, now)
 
 
 func sample_world(world: Vector2) -> Dictionary:

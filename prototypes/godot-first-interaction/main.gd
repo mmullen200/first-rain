@@ -76,6 +76,11 @@ const GROUND_SOAKED_MOISTURE := 0.3
 const PREDATOR_FALL_SECONDS := 2.4
 const PREDATOR_GLIDE_RUN := 9.0
 const PREDATOR_GLIDE_HEIGHT := 5.0
+# Playtest setting: once a plant or animal has appeared it stays alive. Plants
+# can thin but not die out, animals never go back to sleep when their ground
+# fails, a stirring sleeper settles back down instead of dying, and a hunted
+# grazer is wounded but not killed. Losses are to be added back gradually.
+const LIFE_PERSISTS := true
 const EcologyGridModel = preload("res://ecology_grid.gd")
 const EvidenceRecorder = preload("res://evidence_recorder.gd")
 const AnimalSimulation = preload("res://animal_simulation.gd")
@@ -239,6 +244,7 @@ var garden_spire: Node3D
 var first_rain_announced := false
 
 var disturbance_state := "quiet"
+var life_persists := false
 var disturbance_timer := 0.0
 var disturbance_column := -1
 var dust_front: MeshInstance3D
@@ -751,6 +757,7 @@ func _build_world() -> void:
 func _build_ecology_grid() -> void:
 	ecology = EcologyGridModel.new()
 	animal_simulation = AnimalSimulation.new(ecology, 1)
+	set_life_persists(LIFE_PERSISTS)
 	weather_simulation = WeatherSimulation.new(1701)
 	drainage_affinity_cache = _drainage_affinity_snapshot()
 	terrain_shader = Shader.new()
@@ -2023,7 +2030,9 @@ func _update_sleepers() -> void:
 		var cell: Vector2i = sleeper_field.sleepers[index]["cell"]
 		var habitat := {} if species == "grazer" and float(sleeper["soak"]) < GRAZER_SOAK_MOISTURE else _sleeper_habitat(species, cell, scores[species])
 		if habitat.is_empty():
-			if state == "stirring":
+			if state == "stirring" and life_persists:
+				_sleeper_settled(index)
+			elif state == "stirring":
 				_sleeper_died(index)
 			else:
 				sleeper["observations"] = 0
@@ -2095,6 +2104,17 @@ func _free_sleeper_id(species: String) -> String:
 		if not claimed:
 			return stable_id
 	return ""
+
+
+# While life persists, a stirring sleeper that loses what woke it settles
+# back to sleep and can stir again.
+func _sleeper_settled(index: int) -> void:
+	var sleeper: Dictionary = sleeper_states[index]
+	sleeper["state"] = "dormant"
+	sleeper["observations"] = 0
+	if not animal_simulation.agents.has(String(sleeper["agent_id"])):
+		sleeper["agent_id"] = ""
+	sleeper_field.show_state(index, "dormant", ecology)
 
 
 func _sleeper_died(index: int) -> void:
@@ -2225,7 +2245,15 @@ func _stirring_queen() -> Dictionary:
 	return best
 
 
+func set_life_persists(persists: bool) -> void:
+	life_persists = persists
+	ecology.life_persists = persists
+	animal_simulation.life_persists = persists
+
+
 func _update_resident_habitat_support() -> void:
+	if life_persists:
+		return
 	var habitat_snapshot: Dictionary = ecology.full_snapshot()
 	habitat_snapshot["drainage_affinity"] = _drainage_affinity_snapshot()
 	for stable_id in animal_simulation.agents:

@@ -8,6 +8,8 @@ func _initialize() -> void:
 func _run() -> void:
 	var scene = load("res://main.tscn").instantiate()
 	root.add_child(scene)
+	# These checks cover dying and going dormant, which the playtest setting turns off.
+	scene.set_life_persists(false)
 	await process_frame
 	scene.astronaut.position = scene.emergency_cache.position
 	scene._update_nearby_interactions()
