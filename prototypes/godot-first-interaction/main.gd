@@ -3397,7 +3397,7 @@ func _water_nearby_patch() -> void:
 	if not established:
 		patch["state"] = "wet"
 		patch["age"] = 0.0
-	ecology.add_water(Vector2(patch_position.x, patch_position.z))
+	ecology.pour_water(Vector2(patch_position.x, patch_position.z))
 	var watered_cell: Vector2i = ecology.world_to_cell(Vector2(patch_position.x, patch_position.z))
 	last_intervention_event_id = evidence.record_event(ecology.tick, "intervention.water_added", "cell:%d,%d" % [watered_cell.x, watered_cell.y], [command_id], {"site": nearest_patch, "remaining_doses": water_doses, "recovery": established})
 	evidence.checkpoint(ecology.tick, "player_intervention", _evidence_snapshot())
@@ -3440,7 +3440,7 @@ func _water_ground() -> void:
 	var command_id := _record_command("water", "cell:%d,%d" % [cell.x, cell.y], {"doses": 1, "site": "ground"})
 	water_doses -= 1
 	ecology_started = true
-	ecology.add_water(world)
+	ecology.pour_water(world)
 	last_intervention_event_id = evidence.record_event(ecology.tick, "intervention.water_added", "cell:%d,%d" % [cell.x, cell.y], [command_id], {"site": "ground", "remaining_doses": water_doses})
 	evidence.checkpoint(ecology.tick, "player_intervention", _evidence_snapshot())
 	var beside_shell := false

@@ -598,6 +598,32 @@ func add_water(world: Vector2, amount := 0.9, radius := 4.0) -> void:
 				surface_water[index] = clampf(surface_water[index] + amount * strength * 0.24, 0.0, 1.0)
 
 
+# The Astronaut pouring a dose onto the ground. Unlike add_water, which wets
+# an even disc, a pour only soaks cells level with or below the cell it lands
+# on, more so the further they drop, and its surface water starts down the
+# flow path, so it runs away downhill rather than spreading uphill.
+func pour_water(world: Vector2, amount := 0.9, radius := 4.0) -> void:
+	var source := world_to_cell(world)
+	var source_height := hydraulic_height(source)
+	for y in range(HEIGHT):
+		for x in range(WIDTH):
+			var distance: float = world_position(x, y).distance_to(world)
+			if distance > radius:
+				continue
+			var drop := source_height - hydraulic_height(Vector2i(x, y))
+			if drop < -0.02:
+				continue
+			var strength: float = (1.0 - distance / radius) * (1.0 + clampf(drop / 0.5, 0.0, 1.0))
+			var index: int = _index(x, y)
+			moisture[index] = clamp(moisture[index] + amount * minf(strength, 1.0), 0.0, 1.0)
+	# Where the flow path stops early, in a hollow, the rest pools there.
+	var path := flow_path(source, 3)
+	var shares: Array = [[1.0], [0.5, 0.5], [0.5, 0.3, 0.2]][path.size() - 1]
+	for step in range(path.size()):
+		var index: int = _index(path[step].x, path[step].y)
+		surface_water[index] = clampf(surface_water[index] + amount * 0.96 * float(shares[step]), 0.0, 1.0)
+
+
 func add_shade(world: Vector2, amount := 0.95, radius := 4.0) -> void:
 	for y in range(HEIGHT):
 		for x in range(WIDTH):
