@@ -84,6 +84,7 @@ const AstronautFigure = preload("res://astronaut_figure.gd")
 const WreckSpaceplane = preload("res://wreck_spaceplane.gd")
 const VectorSwarm = preload("res://vector_swarm.gd")
 const GilaGlider = preload("res://gila_glider.gd")
+const Stoneback = preload("res://stoneback.gd")
 const HoodooField = preload("res://hoodoo_field.gd")
 const GardenSpire = preload("res://garden_spire.gd")
 const SleeperField = preload("res://sleeper_field.gd")
@@ -193,8 +194,7 @@ var last_astronaut_signal_timer := 0.0
 var refuge_signal_acknowledged := false
 
 var grazer_root: Node3D
-var grazer_body: MeshInstance3D
-var grazer_head: MeshInstance3D
+var grazer_body: Stoneback
 var grazer_label: Label3D
 var grazer_glow: OmniLight3D
 var grazer_awake := false
@@ -565,8 +565,6 @@ func _seed_predator_fixture() -> void:
 	grazer_awake = true
 	grazer_label.visible = true
 	grazer_glow.visible = true
-	grazer_body.material_override = _material(Color("76d2bd"), 0.58, Color("237563"))
-	grazer_head.material_override = _material(Color("f2c36d"), 0.48, Color("8f571c"))
 	var grazer_world: Vector2 = ecology.world_position(7, 9)
 	grazer_root.position = Vector3(grazer_world.x, ecology.terrain_height(Vector2i(7, 9)) + 0.28, grazer_world.y)
 	var cell := Vector2i(10, 11)
@@ -1111,23 +1109,10 @@ func _build_grazer() -> void:
 	grazer_root.visible = false
 	add_child(grazer_root)
 
-	grazer_body = MeshInstance3D.new()
-	var body_mesh := SphereMesh.new()
-	body_mesh.radius = 0.24
-	body_mesh.height = 0.38
-	grazer_body.mesh = body_mesh
-	grazer_body.scale = Vector3(1.35, 0.62, 0.9)
-	grazer_body.material_override = _material(Color("65665f"), 0.94)
+	# The stoneback stands with its feet on the ground below the root.
+	grazer_body = Stoneback.new()
+	grazer_body.position.y = -0.28
 	grazer_root.add_child(grazer_body)
-
-	grazer_head = MeshInstance3D.new()
-	var head_mesh := SphereMesh.new()
-	head_mesh.radius = 0.15
-	head_mesh.height = 0.25
-	grazer_head.mesh = head_mesh
-	grazer_head.position = Vector3(0.0, 0.02, -0.3)
-	grazer_head.material_override = _material(Color("5b5c56"), 0.9)
-	grazer_root.add_child(grazer_head)
 
 	grazer_label = Label3D.new()
 	grazer_label.text = "GRAZER"
@@ -1168,6 +1153,9 @@ func _build_ecological_animal_markers() -> void:
 		var body: Node3D
 		if String(stable_id).begins_with("predator"):
 			body = GilaGlider.new(specification[1])
+		elif String(stable_id).begins_with("grazer"):
+			body = Stoneback.new()
+			body.position.y = -0.25
 		elif String(stable_id).begins_with("vector"):
 			body = VectorSwarm.new()
 		else:
@@ -2740,12 +2728,8 @@ func _update_vector_markers(delta: float) -> void:
 func _add_grazer_marker(id: String) -> void:
 	var marker := Node3D.new()
 	marker.visible = false
-	var body := MeshInstance3D.new()
-	var mesh := SphereMesh.new()
-	mesh.radius = 0.2
-	mesh.height = 0.36
-	body.mesh = mesh
-	body.material_override = _material(Color("8edbc3"), 0.58)
+	var body := Stoneback.new()
+	body.position.y = -0.25
 	marker.add_child(body)
 	var label := Label3D.new()
 	label.text = "GRAZER"
@@ -2768,6 +2752,10 @@ func _update_grazer_markers(delta: float) -> void:
 		var world: Vector2 = ecology.world_position(cell.x, cell.y)
 		var speed := 1.8 if agent["state"] == "fleeing" else (0.85 if agent["state"] == "following parent" else GRAZER_MOVE_SPEED)
 		_move_ground_actor(marker, world, 0.25, speed, delta)
+		var stoneback = marker.get_child(0)
+		if bool(agent.get("juvenile", false)) != stoneback.juvenile:
+			stoneback.set_juvenile(bool(agent.get("juvenile", false)))
+		stoneback.animate(delta, String(agent["state"]))
 
 
 func _update_ground_animal_markers(delta: float) -> void:
@@ -2959,8 +2947,7 @@ func _update_grazer(delta: float) -> void:
 	grazer_target_position = Vector3(target_world.x, _terrain_surface_height(target_world) + 0.28, target_world.y)
 	var speed := 1.8 if authoritative["state"] == "fleeing" else GRAZER_MOVE_SPEED
 	_move_ground_actor(grazer_root, target_world, 0.28, speed, delta)
-	if grazer_root.position.distance_to(grazer_target_position) > 0.01:
-		grazer_root.look_at(grazer_target_position, Vector3.UP)
+	grazer_body.animate(delta, String(authoritative["state"]))
 
 
 # The first grazer rises out of its shell at `start_cell` and walks to the
@@ -2988,9 +2975,6 @@ func _awaken_first_grazer(habitat: Dictionary, start_cell := Vector2i(-1, -1)) -
 		"habitat_evidence": habitat["evidence"]
 	})
 	_set_grazer_state("seeking")
-	grazer_root.scale = Vector3.ONE * 1.35
-	grazer_body.material_override = _material(Color("76d2bd"), 0.58, Color("237563"))
-	grazer_head.material_override = _material(Color("f2c36d"), 0.48, Color("8f571c"))
 	grazer_label.visible = true
 	grazer_glow.visible = true
 	_add_discovery("Grazer — wakes from a buried shell where soaked ground meets forage and cover")
