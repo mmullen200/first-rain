@@ -90,9 +90,9 @@ func _check_colony_opens_the_spring() -> void:
 	var spire: Node3D = scene.hoodoo_field.get_node("Hoodoo_%d_%d" % [spring.x, spring.y])
 	var downstream: Vector2i = scene.ecology.flow_path(spring)[2]
 	var dry_downstream: float = scene.ecology.resource_amount(downstream, "surface_water")
-	# Eating a whole spire now takes over an hour of play, too long to simulate
-	# here. Start the seal just above half, check the cap falls as it passes
-	# half, then leave only its last crumbs and check that eating them opens
+	# Eating a whole seal now takes over an hour of play, too long to simulate
+	# here. Start the seal just above half, check its last hoodoo falls as it
+	# passes half, then leave only its last crumbs and check that eating them opens
 	# the spring.
 	scene.ecology.old_matter[spring.y * scene.ecology.WIDTH + spring.x] = EcologyGridModel.SPRING_SEAL_MATTER * 0.505
 	var halfway_step := -1
@@ -104,7 +104,9 @@ func _check_colony_opens_the_spring() -> void:
 			plants_cut = plants_cut or event["taxonomy"] == "organism.colony_plant_gathered"
 		if halfway_step < 0 and scene.ecology.resource_amount(spring, "old_matter") < EcologyGridModel.SPRING_SEAL_MATTER * 0.5:
 			halfway_step = step
-			_assert(not spire.get_node("Mass/Cap").visible, "a half-eaten spire should have lost its cap")
+			for index in range(1, 4):
+				_assert(not spire.get_node("Mass/Crown%d" % index).visible, "a half-eaten seal should have lost all three of its hoodoos")
+			_assert(spire.get_node("Mass").visible, "the bare mass should still cover the spring")
 			scene.ecology.old_matter[spring.y * scene.ecology.WIDTH + spring.x] = 0.004
 		if scene.ecology.spring_open:
 			opened_step = step

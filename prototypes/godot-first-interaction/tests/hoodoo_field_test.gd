@@ -23,13 +23,19 @@ func _initialize() -> void:
 	_assert(cells == repeat.hoodoo_cells, "the seeded hoodoo field should build identically every run")
 	_assert(cells.has(EcologyGrid.HEADWALL_SPRING_CELL), "a hoodoo should seal the Headwall spring")
 	var spire_height: float = field.hoodoo_heights[EcologyGrid.HEADWALL_SPRING_CELL]
+	var seal: Node3D = field.get_node("Hoodoo_%d_%d" % [EcologyGrid.HEADWALL_SPRING_CELL.x, EcologyGrid.HEADWALL_SPRING_CELL.y])
+	_assert(seal.has_node("Mass/Mound"), "the spring seal should be a broad mass")
+	for index in range(1, 4):
+		_assert(seal.has_node("Mass/Crown%d" % index), "three small hoodoos should stand out of the spring seal")
+	_assert(not seal.has_node("Mass/Crown4"), "the spring seal should carry exactly three hoodoos")
+	_assert(field.hoodoo_widths[EcologyGrid.HEADWALL_SPRING_CELL] > 1.5, "the spring seal should be much broader than an ordinary hoodoo")
 	var heights: Array[float] = []
 	var watercourse: Array = ecology.flow_path(EcologyGrid.HEADWALL_SPRING_CELL)
 	for cell in cells:
 		heights.append(field.hoodoo_heights[cell])
 		if cell == EcologyGrid.HEADWALL_SPRING_CELL:
 			continue
-		_assert(field.hoodoo_heights[cell] < spire_height, "the spring spire should be the tallest hoodoo")
+		_assert(field.hoodoo_heights[cell] < spire_height, "the spring seal should stand taller than any other hoodoo")
 		_assert(Vector2(cell).distance_to(Vector2(EcologyGrid.WRECK_CELL)) >= HoodooField.WRECK_CLEARANCE_CELLS, "hoodoo %s crowds the wreck" % cell)
 		_assert(not watercourse.has(cell), "hoodoo %s blocks the spring watercourse" % cell)
 		_assert(ecology.downhill_neighbor(cell) != cell, "hoodoo %s stands in a water-holding low" % cell)
@@ -72,7 +78,7 @@ func _physics_process(_delta: float) -> bool:
 	if failed:
 		quit(1)
 	else:
-		print("PASS: seeded hoodoos hold sleeping queens behind sealed chambers, vary in size, keep clear of the wreck and water, seal the spring with the tallest spire, and block the astronaut")
+		print("PASS: seeded hoodoos hold sleeping queens behind sealed chambers, vary in size, keep clear of the wreck and water, seal the spring with a broad mass carrying three hoodoos, and block the astronaut")
 		quit(0)
 	return true
 

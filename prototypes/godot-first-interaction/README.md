@@ -40,7 +40,7 @@ Branch: `prototype/four-bowls-terrain`. The Crash Basin now follows the Four Bow
 
 Terrain remains square and vertical-sided. Each authoritative Ecological Cell renders as a 3 × 3 patch of nine narrow voxel columns whose sampled heights add finer stepped relief without changing ecology or hydrology. Ecological state owns their shared top color; exposed sides use world-scaled pixel variation and elevation-sensitive rock strata. The Astronaut and ground animals follow a continuous presentation surface beneath those steps, so movement stays smooth while the landscape remains blocky. Boundary Ecological Cells now shed stranded water out of the Crash Basin instead of forming permanent edge puddles. The blocked spring is presently a situated terrain cue, not yet a renewable-flow mechanic; spring opening and re-closing remain separate interaction questions.
 
-Hoodoos stand around the Crash Basin (`hoodoo_field.gd`): banded rust-coloured spires of the previous biosphere's undecayed remains, most wearing a tilted cap boulder, placed in small seeded groups that stay clear of the wreck, the named landmarks, the water-holding lows and the spring's watercourse. The tallest stands over the blocked Headwall spring. They are objects on Ecological Cells rather than terrain, so drainage is unchanged; the Astronaut collides with them, and other animals still pass through them. The colony eats them (see below).
+Hoodoos stand around the Crash Basin (`hoodoo_field.gd`): banded rust-coloured spires of the previous biosphere's undecayed remains, most wearing a tilted cap boulder, placed in small seeded groups that stay clear of the wreck, the named landmarks, the water-holding lows and the spring's watercourse. The blocked Headwall spring is sealed by a broad, banded mass of the same material with three small hoodoos growing out of its top (one capped and tallest, one pointed, one small and capped), standing higher than any other hoodoo. They are objects on Ecological Cells rather than terrain, so drainage is unchanged; the Astronaut collides with them, and other animals still pass through them. The colony eats them (see below).
 
 The Astronaut is drawn by `astronaut_figure.gd`: a toy-like white suit with a large domed helmet, dark visor and orange trim, built from simple rounded shapes. Its walk is animated in code from the distance actually travelled, so the legs stop when movement is blocked and the planted foot does not slide; standing still, it breathes slightly. It is presentation only; collision and movement are unchanged.
 
@@ -220,23 +220,23 @@ Ordinary controls apply; letting the garden dry or eating the fungus can make th
 
 ## Hoodoo devouring question (#39)
 
-Branch: `prototype/hoodoo-devouring`. Does the player see the colony taking a hoodoo apart, and later recognise the spire over the Headwall spring as the same material, so that the spring opening reads as something the colony did?
+Branch: `prototype/hoodoo-devouring`. Does the player see the colony taking a hoodoo apart, and later recognise the seal over the Headwall spring as the same material, so that the spring opening reads as something the colony did?
 
 ```sh
 /Applications/Godot.app/Contents/MacOS/Godot --path prototypes/godot-first-interaction -- --hoodoo-devouring
 ```
 
-Its title is **HOODOO DEVOURING PROTOTYPE**. It starts an established colony high on the Headwall, two cells from the spring spire, with a small plant patch on the other side. The Headwall is dry: the fixture starts the fungus garden well watered, and **Space** keeps it damp. **WASD** moves, **J** pauses, **R** restarts; the other controls work as usual.
+Its title is **HOODOO DEVOURING PROTOTYPE**. It starts an established colony high on the Headwall, two cells from the spring seal, with a small plant patch on the other side. The Headwall is dry: the fixture starts the fungus garden well watered, and **Space** keeps it damp. **WASD** moves, **J** pauses, **R** restarts; the other controls work as usual.
 
-- Each hoodoo holds **old matter** in its Ecological Cell, 0.1 per metre of height; the spring spire holds the ecology's own spring seal (0.5). Nothing in the ecology wears it down: water, weather and time leave it alone.
+- Each hoodoo holds **old matter** in its Ecological Cell, 0.1 per metre of height; the spring seal holds the ecology's own seal matter (0.5). Nothing in the ecology wears it down: water, weather and time leave it alone.
 - A worker on a cell with nothing living to cut breaks off a crumb of old matter (0.0006, a fifth of a plant load, because old matter is hard) and carries it home, where it joins the nest's Detritus and feeds the fungus. Workers notice a hoodoo from the next cell, as they notice plants, and recruit to it by scent the same way. Plants come first on a cell that has both, so the colony keeps cutting plants and the two sources compete.
-- Carried hoodoo pieces are rust-coloured; clipped plants stay green. A spire shortens and narrows as it is eaten, drops its cap below 70% and ends as a low stub. The spring spire goes entirely, and then the spring runs: 0.05 surface water per tick at the Headwall, down the existing watercourse, and the label reads SPRING RUNNING.
+- Carried hoodoo pieces are rust-coloured; clipped plants stay green. A spire shortens and narrows as it is eaten, drops its cap below 70% and ends as a low stub. The spring seal loses its three hoodoos one at a time (below 85%, 70% and 55%), then the bare mass wears down and narrows until it goes entirely, and then the spring runs: 0.05 surface water per tick at the Headwall, down the existing watercourse, and the label reads SPRING RUNNING.
 - The colony's reach is unchanged. In ordinary play the nearest sleeping queen is 11 cells from the spring and workers stay within 6 cells of the nest, so the spring cannot open yet; the fixture places the nest within reach. How the colony reaches the spring in ordinary play is an open decision.
 - In ordinary play the workers start by eating the queen's own hoodoo, which stands beside the nest.
 
-Eating was slowed tenfold after the first playtest (2026-09-24: "they should consume the hoodoo much more slowly"). Measured headlessly: a colony beside a queen's hoodoo (0.35) eats half of it in about 3 minutes 20 seconds and 90% in about 6 minutes, against 21 and 36 seconds before. The spring spire should now take roughly ten times the earlier 3 minutes to half and 5 minutes to open; that full run is too long for the regression suite, which starts the seal nearly eaten instead, and has not been measured end to end.
+Eating was slowed tenfold after the first playtest (2026-09-24: "they should consume the hoodoo much more slowly"). Measured headlessly: a colony beside a queen's hoodoo (0.35) eats half of it in about 3 minutes 20 seconds and 90% in about 6 minutes, against 21 and 36 seconds before. The spring seal should now take roughly ten times the earlier 3 minutes to half and 5 minutes to open; that full run is too long for the regression suite, which starts the seal nearly eaten instead, and has not been measured end to end.
 
-**Playtest gate:** without F9 or coaching, the player says the workers are breaking down a hoodoo, and connects the spring running to the colony eating the spire. Automated checks establish transport, conservation, the seal and the flow, not comprehension.
+**Playtest gate:** without F9 or coaching, the player says the workers are breaking down a hoodoo, and connects the spring running to the colony eating the seal. Automated checks establish transport, conservation, the seal and the flow, not comprehension.
 
 ## Colony foraging question (#29)
 

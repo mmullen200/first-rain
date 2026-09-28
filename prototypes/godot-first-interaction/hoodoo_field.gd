@@ -10,8 +10,9 @@ extends Node3D
 # main.gd decides when one wakes.
 # Each hoodoo holds old matter in the ecology grid, in proportion to its
 # height. Nothing rots it; colony workers break it off, and sync() shrinks the
-# spire to match what is left. The spring spire's matter is the ecology's own
-# spring seal.
+# spire to match what is left. The spring seal's matter is the ecology's own
+# spring seal: a broad mass of old matter over the spring with three small
+# hoodoos weathering out of its top.
 
 const EcologyGridModel = preload("res://ecology_grid.gd")
 
@@ -35,6 +36,20 @@ const MATTER_PER_METRE := 0.1
 const CAP_LOST_FRACTION := 0.7
 # What still stands of an ordinary hoodoo once it is eaten down.
 const STUB_FRACTION := 0.12
+# The spring seal: a broad, low mass sunk deeper into the Headwall slope so no
+# edge floats, with three small hoodoos standing out of it.
+const SEAL_SEED := 20260928
+const SEAL_SINK := 0.75
+const SEAL_MASS_HEIGHT := 2.7
+const SEAL_MASS_RADIUS := 2.2
+# Heights, widths and caps of the three hoodoos on the seal, tallest first.
+const SEAL_CROWNS := [[2.6, 0.62, true], [2.0, 0.54, false], [1.6, 0.5, true]]
+# The seal's hoodoos fall one at a time as the colony eats it; below the last
+# of these shares the bare mass shrinks until nothing is left over the spring.
+const SEAL_CROWN_FALL_FRACTIONS := [0.55, 0.7, 0.85]
+# Random draws the earlier single spring spire took from the placement seed.
+# Skipping them keeps every other hoodoo and queen where it was.
+const OLD_SPRING_SPIRE_DRAWS := 24
 
 const HOODOO_SHADER := """
 shader_type spatial;
@@ -82,8 +97,10 @@ func build(ecology) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = PLACEMENT_SEED
 
-	# The seal over the spring is the tallest spire on the map.
-	_add_hoodoo(ecology, EcologyGridModel.HEADWALL_SPRING_CELL, rng, {"height": 6.8, "width": 1.25, "capped": true})
+	# The seal over the spring stands taller than any other hoodoo.
+	_add_spring_seal(ecology, EcologyGridModel.HEADWALL_SPRING_CELL)
+	for ignored in OLD_SPRING_SPIRE_DRAWS:
+		rng.randf()
 
 	var watercourse: Array[Vector2i] = ecology.flow_path(EcologyGridModel.HEADWALL_SPRING_CELL)
 	var candidates: Array[Vector2i] = []
@@ -131,7 +148,7 @@ func build(ecology) -> void:
 
 # Match every spire to the old matter the colony has left in its cell. The
 # column shortens and narrows a little, the cap drops away early, and an
-# ordinary hoodoo ends as a low stub. The spring spire goes entirely.
+# ordinary hoodoo ends as a low stub. The spring seal goes entirely.
 func sync(ecology) -> void:
 	for cell in hoodoo_cells:
 		var full: float = full_matter[cell]
@@ -140,18 +157,37 @@ func sync(ecology) -> void:
 			continue
 		remaining_fractions[cell] = fraction
 		var body: StaticBody3D = get_node("Hoodoo_%d_%d" % [cell.x, cell.y])
+		if cell == EcologyGridModel.HEADWALL_SPRING_CELL:
+			_sync_spring_seal(body, fraction)
+			continue
 		var mass: Node3D = body.get_node("Mass")
-		var gone := fraction <= 0.0 and cell == EcologyGridModel.HEADWALL_SPRING_CELL
 		var standing := lerpf(STUB_FRACTION, 1.0, fraction)
-		mass.visible = not gone
 		mass.scale = Vector3(lerpf(0.8, 1.0, fraction), standing, lerpf(0.8, 1.0, fraction))
-		if mass.has_node("Cap"):
-			mass.get_node("Cap").visible = fraction >= CAP_LOST_FRACTION
+		if mass.has_node("Spire/Cap"):
+			mass.get_node("Spire/Cap").visible = fraction >= CAP_LOST_FRACTION
 		var collision: CollisionShape3D = body.get_node("Collision")
-		collision.disabled = gone
 		var cylinder: CylinderShape3D = collision.shape
 		cylinder.height = (float(hoodoo_heights[cell]) + BASE_SINK) * standing
 		collision.position.y = cylinder.height * 0.5
+
+
+# The seal's hoodoos drop off first, one at a time; then the bare mass wears
+# down and narrows, and at nothing the spring is open ground.
+func _sync_spring_seal(body: StaticBody3D, fraction: float) -> void:
+	var mass: Node3D = body.get_node("Mass")
+	for index in SEAL_CROWNS.size():
+		mass.get_node("Crown%d" % (index + 1)).visible = fraction >= SEAL_CROWN_FALL_FRACTIONS[index]
+	var bare := clampf(fraction / SEAL_CROWN_FALL_FRACTIONS[0], 0.0, 1.0)
+	var standing := lerpf(0.12, 1.0, bare)
+	var gone := fraction <= 0.0
+	mass.visible = not gone
+	mass.scale = Vector3(lerpf(0.75, 1.0, bare), standing, lerpf(0.75, 1.0, bare))
+	var collision: CollisionShape3D = body.get_node("Collision")
+	collision.disabled = gone
+	var cylinder: CylinderShape3D = collision.shape
+	cylinder.radius = SEAL_MASS_RADIUS * 0.85 * lerpf(0.75, 1.0, bare)
+	cylinder.height = SEAL_MASS_HEIGHT * standing
+	collision.position.y = cylinder.height * 0.5
 
 
 # At most one sleeping queen per group, so wherever the player works there is
@@ -231,35 +267,8 @@ func _add_hoodoo(ecology, cell: Vector2i, rng: RandomNumberGenerator, shape: Dic
 	mass.name = "Mass"
 	body.add_child(mass)
 
-	var tint := Color("b2623a").lerp(Color("c98150"), rng.randf()).lerp(Color("8f4e33"), rng.randf() * 0.35)
-	var noise := [rng.randf_range(0.0, TAU), rng.randf_range(0.0, TAU), rng.randf_range(0.0, TAU), rng.randf_range(0.0, TAU)]
-	var capped: bool = shape["capped"]
-	var column_height := height * (0.74 if capped else 1.0)
-	var profile: Array
-	if capped:
-		profile = [[0.0, 1.0], [0.1, 0.7], [0.3, 0.6], [0.48, 0.47], [0.63, 0.55], [0.84, 0.3], [1.0, 0.25]]
-	else:
-		profile = [[0.0, 1.0], [0.15, 0.74], [0.45, 0.55], [0.72, 0.4], [0.9, 0.26], [1.0, 0.0]]
-	for point in profile:
-		if point[1] > 0.0:
-			point[1] *= rng.randf_range(0.88, 1.12)
-	var column := MeshInstance3D.new()
-	column.mesh = _lathe(profile, column_height, width, 30, noise, 0.09, tint, not capped)
-	column.material_override = material
-	mass.add_child(column)
-
-	if capped:
-		var neck_radius: float = profile[profile.size() - 1][1] * width
-		var cap_radius := maxf(neck_radius * 2.6, width * rng.randf_range(0.66, 0.92))
-		var cap_height := (height - column_height) * rng.randf_range(1.0, 1.25) + 0.12
-		var cap_profile := [[0.0, 0.5], [0.15, 0.88], [0.45, 1.0], [0.75, 0.84], [0.92, 0.5], [1.0, 0.0]]
-		var cap := MeshInstance3D.new()
-		cap.mesh = _lathe(cap_profile, cap_height, cap_radius, 14, [noise[1], noise[3], noise[0], noise[2]], 0.13, tint.lightened(0.05), true)
-		cap.material_override = material
-		cap.name = "Cap"
-		cap.position = Vector3(rng.randf_range(-0.14, 0.14), column_height - 0.12, rng.randf_range(-0.14, 0.14))
-		cap.rotation = Vector3(rng.randf_range(-0.26, 0.26), 0.0, rng.randf_range(-0.26, 0.26))
-		mass.add_child(cap)
+	var tint := _hoodoo_tint(rng)
+	_add_spire(mass, rng, height, width, shape["capped"], tint).name = "Spire"
 
 	var collision := CollisionShape3D.new()
 	collision.name = "Collision"
@@ -273,6 +282,110 @@ func _add_hoodoo(ecology, cell: Vector2i, rng: RandomNumberGenerator, shape: Dic
 	hoodoo_cells.append(cell)
 	hoodoo_heights[cell] = height
 	hoodoo_widths[cell] = width
+
+
+func _hoodoo_tint(rng: RandomNumberGenerator) -> Color:
+	return Color("b2623a").lerp(Color("c98150"), rng.randf()).lerp(Color("8f4e33"), rng.randf() * 0.35)
+
+
+# A banded column, capped with a tilted boulder or tapering to a point.
+func _add_spire(parent: Node3D, rng: RandomNumberGenerator, height: float, width: float, capped: bool, tint: Color) -> Node3D:
+	var spire := Node3D.new()
+	parent.add_child(spire)
+	var noise := [rng.randf_range(0.0, TAU), rng.randf_range(0.0, TAU), rng.randf_range(0.0, TAU), rng.randf_range(0.0, TAU)]
+	var column_height := height * (0.74 if capped else 1.0)
+	var profile: Array
+	if capped:
+		profile = [[0.0, 1.0], [0.1, 0.7], [0.3, 0.6], [0.48, 0.47], [0.63, 0.55], [0.84, 0.3], [1.0, 0.25]]
+	else:
+		profile = [[0.0, 1.0], [0.15, 0.74], [0.45, 0.55], [0.72, 0.4], [0.9, 0.26], [1.0, 0.0]]
+	for point in profile:
+		if point[1] > 0.0:
+			point[1] *= rng.randf_range(0.88, 1.12)
+	var column := MeshInstance3D.new()
+	column.mesh = _lathe(profile, column_height, width, 30, noise, 0.09, tint, not capped)
+	column.material_override = material
+	spire.add_child(column)
+
+	if capped:
+		var neck_radius: float = profile[profile.size() - 1][1] * width
+		var cap_radius := maxf(neck_radius * 2.6, width * rng.randf_range(0.66, 0.92))
+		var cap_height := (height - column_height) * rng.randf_range(1.0, 1.25) + 0.12
+		var cap_profile := [[0.0, 0.5], [0.15, 0.88], [0.45, 1.0], [0.75, 0.84], [0.92, 0.5], [1.0, 0.0]]
+		var cap := MeshInstance3D.new()
+		cap.mesh = _lathe(cap_profile, cap_height, cap_radius, 14, [noise[1], noise[3], noise[0], noise[2]], 0.13, tint.lightened(0.05), true)
+		cap.material_override = material
+		cap.name = "Cap"
+		cap.position = Vector3(rng.randf_range(-0.14, 0.14), column_height - 0.12, rng.randf_range(-0.14, 0.14))
+		cap.rotation = Vector3(rng.randf_range(-0.26, 0.26), 0.0, rng.randf_range(-0.26, 0.26))
+		spire.add_child(cap)
+	return spire
+
+
+# The spring seal: a broad, lumpy mass of the same old matter, with three
+# small hoodoos weathering out of its top. It has its own seed so its shape
+# never moves the rest of the field.
+func _add_spring_seal(ecology, cell: Vector2i) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = SEAL_SEED
+	var world: Vector2 = ecology.world_position(cell.x, cell.y)
+	var body := StaticBody3D.new()
+	body.name = "Hoodoo_%d_%d" % [cell.x, cell.y]
+	body.position = Vector3(world.x, ecology.terrain_height(cell) - SEAL_SINK, world.y)
+	body.rotation.y = rng.randf_range(0.0, TAU)
+	add_child(body)
+	var mass := Node3D.new()
+	mass.name = "Mass"
+	body.add_child(mass)
+
+	var tint := _hoodoo_tint(rng)
+	var noise := [rng.randf_range(0.0, TAU), rng.randf_range(0.0, TAU), rng.randf_range(0.0, TAU), rng.randf_range(0.0, TAU)]
+	# Tucked in below ground so no buried edge shows past a terrace, then a
+	# broad, flat-shouldered top for the hoodoos to stand on.
+	var mound_profile := [[0.0, 0.8], [0.3, 1.0], [0.55, 0.94], [0.78, 0.8], [0.92, 0.55], [1.0, 0.0]]
+	var mound := MeshInstance3D.new()
+	mound.name = "Mound"
+	mound.mesh = _lathe(mound_profile, SEAL_MASS_HEIGHT, SEAL_MASS_RADIUS, 36, noise, 0.16, tint.darkened(0.04), true)
+	mound.material_override = material
+	mass.add_child(mound)
+
+	# Spread the three hoodoos around the top, each rooted a little into it.
+	var tallest := 0.0
+	var first_angle := rng.randf_range(0.0, TAU)
+	for index in SEAL_CROWNS.size():
+		var crown_shape: Array = SEAL_CROWNS[index]
+		var angle := first_angle + TAU * float(index) / float(SEAL_CROWNS.size()) + rng.randf_range(-0.35, 0.35)
+		var reach := rng.randf_range(0.28, 0.46)
+		var base_y := _profile_height(mound_profile, reach) * SEAL_MASS_HEIGHT - 0.25
+		var crown_tint := tint.lerp(_hoodoo_tint(rng), 0.5)
+		var crown := _add_spire(mass, rng, crown_shape[0], crown_shape[1], crown_shape[2], crown_tint)
+		crown.name = "Crown%d" % (index + 1)
+		crown.position = Vector3(cos(angle) * reach * SEAL_MASS_RADIUS, base_y, sin(angle) * reach * SEAL_MASS_RADIUS)
+		crown.rotation = Vector3(rng.randf_range(-0.08, 0.08), rng.randf_range(0.0, TAU), rng.randf_range(-0.08, 0.08))
+		tallest = maxf(tallest, base_y + float(crown_shape[0]))
+
+	var collision := CollisionShape3D.new()
+	collision.name = "Collision"
+	var cylinder := CylinderShape3D.new()
+	cylinder.radius = SEAL_MASS_RADIUS * 0.85
+	cylinder.height = SEAL_MASS_HEIGHT
+	collision.shape = cylinder
+	collision.position.y = cylinder.height * 0.5
+	body.add_child(collision)
+
+	hoodoo_cells.append(cell)
+	# Recorded like an ordinary hoodoo's height, whose base sinks BASE_SINK,
+	# so labels lifted by it clear the tallest hoodoo on the seal.
+	hoodoo_heights[cell] = tallest - SEAL_SINK + BASE_SINK
+	hoodoo_widths[cell] = SEAL_MASS_RADIUS
+
+
+# The height, as a fraction, at which a profile narrows to a radius fraction.
+func _profile_height(profile: Array, radius_fraction: float) -> float:
+	var t := 1.0
+	while t > 0.0 and _profile_radius(profile, t) < radius_fraction:
+		t -= 0.01
+	return maxf(t, 0.0)
 
 
 # A surface of revolution from a (fraction of height, fraction of radius)
