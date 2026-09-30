@@ -47,6 +47,10 @@ const COLONY_INTAKE_MEMORY := 0.9
 # Old hoodoo matter is hard: each trip chips off only a crumb, so a spire
 # takes a long time to come down.
 const COLONY_HOODOO_LOAD := 0.0006
+# Like a bee's scent mark, a flower the vector has just fed from is avoided for
+# this many ticks, so it moves on through a patch and across to the next one
+# instead of circling the same few flowers (#49).
+const VECTOR_SCENT_MARK_TICKS := 60
 const DIRECTIONS := [
 	Vector2i(1, 0), Vector2i(1, 1), Vector2i(0, 1), Vector2i(-1, 1),
 	Vector2i(-1, 0), Vector2i(-1, -1), Vector2i(0, -1), Vector2i(1, -1)
@@ -133,6 +137,7 @@ func register_agent(species: String, stable_id: String, initial_state := {}) -> 
 		"flower_memory": {},
 		"last_flower": Vector2i(-1, -1),
 		"last_visit_tick": -1000,
+		"scent_marks": {},
 		"spore_load": float(initial_state.get("spore_load", 0.0))
 	}
 	if species == "colony":
@@ -628,12 +633,12 @@ func _choose_vector_intention(agent: Dictionary) -> Dictionary:
 		agent["state"] = "resting"
 		agents[agent_id] = agent
 		return {"type": "wait", "agent_id": agent_id}
-	if ecology.flower_reward(cell) >= 0.003 and (cell != agent["last_flower"] or tick - int(agent["last_visit_tick"]) >= 60):
+	if ecology.flower_reward(cell) >= 0.003 and not _scent_marked(agent, cell):
 		return {"type": "visit_flower", "agent_id": agent_id}
 	var target := cell
 	var best := 0.0
 	for candidate in memory:
-		if candidate == cell or (candidate == agent["last_flower"] and tick - int(agent["last_visit_tick"]) < 60):
+		if candidate == cell or _scent_marked(agent, candidate):
 			continue
 		var score := float(memory[candidate]["reward"]) / (1.0 + _cell_distance(cell, candidate) * 0.2)
 		if score > best:
@@ -1123,6 +1128,12 @@ func _visit_flower(agent_id: String) -> void:
 	ecology.add_resources(cell, {"nutrients": nectar})
 	agent["last_flower"] = cell
 	agent["last_visit_tick"] = tick
+	var marks: Dictionary = agent.get("scent_marks", {})
+	for marked in marks.keys():
+		if tick - int(marks[marked]) >= VECTOR_SCENT_MARK_TICKS:
+			marks.erase(marked)
+	marks[cell] = tick
+	agent["scent_marks"] = marks
 	agent["move_cooldown"] = 8
 	agent["pollen_donor"] = cell
 	agent["pollen_kind"] = kind
@@ -1132,6 +1143,10 @@ func _visit_flower(agent_id: String) -> void:
 	_collect_pollen(agent_id, 0.04)
 	agents[agent_id]["state"] = "feeding"
 	_emit("organism.nectar_consumed", agent_id, {"cell": cell, "kind": kind, "amount": nectar})
+
+
+func _scent_marked(agent: Dictionary, cell: Vector2i) -> bool:
+	return tick - int(agent.get("scent_marks", {}).get(cell, -1000000)) < VECTOR_SCENT_MARK_TICKS
 
 
 func _collect_pollen(agent_id: String, amount: float) -> void:

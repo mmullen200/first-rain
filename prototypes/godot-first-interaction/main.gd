@@ -10,6 +10,15 @@ const GRAZER_MOVE_SPEED := 0.38
 # keeps clear of other grazers (scaled down for juveniles), in metres.
 const GRAZER_CELL_SLOT := 0.5
 const GRAZER_BODY_RADIUS := 0.65
+# Where each blossom in a flowering cell's cluster stands: x and z offset, and
+# stem height, in metres.
+# The flower-lineage quick start: patches along the Headwall spring's stream,
+# each a top-left cell and starting hue in degrees (gold, violet, blue), and
+# the pollinator's home between the first two.
+const FLOWER_FIXTURE_PATCHES := [[Vector2i(13, 9), 48.0], [Vector2i(16, 10), 280.0], [Vector2i(29, 17), 210.0]]
+const FLOWER_FIXTURE_HOME := Vector2i(16, 11)
+const FLOWER_SEEP_MOISTURE := 0.5
+const FLOWER_CLUSTER := [Vector3(0.0, 0.3, 0.0), Vector3(0.42, 0.24, 0.18), Vector3(-0.36, 0.27, 0.3), Vector3(0.16, 0.22, -0.42), Vector3(-0.4, 0.2, -0.24), Vector3(0.5, 0.26, -0.3), Vector3(-0.1, 0.23, 0.5), Vector3(0.28, 0.21, 0.52), Vector3(-0.55, 0.25, 0.05)]
 const GROUND_ANIMAL_MOVE_SPEED := 0.72
 const TERRAIN_SUBDIVISIONS := 3
 const TERRAIN_BLOCK_GAP := 0.0
@@ -276,6 +285,8 @@ var zone_label: Label
 var visited_zones: Dictionary = {}
 var scanner_before_survey := ""
 var reproductive_markers: Dictionary = {}
+# Cells the flower-lineage quick start keeps damp.
+var flower_fixture_seeps: Array[Vector2i] = []
 var seedling_observations: Dictionary = {}
 
 
@@ -311,8 +322,10 @@ func _ready() -> void:
 		_seed_engineer_fixture()
 	if "--waking-animals" in OS.get_cmdline_user_args():
 		_seed_waking_fixture()
+	if "--flower-lineage" in OS.get_cmdline_user_args():
+		_seed_flower_lineage_fixture()
 	evidence.begin_run(1, _evidence_snapshot())
-	if "--colony-foraging" in OS.get_cmdline_user_args() or "--hoodoo-devouring" in OS.get_cmdline_user_args() or "--queen-waking" in OS.get_cmdline_user_args() or "--predator-ecology" in OS.get_cmdline_user_args() or "--vector-pollination" in OS.get_cmdline_user_args() or "--wetland-engineer" in OS.get_cmdline_user_args() or "--waking-animals" in OS.get_cmdline_user_args():
+	if "--colony-foraging" in OS.get_cmdline_user_args() or "--hoodoo-devouring" in OS.get_cmdline_user_args() or "--queen-waking" in OS.get_cmdline_user_args() or "--predator-ecology" in OS.get_cmdline_user_args() or "--vector-pollination" in OS.get_cmdline_user_args() or "--wetland-engineer" in OS.get_cmdline_user_args() or "--waking-animals" in OS.get_cmdline_user_args() or "--flower-lineage" in OS.get_cmdline_user_args():
 		_open_emergency_cache()
 	if "--queen-waking" in OS.get_cmdline_user_args():
 		_set_status("Violet fungus is spreading at the foot of a hoodoo. The dark plug at its base looks like a sealed door.", 5.0)
@@ -327,6 +340,8 @@ func _ready() -> void:
 		_set_status("Water murmurs through one shallow runnel. A perched pool waits behind a narrow dry lip.", 5.0)
 	if "--waking-animals" in OS.get_cmdline_user_args():
 		_set_status("Two grey humps lie half sunk in dry ground beside a patch of moss and cover. To the west, pale cases poke up among blossoms.", 5.0)
+	if "--flower-lineage" in OS.get_cmdline_user_args():
+		_set_status("Three patches of flowers bloom along the slope: gold, violet, and far to the east, blue. A small swarm hums between the nearer two.", 5.0)
 
 
 func _seed_engineer_fixture() -> void:
@@ -411,6 +426,40 @@ func _seed_vector_fixture() -> void:
 	astronaut.position = Vector3(world.x, ecology.terrain_height(cell) + 0.02, world.y)
 	camera.position = astronaut.position + Vector3(8.8, 10.8, 10.5)
 	camera.look_at(astronaut.position)
+	_refresh_ecology_visuals()
+	_update_ecological_animal_markers()
+
+
+# Three flowering patches of different colours (#49) down the Headwall gully:
+# gold and violet within the pollinator's reach of each other, blue well
+# downhill beyond it. Watch whether the two it travels between drift toward
+# one colour while the blue stays blue. Each patch sits on a seep that keeps
+# its ground damp, so the flowers last long enough to watch.
+func _seed_flower_lineage_fixture() -> void:
+	for patch in FLOWER_FIXTURE_PATCHES:
+		var corner: Vector2i = patch[0]
+		for y in range(corner.y - 1, corner.y + 3):
+			for x in range(corner.x - 1, corner.x + 3):
+				var i: int = y * ecology.WIDTH + x
+				flower_fixture_seeps.append(Vector2i(x, y))
+				ecology.flower_hue[i] = Vector2.from_angle(deg_to_rad(float(patch[1])))
+				ecology.moisture[i] = 0.68
+				ecology.temperature[i] = 0.35
+				ecology.toxicity[i] = 0.02
+				ecology.nutrients[i] = 0.55
+				ecology.dormant_rhizome[i] = 0.0
+				ecology.dormant_canopy[i] = 0.0
+				ecology.dormant_moss[i] = 0.0
+		for offset in [Vector2i(0, 0), Vector2i(1, 0), Vector2i(0, 1), Vector2i(1, 1)]:
+			ecology.add_resources(corner + offset, {"rhizome": 0.55, "ground_bloom": 0.45})
+	ecology._step_reproduction()
+	for cell in ecology.flower_stores:
+		ecology.flower_stores[cell]["nectar"] += ecology.consume_resource(cell, ecology.flower_kind(cell), 0.025)
+	animal_simulation.register_agent("vector", "vector:1", {"cell": FLOWER_FIXTURE_HOME, "habitat_cell": FLOWER_FIXTURE_HOME})
+	ecology_started = true
+	var stand := Vector2i(15, 10)
+	var world: Vector2 = ecology.world_position(stand.x, stand.y)
+	astronaut.position = Vector3(world.x, ecology.terrain_height(stand) + 0.02, world.y)
 	_refresh_ecology_visuals()
 	_update_ecological_animal_markers()
 
@@ -1311,6 +1360,8 @@ func _build_interface() -> void:
 		title.text = "FIRST RAIN  /  HOODOO DEVOURING PROTOTYPE"
 	elif "--waking-animals" in OS.get_cmdline_user_args():
 		title.text = "FIRST RAIN  /  WAKING ANIMALS PROTOTYPE"
+	elif "--flower-lineage" in OS.get_cmdline_user_args():
+		title.text = "FIRST RAIN  /  FLOWER LINEAGE PROTOTYPE"
 	title.add_theme_font_size_override("font_size", 15)
 	title.add_theme_color_override("font_color", Color("e9b36e"))
 	canvas.add_child(title)
@@ -1937,6 +1988,9 @@ func _update_ecology_grid(delta: float) -> void:
 		_seed_integrated_animals()
 		var animal_events: Array[Dictionary] = animal_simulation.step()
 		_handle_authoritative_animal_events(animal_events)
+		for seep in flower_fixture_seeps:
+			var seep_index: int = seep.y * ecology.WIDTH + seep.x
+			ecology.moisture[seep_index] = maxf(ecology.moisture[seep_index], FLOWER_SEEP_MOISTURE)
 		_check_spring_opened()
 		var state: Dictionary = ecology.summary()
 		var weather_events: Array[Dictionary] = weather_simulation.step(state)
@@ -3287,11 +3341,33 @@ func _refresh_reproductive_markers() -> void:
 	for cell in cells:
 		if not reproductive_markers.has(cell):
 			var root := Node3D.new()
-			var body := MeshInstance3D.new()
-			var sphere := SphereMesh.new()
-			sphere.radius = 0.12
-			sphere.height = 0.16
-			body.mesh = sphere
+			# A small cluster of blossoms on short stems, sharing one material.
+			var body := Node3D.new()
+			var petals := StandardMaterial3D.new()
+			petals.roughness = 0.6
+			body.set_meta("material", petals)
+			var stem_material := _material(Color("4f8a4a"), 0.8)
+			for blossom in FLOWER_CLUSTER:
+				var stem := MeshInstance3D.new()
+				var stem_mesh := CylinderMesh.new()
+				stem_mesh.top_radius = 0.008
+				stem_mesh.bottom_radius = 0.01
+				stem_mesh.height = blossom.y
+				stem_mesh.radial_segments = 5
+				stem.mesh = stem_mesh
+				stem.position = Vector3(blossom.x, blossom.y * 0.5 - 0.1, blossom.z)
+				stem.material_override = stem_material
+				body.add_child(stem)
+				var head := MeshInstance3D.new()
+				var head_mesh := SphereMesh.new()
+				head_mesh.radius = 0.085
+				head_mesh.height = 0.08
+				head_mesh.radial_segments = 8
+				head_mesh.rings = 4
+				head.mesh = head_mesh
+				head.position = Vector3(blossom.x, blossom.y - 0.1, blossom.z)
+				head.material_override = petals
+				body.add_child(head)
 			root.add_child(body)
 			var label := Label3D.new()
 			label.font_size = 22
@@ -3304,13 +3380,15 @@ func _refresh_reproductive_markers() -> void:
 		var marker: Node3D = reproductive_markers[cell]
 		marker.visible = true
 		var world: Vector2 = ecology.world_position(cell.x, cell.y)
-		marker.position = Vector3(world.x + 0.3, ecology.terrain_height(cell) + 0.22, world.y)
-		var body: MeshInstance3D = marker.get_child(0)
+		marker.position = Vector3(world.x, ecology.terrain_height(cell) + 0.22, world.y)
+		var body: Node3D = marker.get_child(0)
 		var stage := String(stages.get(cell, ""))
-		var color := Color("eeb4da") if ecology.flower_kind(cell) == "canopy" else Color("fff0a0")
+		# Rooted Mat flowers show their lineage's colour (#49).
+		var color: Color = Color("eeb4da") if ecology.flower_kind(cell) == "canopy" else ecology.flower_color(cell)
 		if not stage.is_empty():
-			color = Color("80ed9a") if stage == "SEEDLING" else Color("b88446")
-		body.material_override = _material(color, 0.6)
+			# A seedling already shows the colour it inherited.
+			color = ecology.flower_color(cell).lightened(0.25) if stage == "SEEDLING" else Color("b88446")
+		(body.get_meta("material") as StandardMaterial3D).albedo_color = color
 		body.scale = Vector3.ONE * (1.0 if not stage.is_empty() else lerpf(0.45, 1.3, clampf(ecology.flower_reward(cell) / 0.035, 0.0, 1.0)))
 		var label: Label3D = marker.get_child(1)
 		label.text = stage
@@ -3341,7 +3419,7 @@ func _refresh_ecology_visuals() -> void:
 			color = color.lerp(Color("67c88f"), clamp(sample["rhizome"] * 30.0, 0.0, 0.82))
 			color = color.lerp(Color("28b9b2"), clamp(sample["aquatic_producer"] * 50.0, 0.0, 0.75))
 			color = color.lerp(Color("ef8668"), clamp(sample["aquatic_consumer"] * 35.0, 0.0, 0.52))
-			color = color.lerp(Color("e2cf62"), clamp(sample["ground_bloom"] * 8.0, 0.0, 0.55))
+			color = color.lerp(ecology.flower_color(Vector2i(x, y)), clamp(sample["ground_bloom"] * 8.0, 0.0, 0.55))
 			color = color.lerp(Color("e790c4"), clamp(sample["canopy_bloom"] * 8.0, 0.0, 0.55))
 			color = color.lerp(Color("ad7b45"), clamp(sample["dam_material"] * 5.0, 0.0, 0.65))
 			if analysis_lens_mode == 1 and scanner_recovered:

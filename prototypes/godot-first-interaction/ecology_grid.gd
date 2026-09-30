@@ -44,6 +44,14 @@ const PANEL_SHADE_RADIUS := 1.0
 # layer from PERSISTENT_LAYERS to let it die back again.
 const LIFE_FLOOR := 0.2
 const PERSISTENT_LAYERS := ["moss", "fungus", "fruiting", "microbial_crust", "rhizome", "canopy", "aquatic_producer", "aquatic_consumer"]
+# Flower lineages (#49). Each patch's native colour comes from a seeded,
+# slowly varying field, so separate hollows start with different shades.
+# Within a living mat colour evens out a little each tick; each seed set shifts
+# the receiving patch part of the way toward its pollen donor's colour.
+const LINEAGE_SEED := 20260930
+const LINEAGE_FREQUENCY := 0.07
+const LINEAGE_MIXING := 0.01
+const LINEAGE_SEED_SHARE := 0.3
 
 var moisture := PackedFloat32Array()
 var elevation := PackedFloat32Array()
@@ -69,6 +77,9 @@ var volatile_sulfur := PackedFloat32Array()
 var ground_bloom := PackedFloat32Array()
 var canopy_bloom := PackedFloat32Array()
 var pollination := PackedFloat32Array()
+# Each cell's Rooted Mat flower colour, as a direction on the colour wheel, so
+# blending two colours gives the hue between them rather than grey (#49).
+var flower_hue := PackedVector2Array()
 var flower_stores: Dictionary = {}
 var developing_seeds: Array[Dictionary] = []
 var seed_events: Array[Dictionary] = []
@@ -91,6 +102,7 @@ func _init() -> void:
 		field.resize(count)
 	_seed_terrain()
 	_seed_barren_basin()
+	_seed_flower_lineages()
 	old_matter[_index(HEADWALL_SPRING_CELL.x, HEADWALL_SPRING_CELL.y)] = SPRING_SEAL_MATTER
 	habitat_shade = shade.duplicate()
 
@@ -292,6 +304,9 @@ func step() -> void:
 	var next_ground_bloom: PackedFloat32Array = ground_bloom.duplicate()
 	var next_canopy_bloom: PackedFloat32Array = canopy_bloom.duplicate()
 	var next_pollination: PackedFloat32Array = pollination.duplicate()
+	# The share of each cell's new Rooted Mat that crept in from its neighbours.
+	var lineage_pull := PackedFloat32Array()
+	lineage_pull.resize(WIDTH * HEIGHT)
 	var next_fungal_spores: PackedFloat32Array = fungal_spores.duplicate()
 	var next_dam_material: PackedFloat32Array = dam_material.duplicate()
 
@@ -379,6 +394,7 @@ func step() -> void:
 			var rhizome_growth: float = local_rhizome * rhizome_suitability * 0.022
 			var rhizome_stress: float = local_rhizome * (maxf(0.0, 0.12 - local_moisture) * 0.08 + maxf(0.0, local_temperature - 0.62) * 0.045 + maxf(0.0, local_toxicity - 0.46) * 0.08 + local_canopy * 0.006)
 			next_rhizome[index] = clampf(local_rhizome + rhizome_awakening + rhizome_spread + rhizome_growth - rhizome_stress, 0.0, 1.0)
+			lineage_pull[index] = rhizome_spread / maxf(next_rhizome[index], 0.0001)
 			next_dormant_rhizome[index] = maxf(0.0, dormant_rhizome[index] - rhizome_awakening * 0.45)
 			next_moisture[index] = maxf(0.0, next_moisture[index] - rhizome_growth * 0.038)
 			next_nutrients[index] = maxf(0.0, next_nutrients[index] - rhizome_growth * 0.025)
@@ -484,6 +500,7 @@ func step() -> void:
 	fruiting = next_fruiting
 	microbial_crust = next_crust
 	dormant_rhizome = next_dormant_rhizome
+	_mix_flower_lineages(next_rhizome, lineage_pull)
 	rhizome = next_rhizome
 	dormant_canopy = next_dormant_canopy
 	canopy = next_canopy
@@ -510,6 +527,62 @@ func step() -> void:
 		moisture[spring_index] = clampf(moisture[spring_index] + SPRING_FLOW, 0.0, 1.0)
 	tick += 1
 	_step_reproduction()
+
+
+func _seed_flower_lineages() -> void:
+	flower_hue.resize(WIDTH * HEIGHT)
+	var noise := FastNoiseLite.new()
+	noise.seed = LINEAGE_SEED
+	noise.frequency = LINEAGE_FREQUENCY
+	noise.fractal_octaves = 2
+	for y in range(HEIGHT):
+		for x in range(WIDTH):
+			var turns: float = (noise.get_noise_2d(float(x), float(y)) * 0.5 + 0.5) * 1.5
+			flower_hue[_index(x, y)] = Vector2.from_angle(turns * TAU)
+
+
+# Colour moves with the plants: Rooted Mat creeping in from its neighbours
+# brings their colour, and a living mat evens out slowly with the mat around it.
+# Reads the colours before this tick, so traversal order does not matter.
+func _mix_flower_lineages(next_mat: PackedFloat32Array, pull: PackedFloat32Array) -> void:
+	var mixed := flower_hue.duplicate()
+	for y in range(HEIGHT):
+		for x in range(WIDTH):
+			var index := _index(x, y)
+			if next_mat[index] <= 0.001:
+				continue
+			var around := Vector2.ZERO
+			var weight := 0.0
+			for step in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+				var nx: int = x + step.x
+				var ny: int = y + step.y
+				if nx < 0 or ny < 0 or nx >= WIDTH or ny >= HEIGHT:
+					continue
+				var neighbour_mat: float = rhizome[_index(nx, ny)]
+				if neighbour_mat > 0.001:
+					around += flower_hue[_index(nx, ny)] * neighbour_mat
+					weight += neighbour_mat
+			if weight <= 0.0:
+				continue
+			var blended: Vector2 = flower_hue[index].lerp(around / weight, clampf(LINEAGE_MIXING + pull[index], 0.0, 1.0))
+			if blended.length() > 0.001:
+				mixed[index] = blended.normalized()
+	flower_hue = mixed
+
+
+# The colour between two lineages, halfway round the shorter way.
+func _hybrid_hue(mother: Vector2i, father: Vector2i) -> Vector2:
+	var own: Vector2 = flower_hue[_index(mother.x, mother.y)]
+	if father.x < 0 or father.y < 0 or father.x >= WIDTH or father.y >= HEIGHT:
+		return own
+	var both: Vector2 = own + flower_hue[_index(father.x, father.y)]
+	return both.normalized() if both.length() > 0.001 else own
+
+
+# What the player sees of a cell's flowers.
+func flower_color(cell: Vector2i) -> Color:
+	var hue: Vector2 = flower_hue[_index(cell.x, cell.y)]
+	return Color.from_hsv(fposmod(hue.angle() / TAU, 1.0), 0.72, 0.97)
 
 
 # Two provisional plant compatibility groups; a cell is a reproductive patch,
@@ -573,6 +646,11 @@ func _step_reproduction() -> void:
 		var kind := String(batch["kind"])
 		if batch["age"] == 90:
 			seed_events.append({"taxonomy": "ecology.seeds_matured", "cell": source, "kind": kind, "amount": batch["amount"]})
+			if kind == "rhizome":
+				# The patch's next generation is part hybrid with its pollen donor.
+				var source_index := _index(source.x, source.y)
+				flower_hue[source_index] = flower_hue[source_index].lerp(_hybrid_hue(source, batch["donor"]), LINEAGE_SEED_SHARE).normalized()
+				batch["hue"] = _hybrid_hue(source, batch["donor"])
 		if batch["age"] >= 90:
 			var established := false
 			for direction in [Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(0, -1)]:
@@ -582,8 +660,13 @@ func _step_reproduction() -> void:
 				var i := target.y * WIDTH + target.x
 				if moisture[i] < 0.25 or toxicity[i] > 0.4 or nutrients[i] < 0.08 or temperature[i] > 0.65 or resource_amount(target, kind) > 0.15:
 					continue
+				var already: float = resource_amount(target, kind)
 				var accepted: Dictionary = add_resources(target, {kind: batch["amount"]})
-				batch["amount"] -= float(accepted.get(kind, 0.0))
+				var planted := float(accepted.get(kind, 0.0))
+				batch["amount"] -= planted
+				if kind == "rhizome" and planted > 0.0 and batch.has("hue"):
+					# The seedling carries the hybrid colour into its new cell.
+					flower_hue[i] = flower_hue[i].lerp(batch["hue"], planted / maxf(already + planted, 0.0001)).normalized()
 				seed_events.append({"taxonomy": "ecology.seedling_established", "cell": target, "source": source, "kind": kind})
 				established = true
 				break
@@ -1034,6 +1117,7 @@ func full_snapshot() -> Dictionary:
 		"flower_stores": flower_stores.duplicate(true),
 		"developing_seeds": developing_seeds.duplicate(true),
 		"seed_events": seed_events.duplicate(true),
+		"flower_hue": flower_hue.duplicate(),
 		"tick": tick,
 		"width": WIDTH,
 		"height": HEIGHT,
@@ -1084,6 +1168,8 @@ func restore_snapshot(snapshot: Dictionary) -> bool:
 	flower_stores = snapshot["flower_stores"].duplicate(true)
 	developing_seeds.assign(snapshot["developing_seeds"].duplicate(true))
 	seed_events.assign(snapshot["seed_events"].duplicate(true))
+	if snapshot.has("flower_hue") and snapshot["flower_hue"].size() == WIDTH * HEIGHT:
+		flower_hue = snapshot["flower_hue"].duplicate()
 	elevation = snapshot["elevation"].duplicate()
 	moisture = snapshot["moisture"].duplicate()
 	temperature = snapshot["temperature"].duplicate()

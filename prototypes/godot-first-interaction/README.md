@@ -174,6 +174,26 @@ Sleepers are recorded in evidence checkpoints (`sleepers`), and F9 shows `organi
 
 Habitat search is distributed across deterministic ecology ticks using one frozen ecological snapshot. This preserves whole-basin comparison without placing a full multi-species neighborhood sweep in one rendered frame.
 
+## Flower lineage question (#49)
+
+Branch: `prototype/flower-lineage`. Can the player see which flower patches the pollinator has connected, just from the colours of the flowers?
+
+- Every Ecological Cell carries a flower colour for its Rooted Mat (`flower_hue` in `ecology_grid.gd`), stored as a direction on the colour wheel so two colours blend to the hue between them instead of grey. Native colours come from a seeded, slowly varying field, so separate hollows start with different shades.
+- Mat creeping into a cell from its neighbours brings their colour, and a living mat evens out slowly with the mat around it.
+- When pollen carried from another patch sets seed, the receiving patch shifts 30% of the way toward the colour between the two parents, and the seedling that establishes beside it carries that in-between colour. Patches the pollinator keeps linking therefore converge; patches it never reaches keep their own colour.
+- Each flowering cell is drawn as a small cluster of blossoms in its colour (canopy flowers stay pink), and the ground tint uses the same colour. A seedling shows its inherited colour.
+- The flying vector now leaves a scent mark on each flower it feeds from and avoids marked flowers for 60 ticks (about 20 s), like a bee, instead of avoiding only the last one. Without it, the vector circled the same few flowers of one patch forever and never crossed to the next.
+
+```sh
+/Applications/Godot.app/Contents/MacOS/Godot --path prototypes/godot-first-interaction -- --flower-lineage
+```
+
+Its title is **FLOWER LINEAGE PROTOTYPE**. Three patches stand down the Headwall gully: gold and violet one cell apart, with the pollinator living between them, and blue far downhill beyond its reach. Each patch sits on a fixture seep that keeps its ground damp; without it the patches dry out within half a minute on the slope, before the pollinator has done anything. Measured headlessly: after 5 minutes gold has turned orange-red (48° to 26°) and violet has warmed (280° to 299°); after 10 minutes they are about 40° apart, down from about 130°, and blue has not changed. Ordinary controls apply; **R** restarts.
+
+Colours, blend share, mixing rate, seep moisture and the patch layout are disposable.
+
+**Playtest gate:** without F9 or coaching, the player says two patches have become the same colour because the pollinator travels between them, or that a patch kept its own colour because nothing reached it.
+
 ## Integrated succession and First Rain
 
 The grid now carries microbial crust, rooted rhizome mats, canopy-formers, standing water, aquatic producers and consumers, dissolved oxygen, sulfur precursor, volatile sulfur, pollination, and dam material. These roles form a provisional Succession rather than an upgrade ladder. Microbial crust occupies a narrow damp band and becomes water-repellent when dense and dry; moss retains water and sheds Detritus; fungus requires that Detritus, recycles nutrients, and detoxifies; rooted mats require moss, crust, and nutrients to awaken or spread, then compete for water; ground flowering offers a reproductive opportunity; vector pollination enables new rooted populations and canopy awakening; and canopy creates shade, litter, cover, and vapor. A Rooted Mat therefore cannot creep into bare ground merely because the ground is wet and fertile, though the Astronaut can carry a finite living clump there with **T**.
@@ -380,6 +400,7 @@ The captured idle-opening failure can be replayed headlessly:
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/spaceplane_cabin_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/waking_animals_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/grazer_gait_test.gd
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/flower_lineage_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/astronaut_footstep_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/life_persists_test.gd
 ```
