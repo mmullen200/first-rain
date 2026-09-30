@@ -44,6 +44,18 @@ const PANEL_SHADE_RADIUS := 1.0
 # layer from PERSISTENT_LAYERS to let it die back again.
 const LIFE_FLOOR := 0.2
 const PERSISTENT_LAYERS := ["moss", "fungus", "fruiting", "microbial_crust", "rhizome", "canopy", "aquatic_producer", "aquatic_consumer"]
+# Shrub stripes (#50), after real tiger bush. Shrubs seed into neighbouring
+# cells, make their own fertile soil from litter, let water soak in where it
+# would otherwise run off bare crust, and draw water from the ground around
+# their roots. On a gentle slope that alone arranges them into bands across
+# the slope with bare strips between.
+const CANOPY_SPREAD := 0.004
+const CANOPY_INFILTRATION := 0.5
+const CANOPY_ROOT_DRAW := 0.02
+# Rain running off as a sheet: each cell soaks up only what its ground can
+# take, bare crust little and shrub ground a lot, and passes the rest downhill.
+const SHEET_BARE_SOAK := 0.1
+const SHEET_SHRUB_SOAK := 0.6
 
 var moisture := PackedFloat32Array()
 var elevation := PackedFloat32Array()
@@ -317,6 +329,7 @@ func step() -> void:
 			var neighbor_moss: float = _neighbor_average(moss, x, y)
 			var neighbor_fungus: float = _neighbor_average(fungus, x, y)
 			var neighbor_rhizome: float = _neighbor_average(rhizome, x, y)
+			var neighbor_canopy: float = _neighbor_average(canopy, x, y)
 			var neighbor_aquatic_producer: float = _neighbor_average(aquatic_producer, x, y)
 			var effective_shade: float = clampf(shade[index] + local_canopy * 0.62, 0.0, 1.0)
 
@@ -386,11 +399,14 @@ func step() -> void:
 
 			# Canopy-formers are slow deep-succession producers. They require a
 			# functioning rooted/decomposer patch and create shade, litter, and vapor.
-			var canopy_suitability: float = smoothstep(0.2, 0.55, local_moisture) * smoothstep(0.08, 0.35, nutrients[index]) * smoothstep(0.05, 0.3, local_fungus + local_rhizome)
+			# Shrub litter builds a fertile island under and around a stand.
+			var canopy_soil: float = local_fungus + local_rhizome + local_canopy + neighbor_canopy * 0.5
+			var canopy_suitability: float = smoothstep(0.2, 0.55, local_moisture) * smoothstep(0.08, 0.35, nutrients[index]) * smoothstep(0.05, 0.3, canopy_soil)
 			var canopy_awakening: float = dormant_canopy[index] * canopy_suitability * maxf(0.0, local_rhizome - 0.005) * 0.005
 			var canopy_growth: float = local_canopy * canopy_suitability * 0.0022
+			var canopy_spread: float = neighbor_canopy * canopy_suitability * CANOPY_SPREAD
 			var canopy_stress: float = local_canopy * maxf(0.0, 0.16 - local_moisture) * 0.025
-			next_canopy[index] = clampf(local_canopy + canopy_awakening + canopy_growth - canopy_stress, 0.0, 1.0)
+			next_canopy[index] = clampf(local_canopy + canopy_awakening + canopy_growth + canopy_spread - canopy_stress, 0.0, 1.0)
 			next_dormant_canopy[index] = maxf(0.0, dormant_canopy[index] - canopy_awakening * 0.5)
 			next_moisture[index] = maxf(0.0, next_moisture[index] - canopy_growth * 0.055)
 			next_dead[index] = clampf(next_dead[index] + local_canopy * 0.0018 + canopy_stress * 0.55, 0.0, 1.0)
@@ -442,7 +458,7 @@ func step() -> void:
 	for y in range(HEIGHT):
 		for x in range(WIDTH):
 			var index: int = _index(x, y)
-			var retention: float = 0.22 + next_moss[index] * 0.28 + next_rhizome[index] * 0.18 + next_crust[index] * 0.06 + shade[index] * 0.12
+			var retention: float = 0.22 + next_moss[index] * 0.28 + next_rhizome[index] * 0.18 + next_crust[index] * 0.06 + shade[index] * 0.12 + next_canopy[index] * CANOPY_INFILTRATION
 			var runoff: float = maxf(0.0, next_moisture[index] - retention) * 0.08
 			var natural_downhill := terrain_downhill_neighbor(Vector2i(x, y))
 			var downstream_dam := next_dam_material[_index(natural_downhill.x, natural_downhill.y)] if is_inside_basin(natural_downhill) and natural_downhill != Vector2i(x, y) else 0.0
@@ -499,6 +515,7 @@ func step() -> void:
 	fungal_spores = next_fungal_spores
 	dam_material = next_dam_material
 	throughflow = next_throughflow
+	_draw_water_to_roots()
 	if life_persists:
 		_hold_life(living_before)
 	# The spring runs once its seal has been eaten away, and stays open.
@@ -1224,6 +1241,46 @@ func excavate(cell: Vector2i, amount := 0.2) -> float:
 func world_to_cell(world: Vector2) -> Vector2i:
 	var local: Vector2 = (world - ORIGIN) / CELL_SIZE
 	return Vector2i(clampi(roundi(local.x), 0, WIDTH - 1), clampi(roundi(local.y), 0, HEIGHT - 1))
+
+
+# One shower of rain over `cells`, routed downhill as sheet flow from the
+# highest cell to the lowest. Water that runs off the listed cells is gone.
+func rain_sheet(cells: Array[Vector2i], amount: float) -> void:
+	var ordered: Array[Vector2i] = cells.duplicate()
+	ordered.sort_custom(func(a: Vector2i, b: Vector2i) -> bool: return elevation[_index(a.x, a.y)] > elevation[_index(b.x, b.y)])
+	var running := {}
+	for cell in ordered:
+		var index := _index(cell.x, cell.y)
+		var water: float = amount + float(running.get(cell, 0.0))
+		var capacity: float = SHEET_BARE_SOAK + canopy[index] * SHEET_SHRUB_SOAK + (moss[index] + rhizome[index]) * 0.2
+		var soaked: float = minf(water, minf(capacity, 1.0 - moisture[index]))
+		moisture[index] += soaked
+		var downhill := downhill_neighbor(cell)
+		if downhill != cell:
+			running[downhill] = float(running.get(downhill, 0.0)) + water - soaked
+
+
+# Shrub roots reach into the eight cells around a stand and draw water from
+# them, so the ground just beside a band stays too dry for new shrubs.
+func _draw_water_to_roots() -> void:
+	var next := moisture.duplicate()
+	for y in range(HEIGHT):
+		for x in range(WIDTH):
+			var shrub: float = canopy[_index(x, y)]
+			if shrub <= 0.01:
+				continue
+			for dy in range(-1, 2):
+				for dx in range(-1, 2):
+					var nx: int = x + dx
+					var ny: int = y + dy
+					if (dx == 0 and dy == 0) or nx < 0 or ny < 0 or nx >= WIDTH or ny >= HEIGHT:
+						continue
+					var drawn: float = moisture[_index(nx, ny)] * shrub * CANOPY_ROOT_DRAW
+					next[_index(nx, ny)] -= drawn
+					next[_index(x, y)] += drawn
+	for index in range(next.size()):
+		next[index] = clampf(next[index], 0.0, 1.0)
+	moisture = next
 
 
 func _neighbor_average(field: PackedFloat32Array, x: int, y: int) -> float:
