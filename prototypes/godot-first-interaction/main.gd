@@ -4152,8 +4152,8 @@ func _play_presence_tones(frequencies: PackedFloat32Array) -> void:
 
 
 # Small dry crunches underfoot: a few seeded variations of crust breaking,
-# a soft low thump with a scatter of tiny cracks on top, each well under a
-# tenth of a second. Built once; nothing is made in a headless run.
+# a soft low thump that swells in and settles out, with a scatter of muffled
+# cracks on top. Built once; nothing is made in a headless run.
 func _build_footstep_sounds() -> void:
 	footstep_audio = AudioStreamPlayer.new()
 	footstep_audio.name = "FootstepAudio"
@@ -4165,25 +4165,31 @@ func _build_footstep_sounds() -> void:
 		return
 	var mix_rate := 22050
 	for variant in 5:
-		var samples := int(float(mix_rate) * 0.11)
+		var samples := int(float(mix_rate) * 0.2)
 		var data := PackedByteArray()
 		data.resize(samples * 2)
 		var cracks: Array = []
 		for crack in footstep_rng.randi_range(5, 9):
-			cracks.append([footstep_rng.randf_range(0.0, 0.07), footstep_rng.randf_range(0.25, 0.7)])
+			cracks.append([footstep_rng.randf_range(0.01, 0.1), footstep_rng.randf_range(0.12, 0.3)])
 		var low := 0.0
+		var smooth := 0.0
+		# The step swells in over about 25 ms and settles out, rather than striking.
+		var swell := 0.025
 		for sample_index in samples:
 			var time := float(sample_index) / float(mix_rate)
 			var noise := footstep_rng.randf_range(-1.0, 1.0)
-			# The thump: low-passed noise that dies away quickly.
-			low = lerpf(low, noise, 0.08)
-			var value := low * 1.6 * exp(-time * 45.0) * minf(1.0, time * 900.0)
-			# The crunch: short bright ticks of raw noise.
+			# The thump: low-passed noise under a rounded rise-and-fall curve.
+			low = lerpf(low, noise, 0.06)
+			var value := low * 2.2 * (time / swell) * exp(1.0 - time / swell)
+			# The crunch: brief grains of noise that ease in and out.
 			for crack in cracks:
 				var since: float = time - float(crack[0])
-				if since >= 0.0 and since < 0.006:
-					value += noise * float(crack[1]) * exp(-since * 700.0)
-			data.encode_s16(sample_index * 2, int(clampf(value * 0.5, -1.0, 1.0) * 32767.0))
+				if since >= 0.0 and since < 0.012:
+					value += noise * float(crack[1]) * sin(PI * since / 0.012) * exp(-since * 250.0)
+			# Take the edge off the whole step, and fade the tail to silence.
+			smooth = lerpf(smooth, value, 0.45)
+			var fade := minf(1.0, float(samples - sample_index) / (float(mix_rate) * 0.03))
+			data.encode_s16(sample_index * 2, int(clampf(smooth * fade * 0.5, -1.0, 1.0) * 32767.0))
 		var stream := AudioStreamWAV.new()
 		stream.format = AudioStreamWAV.FORMAT_16_BITS
 		stream.mix_rate = mix_rate
