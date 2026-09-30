@@ -13,6 +13,7 @@ func _run() -> void:
 	await _assert_vector_stirs_wakes_sleeps_and_wakes_again()
 	await _assert_engineer_woken_too_early_dies()
 	await _assert_grazer_needs_soaked_ground()
+	await _assert_grazer_wakes_under_shrubs_beside_water()
 	await _assert_predator_rides_the_dust()
 	if failed:
 		quit(1)
@@ -123,6 +124,21 @@ func _assert_grazer_needs_soaked_ground() -> void:
 	_assert(_is_present(scene, "grazer:1"), "soaked ground beside forage and cover should wake the grazer")
 	_assert(scene.animal_simulation.agent_state("grazer:1")["cell"] == shell, "the grazer should rise out of its shell")
 	_assert(scene.grazer_root.visible, "the woken grazer should be visible")
+	scene.queue_free()
+
+
+# Shrubs grown over every forage cell, and water pooled beside the shell
+# rather than on it, must still wake a grazer: more cover and more water
+# never count against it.
+func _assert_grazer_wakes_under_shrubs_beside_water() -> void:
+	var scene = await _new_scene()
+	var shell: Vector2i = scene.sleeper_field.cells_for("grazer")[0]
+	_seed_patch(scene, shell, {"moss": 0.3, "rhizome": 0.3, "canopy": 0.4})
+	_soak(scene, shell + Vector2i(-2, 0))
+	var calls: int = scene._calls_per_habitat_observation()
+	for ignored in range(calls * (int(scene.ARRIVAL_SUPPORT_OBSERVATIONS["grazer"]) + 1)):
+		scene._seed_integrated_animals()
+	_assert(_is_present(scene, "grazer:1"), "shrubs over the forage and water pooled beside the shell should still wake the grazer")
 	scene.queue_free()
 
 

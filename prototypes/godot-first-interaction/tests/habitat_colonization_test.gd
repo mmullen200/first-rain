@@ -28,7 +28,8 @@ func _run() -> void:
 	uniform_scene.ecology.add_water(uniform_scene.ecology.world_position(lush_patch.x, lush_patch.y), 0.5, 2.4)
 	_assert(uniform_scene._best_arrival_habitat("vector").is_empty(), "one connected bloom carpet should not qualify a reproductive vector")
 	_assert(uniform_scene._best_arrival_habitat("wetland_engineer").is_empty(), "standing water away from the Drainage Spine should not qualify a Wetland Engineer")
-	_assert(uniform_scene._best_arrival_habitat("grazer").is_empty(), "uniform forage under uniform cover should not qualify a grazer without a habitat edge")
+	# Reversed 2026-09-30 (user): too many shrubs must never keep a grazer from waking.
+	_assert(not uniform_scene._best_arrival_habitat("grazer").is_empty(), "forage under shrub cover should qualify a grazer")
 	uniform_scene.queue_free()
 
 	# Nothing arrives. The colony wakes from a queen sleeping in a hoodoo, and

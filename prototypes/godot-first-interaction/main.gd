@@ -64,11 +64,13 @@ const PREDATOR_ROSTER := ["predator:1", "predator:2"]
 const SLEEPER_STIRRING_OBSERVATIONS := 2
 # A sleeper senses habitat this many cells from where it lies.
 const SLEEPER_REACH := 3
-# A buried grazer also needs its own ground soaked. Its shell remembers the
-# wettest its ground has been, fading each tick, so one watering keeps it
+# A buried grazer also needs its ground soaked: any ground within
+# SHELL_WET_REACH cells, standing water included. Its shell remembers the
+# wettest that ground has been, fading each tick, so one watering keeps it
 # soaked for about half a minute and it needs two or three in a row to wake.
 const GRAZER_SOAK_MOISTURE := 0.25
 const GRAZER_SOAK_MEMORY := 0.995
+const SHELL_WET_REACH := 2
 # Ground this wet (3 x 3 average) refuses another poured dose.
 const GROUND_SOAKED_MOISTURE := 0.3
 # A predator's glide out of the dust front, or back into the wind: seconds,
@@ -2007,7 +2009,7 @@ func _update_sleepers() -> void:
 	for index in range(sleeper_states.size()):
 		if String(sleeper_field.sleepers[index]["species"]) == "grazer":
 			var sleeper: Dictionary = sleeper_states[index]
-			sleeper["soak"] = maxf(float(sleeper["soak"]) * GRAZER_SOAK_MEMORY, _local_moisture(sleeper_field.sleepers[index]["cell"]))
+			sleeper["soak"] = maxf(float(sleeper["soak"]) * GRAZER_SOAK_MEMORY, _shell_wetness(sleeper_field.sleepers[index]["cell"]))
 	var species_to_search: Array[String] = []
 	for species in SLEEPER_ROSTER:
 		for index in range(sleeper_states.size()):
@@ -2080,6 +2082,18 @@ func _sleeper_habitat(species: String, cell: Vector2i, scores: PackedFloat32Arra
 	if best_score < 0.0:
 		return {}
 	return _habitat_at_cell(species, best)
+
+
+# The wettest ground within SHELL_WET_REACH of a buried shell, pooled water
+# included: water poured beside it, or gathered in a hollow next to it, soaks
+# it just as well as water poured on top, and more water never counts less.
+func _shell_wetness(cell: Vector2i) -> float:
+	var wettest := 0.0
+	for y in range(maxi(0, cell.y - SHELL_WET_REACH), mini(ecology.HEIGHT, cell.y + SHELL_WET_REACH + 1)):
+		for x in range(maxi(0, cell.x - SHELL_WET_REACH), mini(ecology.WIDTH, cell.x + SHELL_WET_REACH + 1)):
+			var near := Vector2i(x, y)
+			wettest = maxf(wettest, maxf(_local_moisture(near), ecology.surface_water[y * ecology.WIDTH + x]))
+	return wettest
 
 
 func _local_moisture(cell: Vector2i) -> float:
@@ -2503,7 +2517,9 @@ func _local_habitat_evidence(center: Vector2i, radius: int, include_flowering_to
 				evidence["flowering"] += local_flowering * weight
 			if local_detritus >= 0.03 and moisture_values[index] <= 0.2 and local_surface_water <= 0.03:
 				evidence["dry_detritus"] += local_detritus * weight
-			if local_forage >= 0.16 and canopy_values[index] < 0.06:
+			# Ground plants feed a grazer whether or not shrubs grow over them, so
+			# a thickening canopy never starves a sleeping shell of forage.
+			if local_forage >= 0.16:
 				evidence["open_forage"] += local_forage * weight
 				open_forage_cells.append(cell)
 			if local_cover >= 0.1:
@@ -2525,7 +2541,7 @@ func _local_habitat_evidence(center: Vector2i, radius: int, include_flowering_to
 	for forage_cell in open_forage_cells:
 		for cover_cell in cover_cells:
 			var edge_distance := absi(forage_cell.x - cover_cell.x) + absi(forage_cell.y - cover_cell.y)
-			if edge_distance >= 1 and edge_distance <= 3:
+			if edge_distance <= 3:
 				evidence["forage_cover_edges"] += 1
 	return evidence
 
@@ -3471,7 +3487,7 @@ func _water_ground() -> void:
 	evidence.checkpoint(ecology.tick, "player_intervention", _evidence_snapshot())
 	var beside_shell := false
 	for shell in sleeper_field.cells_for("grazer"):
-		if _cell_distance(shell, cell) <= 1:
+		if _cell_distance(shell, cell) <= SHELL_WET_REACH:
 			beside_shell = true
 	if beside_shell:
 		_set_status("Water soaks into the ground around the grey buried hump. The soil darkens and holds it, for now.", 2.6)
