@@ -14,6 +14,7 @@ func _run() -> void:
 	await _assert_engineer_woken_too_early_dies()
 	await _assert_grazer_needs_soaked_ground()
 	await _assert_grazer_wakes_under_shrubs_beside_water()
+	await _assert_grazers_never_overlap()
 	await _assert_predator_rides_the_dust()
 	if failed:
 		quit(1)
@@ -124,6 +125,24 @@ func _assert_grazer_needs_soaked_ground() -> void:
 	_assert(_is_present(scene, "grazer:1"), "soaked ground beside forage and cover should wake the grazer")
 	_assert(scene.animal_simulation.agent_state("grazer:1")["cell"] == shell, "the grazer should rise out of its shell")
 	_assert(scene.grazer_root.visible, "the woken grazer should be visible")
+	scene.queue_free()
+
+
+# Two grazers the simulation places in the same cell are drawn apart, never
+# one on top of the other.
+func _assert_grazers_never_overlap() -> void:
+	var scene = await _new_scene()
+	var cell: Vector2i = scene.sleeper_field.cells_for("grazer")[0]
+	for stable_id in ["grazer:2", "grazer:3"]:
+		scene.animal_simulation.register_agent("grazer", stable_id, {"cell": cell, "habitat_cell": cell})
+	scene._update_ecological_animal_markers()
+	var first: Node3D = scene.animal_markers["grazer:2"]
+	var second: Node3D = scene.animal_markers["grazer:3"]
+	var closest := INF
+	for ignored in 240:
+		scene._update_grazer_markers(1.0 / 60.0)
+		closest = minf(closest, Vector2(second.position.x - first.position.x, second.position.z - first.position.z).length())
+	_assert(closest >= 2.0 * scene.GRAZER_BODY_RADIUS - 0.01, "two grazers in one cell should stand apart (closest %.2f m)" % closest)
 	scene.queue_free()
 
 

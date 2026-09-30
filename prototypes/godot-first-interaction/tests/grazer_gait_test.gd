@@ -56,6 +56,21 @@ func _run() -> void:
 	var muzzle: Vector3 = animal.head.global_transform * Vector3(0.0, -0.05, 0.27)
 	_assert(absf(muzzle.y - marker.position.y) < 0.08, "feeding should bring the flat muzzle down to the ground (%.3f m)" % (muzzle.y - marker.position.y))
 
+	# Slug-like eye stalks: tips ahead of and above their roots, spreading apart.
+	for ignored in 240:
+		animal.animate(STEP, "resting")
+		var tips := {}
+		for stalk in animal.tentacles:
+			if int(stalk.get_meta("pair")) != 0:
+				continue
+			var base: Vector3 = animal.head.global_transform.inverse() * stalk.global_position
+			var tip: Vector3 = animal.head.global_transform.inverse() * (stalk.global_transform * Vector3(0.0, 0.3, 0.0))
+			_assert(tip.z > base.z + 0.08 and tip.y > base.y + 0.08, "eye stalks should point forward and up")
+			tips[stalk.get_meta("side")] = [base, tip]
+		var roots_apart: float = absf(tips[1.0][0].x - tips[-1.0][0].x)
+		var tips_apart: float = absf(tips[1.0][1].x - tips[-1.0][1].x)
+		_assert(tips_apart > roots_apart + 0.1, "eye stalks should angle away from each other")
+
 	animal.set_juvenile(true)
 	_assert(animal.scale.x < 0.8, "a juvenile should be smaller")
 

@@ -6,6 +6,10 @@ extends Node3D
 
 const WALK_SPEED := 1.9
 const GRAZER_MOVE_SPEED := 0.38
+# How far from its cell's centre each grazer stands, and the radius its body
+# keeps clear of other grazers (scaled down for juveniles), in metres.
+const GRAZER_CELL_SLOT := 0.5
+const GRAZER_BODY_RADIUS := 0.65
 const GROUND_ANIMAL_MOVE_SPEED := 0.72
 const TERRAIN_SUBDIVISIONS := 3
 const TERRAIN_BLOCK_GAP := 0.0
@@ -2801,19 +2805,61 @@ func _add_grazer_marker(id: String) -> void:
 
 
 func _update_grazer_markers(delta: float) -> void:
+	# The first grazer has its own root and body; the rest ride animal markers.
+	var shown: Array[Node3D] = []
+	var figures: Array[Node3D] = []
+	var heights: Array[float] = []
+	var states: Array[String] = []
+	if grazer_awake and grazer_root.visible:
+		var first: Dictionary = animal_simulation.agent_state("grazer:1")
+		if not first.is_empty() and bool(first["alive"]):
+			shown.append(grazer_root)
+			figures.append(grazer_body)
+			heights.append(0.28)
+			states.append(String(first["state"]))
 	for id in animal_markers:
 		var agent: Dictionary = animal_simulation.agent_state(id)
 		var marker: Node3D = animal_markers[id]
 		if agent.is_empty() or agent["species"] != "grazer" or not bool(agent["alive"]) or not bool(agent["present"]) or not marker.visible:
 			continue
 		var cell: Vector2i = agent["cell"]
-		var world: Vector2 = ecology.world_position(cell.x, cell.y)
+		var world: Vector2 = ecology.world_position(cell.x, cell.y) + _grazer_cell_slot(id)
 		var speed := 1.8 if agent["state"] == "fleeing" else (0.85 if agent["state"] == "following parent" else GRAZER_MOVE_SPEED)
 		_move_ground_actor(marker, world, 0.25, speed, delta)
 		var figure = marker.get_child(0)
 		if bool(agent.get("juvenile", false)) != figure.juvenile:
 			figure.set_juvenile(bool(agent.get("juvenile", false)))
-		figure.animate(delta, String(agent["state"]))
+		shown.append(marker)
+		figures.append(figure)
+		heights.append(0.25)
+		states.append(String(agent["state"]))
+	_separate_grazers(shown, figures, heights)
+	for index in shown.size():
+		figures[index].animate(delta, states[index])
+
+
+# Several grazers can share one 2 m cell; each heads for its own spot in it.
+func _grazer_cell_slot(id: String) -> Vector2:
+	var angle := float(hash(id) % 360) * PI / 180.0
+	return Vector2(cos(angle), sin(angle)) * GRAZER_CELL_SLOT
+
+
+# Grazer bodies never overlap: any two closer than their combined size are
+# pushed apart along the line between them, sharing the correction equally.
+func _separate_grazers(roots: Array[Node3D], figures: Array[Node3D], heights: Array[float]) -> void:
+	for pass_index in 3:
+		for a in roots.size():
+			for b in range(a + 1, roots.size()):
+				var apart := Vector2(roots[b].position.x - roots[a].position.x, roots[b].position.z - roots[a].position.z)
+				var needed := GRAZER_BODY_RADIUS * (figures[a].scale.x + figures[b].scale.x)
+				var distance := apart.length()
+				if distance >= needed:
+					continue
+				var direction := apart / distance if distance > 0.001 else Vector2(cos(float(a + b)), sin(float(a + b)))
+				var push := direction * (needed - distance) * 0.5
+				for index in [a, b]:
+					var moved := Vector2(roots[index].position.x, roots[index].position.z) + (push if index == b else -push)
+					roots[index].position = Vector3(moved.x, _terrain_surface_height(moved) + heights[index], moved.y)
 
 
 func _update_ground_animal_markers(delta: float) -> void:
@@ -3001,11 +3047,11 @@ func _update_grazer(delta: float) -> void:
 	grazer_root.visible = true
 	grazer_cell = authoritative["cell"]
 	_set_grazer_state(authoritative["state"])
-	var target_world: Vector2 = ecology.world_position(grazer_cell.x, grazer_cell.y)
+	var target_world: Vector2 = ecology.world_position(grazer_cell.x, grazer_cell.y) + _grazer_cell_slot("grazer:1")
 	grazer_target_position = Vector3(target_world.x, _terrain_surface_height(target_world) + 0.28, target_world.y)
 	var speed := 1.8 if authoritative["state"] == "fleeing" else GRAZER_MOVE_SPEED
 	_move_ground_actor(grazer_root, target_world, 0.28, speed, delta)
-	grazer_body.animate(delta, String(authoritative["state"]))
+	# Posed in _update_grazer_markers, after every grazer has been kept apart.
 
 
 # The first grazer rises out of its shell at `start_cell` and walks to the

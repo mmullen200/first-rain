@@ -19,8 +19,8 @@ extends Node3D
 # muzzle to the ground and sweeps it side to side while the jaw works;
 # fleeing stretches the neck out ahead, lifts the tail and pulls in the
 # tentacles; resting lets the head hang at mid-height, breathing, looking
-# slowly about. Two long snail-like eye tentacles and two short feelers wave
-# slowly on top of the head.
+# slowly about. Two long slug-like eye tentacles point forward and up in a V
+# and two short feelers reach down toward the ground, each moving on its own.
 
 const HIND_HIP := Vector3(0.14, 0.56, -0.24)
 const FORE_HIP := Vector3(0.13, 0.5, 0.21)
@@ -33,10 +33,12 @@ const NECK_SEGMENTS := 6
 const NECK_LENGTH := 0.12
 const TAIL_SEGMENTS := 7
 const TAIL_LENGTH := 0.12
-# Snail-like tentacles (user, 2026-09-28): [length, radius, x, y, z, splay,
-# lean] for a long upper pair carrying the eyes and a short lower pair that
-# feels the ground.
-const TENTACLES := [[0.34, 0.02, 0.05, 0.08, 0.07, 0.3, -0.35], [0.12, 0.015, 0.1, -0.01, 0.2, 0.55, 0.6]]
+# Slug-like tentacles (user, 2026-09-28 and 2026-09-30): [length, radius, x,
+# y, z, splay, lean]. The long upper pair carries the eyes and points forward
+# and up, splaying apart in a V; the short lower pair reaches forward and down
+# to feel the ground. Lean tips a stalk forward from vertical and splay tips it
+# outward, both in radians.
+const TENTACLES := [[0.34, 0.02, 0.05, 0.08, 0.07, 0.32, 0.72], [0.12, 0.015, 0.1, -0.01, 0.2, 0.5, 1.75]]
 const TENTACLE_JOINTS := 4
 
 var juvenile := false
@@ -230,24 +232,28 @@ func _pose_neck() -> void:
 	jaw.rotation.x = 0.28 * chew + 0.05 * (1.0 - feeding)
 
 
-# The tentacles wave slowly, each on its own rhythm, with the bend adding up
-# toward the tip. Feeding tips them forward toward the ground; fleeing pulls
-# them in, as a snail does.
+# Like a slug's, each tentacle moves on its own: the stalk swings slowly
+# forward and back and out and in, and stretches and shortens a little as if
+# probing, while staying nearly straight with a slight droop at the tip.
+# Feeding tips them further toward the ground; fleeing pulls them in.
 func _pose_tentacles() -> void:
 	for root in tentacles:
 		var side: float = root.get_meta("side")
 		var pair: int = root.get_meta("pair")
 		var shape: Array = TENTACLES[pair]
-		var rhythm := float(pair) * 2.1 + side * 0.7
-		var lean: float = shape[6]
-		root.rotation = Vector3(lean + 0.5 * feeding + 0.4 * alert, side * float(shape[5]) * (1.0 - 0.5 * alert), 0.0)
-		root.scale = Vector3.ONE * lerpf(1.0, 0.25, alert)
+		var rhythm := float(pair) * 2.1 + side * 1.3
+		var swing := sin(time * 0.47 + rhythm) * 0.16 + sin(time * 1.13 + rhythm * 2.3) * 0.05
+		var spread := sin(time * 0.31 + rhythm * 1.7) * 0.06
+		var reach := 0.9 + 0.1 * sin(time * 0.23 + rhythm * 0.9)
+		# Euler order is Y, X, Z: splay about Z tips the stalk outward, then
+		# lean about X tips it forward.
+		root.rotation = Vector3(float(shape[6]) + swing + 0.2 * feeding - 0.3 * alert, 0.0, -side * (float(shape[5]) + spread) * (1.0 - 0.5 * alert))
+		root.scale = Vector3(1.0, reach, 1.0) * lerpf(1.0, 0.25, alert)
 		var joint: Node3D = root.get_child(0)
 		var index := 0
 		while joint != null:
-			var wave := sin(time * (0.9 + 0.25 * pair) + rhythm - index * 0.8)
-			var drift := sin(time * 0.53 + rhythm * 1.7 - index * 0.6)
-			joint.rotation = Vector3((0.1 * wave + 0.06 * feeding) * (1.0 - alert), side * 0.12 * drift, 0.0)
+			var wave := sin(time * (0.8 + 0.2 * pair) + rhythm - index * 0.7)
+			joint.rotation = Vector3((0.04 * wave + 0.03 * index) * (1.0 - alert), 0.0, -side * 0.03 * wave)
 			index += 1
 			joint = joint.get_child(1) if joint.get_child_count() > 1 else null
 
