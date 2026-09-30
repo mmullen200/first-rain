@@ -184,7 +184,7 @@ First Rain is a natural threshold, not a Presence ability. Surface water and can
 
 ## Embodied-toolkit question
 
-The loose shade panel can be carried as the astronaut's one bulky object and placed on any reachable ecological cell. A translucent footprint shows immediate coverage without predicting biological success. Retrieving it removes that shade immediately; forced recovery drops it at the collapse location instead of teleporting it to the wreck.
+The loose shade panel can be carried as the astronaut's one bulky object and placed on any reachable ecological cell. The panel is about 1.5 m across, so it shades only the Ecological Cell it lies on; a small translucent footprint on that cell shows the coverage while carrying, without predicting biological success. Retrieving it removes that shade immediately; forced recovery drops it at the collapse location instead of teleporting it to the wreck.
 
 A robust living moss or rhizome cell can also surrender a finite clump to the same bulky carry frame. Extraction immediately thins the donor; placement transfers that exact living biomass rather than creating a planting token. Hot, dry, or toxic ground stresses the transplant through the ordinary ecological rules, so the initial placement is not proof of establishment. This asks whether source sacrifice and uncertain destination choice create a legible spatial Field Experiment.
 

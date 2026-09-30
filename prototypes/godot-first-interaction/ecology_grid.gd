@@ -34,6 +34,9 @@ const DAM_HEIGHT_SCALE := 2.0
 # in the ecology breaks them down; only the colony's workers remove them.
 const SPRING_SEAL_MATTER := 0.5
 const SPRING_FLOW := 0.05
+# The loose wreck panel is about 1.5 m across, so it shades only the one
+# Ecological Cell it lies on (neighbouring cell centres are 2 m away).
+const PANEL_SHADE_RADIUS := 1.0
 # While life_persists is set, living things never die out on their own:
 # drying, heat, toxicity, dust and ordinary turnover can thin a patch, but not
 # below LIFE_FLOOR once it has reached it (a thinner patch keeps what it has).
@@ -639,9 +642,9 @@ func _rebuild_shade() -> void:
 	for y in range(HEIGHT):
 		for x in range(WIDTH):
 			var distance: float = world_position(x, y).distance_to(equipment_shade_world)
-			if distance > 4.0:
+			if distance > PANEL_SHADE_RADIUS:
 				continue
-			var strength: float = 1.0 - distance / 4.0
+			var strength: float = 1.0 - distance / PANEL_SHADE_RADIUS
 			var index: int = _index(x, y)
 			shade[index] = clampf(shade[index] + 0.95 * strength, 0.0, 1.0)
 
