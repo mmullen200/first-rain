@@ -13,6 +13,12 @@ const HIP_SWING := 0.55
 const KNEE_BEND := 0.85
 const ARM_SWING := 0.5
 const REFERENCE_SPEED := 1.9
+# Below this share of a full walk the feet shuffle rather than land.
+const FOOTFALL_WALK := 0.35
+
+# A foot lands: the stride swings each leg furthest forward, knee straight,
+# at a quarter and three quarters of the cycle.
+signal footstep
 
 var body_root: Node3D
 var torso_group: Node3D
@@ -54,7 +60,12 @@ func animate(delta: float, horizontal_speed: float) -> void:
 	var target := clampf(horizontal_speed / REFERENCE_SPEED, 0.0, 1.0)
 	walk_amount = lerpf(walk_amount, target, clampf(delta * 9.0, 0.0, 1.0))
 	# Advance the stride by distance travelled so feet do not skate.
-	stride_phase = fmod(stride_phase + horizontal_speed * delta * STRIDE_RADIANS_PER_METRE, TAU)
+	var advanced := stride_phase + horizontal_speed * delta * STRIDE_RADIANS_PER_METRE
+	if walk_amount > FOOTFALL_WALK:
+		for landing in [PI * 0.5, PI * 1.5, PI * 2.5]:
+			if stride_phase < landing and advanced >= landing:
+				footstep.emit()
+	stride_phase = fmod(advanced, TAU)
 	idle_time += delta
 
 	var swing := sin(stride_phase)

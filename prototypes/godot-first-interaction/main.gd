@@ -180,6 +180,9 @@ var presence_signal_ring: MeshInstance3D
 var astronaut_signal_ring: MeshInstance3D
 var astronaut_signal_beam: MeshInstance3D
 var presence_signal_audio: AudioStreamPlayer
+var footstep_audio: AudioStreamPlayer
+var footstep_sounds: Array[AudioStreamWAV] = []
+var footstep_rng := RandomNumberGenerator.new()
 var presence_signal_elapsed := 0.0
 var presence_signal_duration := 0.0
 var presence_signal_interval := 0.4
@@ -966,6 +969,8 @@ func _build_astronaut() -> void:
 
 	astronaut_figure = AstronautFigure.new()
 	astronaut.add_child(astronaut_figure)
+	astronaut_figure.footstep.connect(_play_footstep)
+	_build_footstep_sounds()
 
 	camera = Camera3D.new()
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
@@ -4107,6 +4112,58 @@ func _play_presence_tones(frequencies: PackedFloat32Array) -> void:
 	stream.data = data
 	presence_signal_audio.stream = stream
 	presence_signal_audio.play()
+
+
+# Small dry crunches underfoot: a few seeded variations of crust breaking,
+# a soft low thump with a scatter of tiny cracks on top, each well under a
+# tenth of a second. Built once; nothing is made in a headless run.
+func _build_footstep_sounds() -> void:
+	footstep_audio = AudioStreamPlayer.new()
+	footstep_audio.name = "FootstepAudio"
+	footstep_audio.volume_db = -17.0
+	footstep_audio.max_polyphony = 3
+	add_child(footstep_audio)
+	footstep_rng.seed = 20260930
+	if DisplayServer.get_name() == "headless":
+		return
+	var mix_rate := 22050
+	for variant in 5:
+		var samples := int(float(mix_rate) * 0.11)
+		var data := PackedByteArray()
+		data.resize(samples * 2)
+		var cracks: Array = []
+		for crack in footstep_rng.randi_range(5, 9):
+			cracks.append([footstep_rng.randf_range(0.0, 0.07), footstep_rng.randf_range(0.25, 0.7)])
+		var low := 0.0
+		for sample_index in samples:
+			var time := float(sample_index) / float(mix_rate)
+			var noise := footstep_rng.randf_range(-1.0, 1.0)
+			# The thump: low-passed noise that dies away quickly.
+			low = lerpf(low, noise, 0.08)
+			var value := low * 1.6 * exp(-time * 45.0) * minf(1.0, time * 900.0)
+			# The crunch: short bright ticks of raw noise.
+			for crack in cracks:
+				var since: float = time - float(crack[0])
+				if since >= 0.0 and since < 0.006:
+					value += noise * float(crack[1]) * exp(-since * 700.0)
+			data.encode_s16(sample_index * 2, int(clampf(value * 0.5, -1.0, 1.0) * 32767.0))
+		var stream := AudioStreamWAV.new()
+		stream.format = AudioStreamWAV.FORMAT_16_BITS
+		stream.mix_rate = mix_rate
+		stream.stereo = false
+		stream.data = data
+		footstep_sounds.append(stream)
+
+
+func _play_footstep() -> void:
+	if footstep_sounds.is_empty():
+		return
+	footstep_audio.stream = footstep_sounds[footstep_rng.randi_range(0, footstep_sounds.size() - 1)]
+	# The cabin floor is metal: the same step lands duller and lower there.
+	var cabin := in_cabin_view
+	footstep_audio.pitch_scale = footstep_rng.randf_range(0.55, 0.65) if cabin else footstep_rng.randf_range(0.88, 1.15)
+	footstep_audio.volume_db = footstep_rng.randf_range(-19.0, -15.0) - (4.0 if cabin else 0.0)
+	footstep_audio.play()
 
 
 func _update_presence_signals(delta: float) -> void:
