@@ -14,6 +14,8 @@ const PARENT_MEMORY_TICKS := 120
 const PREDATOR_TERRITORY_RADIUS := 4
 const HUNT_RECOVERY_TICKS := 48
 const HUNT_ENERGY_COST := 0.24
+# While life persists, a hunted grazer always keeps this much body.
+const PREY_BODY_FLOOR := 0.1
 const ENGINEER_RANGE := 4
 const ENGINEER_TARGET_DEPTH := 0.42
 const ENGINEER_TARGET_DAM := 0.42
@@ -52,6 +54,7 @@ const DIRECTIONS := [
 
 var ecology
 var seed := 1
+var life_persists := false
 var tick := 0
 var agents: Dictionary = {}
 var event_history: Array[Dictionary] = []
@@ -1214,10 +1217,10 @@ func _predate(predator_id: String, prey_id: String, requested: float) -> void:
 	prey["state"] = "fleeing"
 	agents[predator_id] = predator
 	agents[prey_id] = prey
-	_emit("organism.hunt_attempted", predator_id, {"prey_id": prey_id, "cell": predator["cell"], "prey_cell": prey["cell"], "success": success, "lethal": success and float(prey["body_biomass"]) <= requested, "chance": chance, "roll": roll, "energy_cost": HUNT_ENERGY_COST})
+	_emit("organism.hunt_attempted", predator_id, {"prey_id": prey_id, "cell": predator["cell"], "prey_cell": prey["cell"], "success": success, "lethal": success and not life_persists and float(prey["body_biomass"]) <= requested, "chance": chance, "roll": roll, "energy_cost": HUNT_ENERGY_COST})
 	if not success:
 		return
-	var removed := minf(float(prey["body_biomass"]), requested)
+	var removed := clampf(minf(float(prey["body_biomass"]) - (PREY_BODY_FLOOR if life_persists else 0.0), requested), 0.0, requested)
 	var carried_before := float(predator["carried_material"].get("animal_biomass", 0.0))
 	prey["body_biomass"] = float(prey["body_biomass"]) - removed
 	predator["carried_material"]["animal_biomass"] = carried_before + removed

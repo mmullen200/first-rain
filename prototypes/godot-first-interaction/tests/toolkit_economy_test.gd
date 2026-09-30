@@ -22,6 +22,9 @@ func _run() -> void:
 		_fail("shade panel did not place on the chosen ecological cell")
 		return
 	var cell: Vector2i = scene.shade_placed_cell
+	if scene.shade_panel.global_position.y < scene._cell_top_height(cell):
+		_fail("placed panel is buried inside the terrain; panel y=%.2f ground top=%.2f" % [scene.shade_panel.global_position.y, scene._cell_top_height(cell)])
+		return
 	var shaded: float = scene.ecology.cell_snapshot(cell.x, cell.y)["shade"]
 	scene.astronaut.position = scene.shade_panel.position
 	scene._interact_with_shade()
@@ -32,6 +35,9 @@ func _run() -> void:
 	scene._recover_at_wreck(true)
 	if scene.carrying_shade or not scene.shade_placed:
 		_fail("forced recovery did not leave the bulky panel in the field")
+		return
+	if scene.shade_panel.global_position.y < scene._cell_top_height(scene.shade_placed_cell):
+		_fail("panel dropped by forced recovery is buried inside the terrain")
 		return
 	scene.water_doses = 0
 	scene.ship_water_production_elapsed = 0.0

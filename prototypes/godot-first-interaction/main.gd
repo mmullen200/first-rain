@@ -76,6 +76,11 @@ const GROUND_SOAKED_MOISTURE := 0.3
 const PREDATOR_FALL_SECONDS := 2.4
 const PREDATOR_GLIDE_RUN := 9.0
 const PREDATOR_GLIDE_HEIGHT := 5.0
+# Playtest setting: once a plant or animal has appeared it stays alive. Plants
+# can thin but not die out, animals never go back to sleep when their ground
+# fails, a stirring sleeper settles back down instead of dying, and a hunted
+# grazer is wounded but not killed. Losses are to be added back gradually.
+const LIFE_PERSISTS := true
 const EcologyGridModel = preload("res://ecology_grid.gd")
 const EvidenceRecorder = preload("res://evidence_recorder.gd")
 const AnimalSimulation = preload("res://animal_simulation.gd")
@@ -242,6 +247,7 @@ var garden_spire: Node3D
 var first_rain_announced := false
 
 var disturbance_state := "quiet"
+var life_persists := false
 var disturbance_timer := 0.0
 var disturbance_column := -1
 var dust_front: MeshInstance3D
@@ -740,7 +746,7 @@ func _build_world() -> void:
 	shade_panel_home = Vector3(wreck_world.x - 0.4, wreck_height + 0.14, wreck_world.y + 5.7)
 	shade_panel = _create_box(shade_panel_home, Vector3(1.45, 0.09, 0.85), Color("839199"), Vector3(0.0, 0.22, -0.08))
 	shade_panel.name = "LooseShadePanel"
-	shade_preview = _create_cylinder(shade_panel_home, 4.0, 0.025, Color(0.25, 0.75, 0.72, 0.28))
+	shade_preview = _create_cylinder(shade_panel_home, EcologyGridModel.PANEL_SHADE_RADIUS, 0.025, Color(0.25, 0.75, 0.72, 0.28))
 	shade_preview.name = "ShadeFootprintPreview"
 	shade_preview.visible = false
 	clump_marker = _create_cylinder(shade_panel_home, 0.34, 0.22, Color("4fa45e"))
@@ -752,6 +758,7 @@ func _build_world() -> void:
 func _build_ecology_grid() -> void:
 	ecology = EcologyGridModel.new()
 	animal_simulation = AnimalSimulation.new(ecology, 1)
+	set_life_persists(LIFE_PERSISTS)
 	weather_simulation = WeatherSimulation.new(1701)
 	drainage_affinity_cache = _drainage_affinity_snapshot()
 	terrain_shader = Shader.new()
@@ -856,6 +863,15 @@ func _terrain_surface_height(world: Vector2) -> float:
 	var southwest: float = ecology.terrain_height(Vector2i(x0, y0 + 1))
 	var southeast: float = ecology.terrain_height(Vector2i(x0 + 1, y0 + 1))
 	return lerpf(lerpf(northwest, northeast, progress_x), lerpf(southwest, southeast, progress_x), progress_y)
+
+
+# The top of the highest voxel column in a cell, so an object set down there
+# rests on the blocks rather than inside them.
+func _cell_top_height(cell: Vector2i) -> float:
+	var top := 0.0
+	for height in _voxel_heights_for_cell(cell):
+		top = maxf(top, height)
+	return top
 
 
 func _voxel_heights_for_cell(cell: Vector2i) -> PackedFloat32Array:
@@ -1545,7 +1561,7 @@ func _move_astronaut(delta: float) -> void:
 		shade_panel.rotation = astronaut.rotation + Vector3(0.0, 0.0, -0.08)
 		var preview_cell: Vector2i = ecology.world_to_cell(Vector2(astronaut.position.x, astronaut.position.z))
 		var preview_world: Vector2 = ecology.world_position(preview_cell.x, preview_cell.y)
-		shade_preview.position = Vector3(preview_world.x, 0.035, preview_world.y)
+		shade_preview.position = Vector3(preview_world.x, _cell_top_height(preview_cell) + 0.035, preview_world.y)
 		shade_preview.visible = true
 	elif shade_preview != null:
 		shade_preview.visible = false
@@ -1818,7 +1834,7 @@ func _recover_at_wreck(forced: bool) -> void:
 			var dropped_world: Vector2 = ecology.world_position(shade_placed_cell.x, shade_placed_cell.y)
 			carrying_shade = false
 			shade_placed = true
-			shade_panel.position = Vector3(dropped_world.x, 0.18, dropped_world.y)
+			shade_panel.position = Vector3(dropped_world.x, _cell_top_height(shade_placed_cell) + 0.1, dropped_world.y)
 			ecology.place_equipment_shade(dropped_world)
 		if not carried_clump.is_empty():
 			var dropped_cell: Vector2i = ecology.world_to_cell(Vector2(astronaut.position.x, astronaut.position.z))
@@ -2016,7 +2032,9 @@ func _update_sleepers() -> void:
 		var cell: Vector2i = sleeper_field.sleepers[index]["cell"]
 		var habitat := {} if species == "grazer" and float(sleeper["soak"]) < GRAZER_SOAK_MOISTURE else _sleeper_habitat(species, cell, scores[species])
 		if habitat.is_empty():
-			if state == "stirring":
+			if state == "stirring" and life_persists:
+				_sleeper_settled(index)
+			elif state == "stirring":
 				_sleeper_died(index)
 			else:
 				sleeper["observations"] = 0
@@ -2088,6 +2106,17 @@ func _free_sleeper_id(species: String) -> String:
 		if not claimed:
 			return stable_id
 	return ""
+
+
+# While life persists, a stirring sleeper that loses what woke it settles
+# back to sleep and can stir again.
+func _sleeper_settled(index: int) -> void:
+	var sleeper: Dictionary = sleeper_states[index]
+	sleeper["state"] = "dormant"
+	sleeper["observations"] = 0
+	if not animal_simulation.agents.has(String(sleeper["agent_id"])):
+		sleeper["agent_id"] = ""
+	sleeper_field.show_state(index, "dormant", ecology)
 
 
 func _sleeper_died(index: int) -> void:
@@ -2218,7 +2247,15 @@ func _stirring_queen() -> Dictionary:
 	return best
 
 
+func set_life_persists(persists: bool) -> void:
+	life_persists = persists
+	ecology.life_persists = persists
+	animal_simulation.life_persists = persists
+
+
 func _update_resident_habitat_support() -> void:
+	if life_persists:
+		return
 	var habitat_snapshot: Dictionary = ecology.full_snapshot()
 	habitat_snapshot["drainage_affinity"] = _drainage_affinity_snapshot()
 	for stable_id in animal_simulation.agents:
@@ -3537,10 +3574,10 @@ func _interact_with_shade() -> void:
 		shade_placed = true
 		shade_placed_cell = ecology.world_to_cell(Vector2(astronaut.position.x, astronaut.position.z))
 		var placed_world: Vector2 = ecology.world_position(shade_placed_cell.x, shade_placed_cell.y)
-		shade_panel.global_position = Vector3(placed_world.x, 1.15, placed_world.y)
+		shade_panel.global_position = Vector3(placed_world.x, _cell_top_height(shade_placed_cell) + 0.1, placed_world.y)
 		shade_panel.rotation = Vector3(0.0, 0.18, -0.04)
 		ecology.place_equipment_shade(placed_world)
-		patches["crust"]["shade"] = placed_world.distance_to(Vector2(patches["crust"]["node"].position.x, patches["crust"]["node"].position.z)) <= 4.0
+		patches["crust"]["shade"] = ecology.world_to_cell(Vector2(patches["crust"]["node"].position.x, patches["crust"]["node"].position.z)) == shade_placed_cell
 		last_intervention_event_id = evidence.record_event(ecology.tick, "intervention.shade_added", "cell:%d,%d" % [shade_placed_cell.x, shade_placed_cell.y], [command_id])
 		evidence.checkpoint(ecology.tick, "player_intervention", _evidence_snapshot())
 		_refresh_ecology_visuals()

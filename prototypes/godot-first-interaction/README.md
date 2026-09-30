@@ -132,6 +132,17 @@ Each resident remains associated with its local range; mobile foraging is bounde
 
 This remains a provisional slice using a small fixed roster: two grazers, one vector, one engineer and two predators can wake (grazers born in the basin add to that). Resident attraction or conflict and fully resource-supported population size remain separate playable questions.
 
+## Life persists (playtest setting)
+
+Branch: `prototype/life-persists`. So the game can be played slowly, anything that has appeared stays alive (user, 2026-09-28: *"once something appears, it stays alive … we can gradually add it back in later"*). `LIFE_PERSISTS` in `main.gd` is on by default:
+
+- **Plants and other living layers** (moss, fungus, fruiting bodies, microbial crust, rooted mats, canopy, aquatic producers and consumers) can still be thinned by drying, heat, toxicity, dust and turnover, but never below 0.2 once they have reached it; a thinner patch keeps what it has. Animals eating, harvest, transplanting and seed-setting still take. Removing a layer from `PERSISTENT_LAYERS` in `ecology_grid.gd` lets that layer die back again.
+- **Animals** never go back to sleep when their ground fails; a colony never seals itself back in, and a predator never climbs back into the high air.
+- **A stirring sleeper** that loses what woke it settles back to sleep instead of dying, and can stir again.
+- **A hunted grazer** is wounded but keeps at least 0.1 body, so the predator never kills it.
+
+Tests that check dying, dormancy or collapse call `set_life_persists(false)`. With the setting on, the #43 and #47 questions about going back to sleep cannot be observed in ordinary play.
+
 ## Every animal wakes (#43)
 
 Branch: `prototype/waking-animals`. Does every animal read as something woken in the basin rather than something that walked in, and can the player tell what woke it from what they see around the spot where it rose?
@@ -173,7 +184,7 @@ First Rain is a natural threshold, not a Presence ability. Surface water and can
 
 ## Embodied-toolkit question
 
-The loose shade panel can be carried as the astronaut's one bulky object and placed on any reachable ecological cell. A translucent footprint shows immediate coverage without predicting biological success. Retrieving it removes that shade immediately; forced recovery drops it at the collapse location instead of teleporting it to the wreck.
+The loose shade panel can be carried as the astronaut's one bulky object and placed on any reachable ecological cell. The panel is about 1.5 m across, so it shades only the Ecological Cell it lies on; a small translucent footprint on that cell shows the coverage while carrying, without predicting biological success. Retrieving it removes that shade immediately; forced recovery drops it at the collapse location instead of teleporting it to the wreck.
 
 A robust living moss or rhizome cell can also surrender a finite clump to the same bulky carry frame. Extraction immediately thins the donor; placement transfers that exact living biomass rather than creating a planting token. Hot, dry, or toxic ground stresses the transplant through the ordinary ecological rules, so the initial placement is not proof of establishment. This asks whether source sacrifice and uncertain destination choice create a legible spatial Field Experiment.
 
@@ -370,6 +381,7 @@ The captured idle-opening failure can be replayed headlessly:
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/waking_animals_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/grazer_gait_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/astronaut_footstep_test.gd
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/life_persists_test.gd
 ```
 
 The checks verify the opening, movement, grazer behavior, scanner evidence, replay record, toolkit economy, basin traversal, survival pacing, disturbance recovery, shared animal authority, fixed-hive worker transport, and the bounded habitat-search frame cost. Habitat checks demonstrate that roles settle independently from sustained local support, distant basin-wide counts cannot qualify them, brief fluctuations do not cause settlement or departure, sustained collapse causes departure without death, and habitat recovery permits return. The pacing check verifies that watering produces an immediate held local reading, a queen sleeps until fungus grows beside her hoodoo, visibly stirs and opens her chamber over tens of seconds before founding the colony beside the hoodoo, and dies if the fungus fails while she wakes. Integrated checks additionally verify Detritus-dependent fungus, separate pioneer requirements for rooted mats, pollination-gated canopy, the producer/consumer sulfur pathway, reproduction without spontaneous biomass, distinct colony/vector/engineer effects, seeded weather that produces ecological disturbances plus ecosystem-enabled First Rain without a fixed schedule or Presence trigger, and an end-to-end route from finite watering and transplantation through every terrestrial and aquatic role.
