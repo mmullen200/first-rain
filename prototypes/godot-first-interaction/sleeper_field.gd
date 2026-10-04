@@ -7,6 +7,8 @@ extends Node3D
 # Placement comes from a fixed seed, and each species only sleeps in ground
 # that suits it. main.gd decides when a sleeper stirs, wakes, dies or sleeps
 # again; this node owns only the places and the markers.
+# Herd birds sleep as eggs at hoodoo feet (place_clutches) and hatch when a
+# herd grazes nearby (main.gd).
 # The colony sleeps as queens in hoodoos (hoodoo_field.gd) and the predator
 # drifts in the high air until a dust front brings it down (main.gd), so
 # neither has a sleeper here.
@@ -23,8 +25,11 @@ const MAX_START_TOXICITY := 0.3
 const STIR_LABELS := {
 	"grazer": "STONE SHELL / STIRRING",
 	"vector": "PUPAE / STIRRING",
-	"wetland_engineer": "MUD CASING / STIRRING"
+	"wetland_engineer": "MUD CASING / STIRRING",
+	"herd_bird": "EGGS / STIRRING"
 }
+# Herd birds (#52) lay their eggs in the cracks at the foot of hoodoos.
+const HERD_BIRD_CLUTCHES := 4
 
 # Each entry: {"species": String, "cell": Vector2i}. main.gd moves the cell
 # when an animal goes back to sleep somewhere new.
@@ -64,6 +69,35 @@ func build(ecology, hoodoo_cells: Array[Vector2i], spine_affinity: PackedFloat32
 				_add_sleeper(species, cell, ecology, rng)
 				if species == "grazer":
 					_place_partner(cell, ecology, hoodoo_cells, spine_affinity)
+
+
+# Herd bird clutches sit against a hoodoo's foot, spread apart, one of them
+# the nearest to the Shelter Bowl, where the first grazers wake.
+func place_clutches(ecology, hoodoo_cells: Array[Vector2i]) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = PLACEMENT_SEED + 52
+	var candidates: Array[Vector2i] = []
+	for hoodoo in hoodoo_cells:
+		for direction in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+			var cell: Vector2i = hoodoo + direction
+			if cell.x < 1 or cell.y < 1 or cell.x >= EcologyGridModel.WIDTH - 1 or cell.y >= EcologyGridModel.HEIGHT - 1 or cell in hoodoo_cells:
+				continue
+			if _distance(cell, EcologyGridModel.WRECK_CELL) < WRECK_CLEARANCE_CELLS or ecology.toxicity[cell.y * EcologyGridModel.WIDTH + cell.x] > MAX_START_TOXICITY:
+				continue
+			candidates.append(cell)
+	if candidates.is_empty():
+		return
+	var nearest := candidates[0]
+	for cell in candidates:
+		if _distance(cell, EcologyGridModel.SHELTER_BOWL_CELL) < _distance(nearest, EcologyGridModel.SHELTER_BOWL_CELL):
+			nearest = cell
+	_add_sleeper("herd_bird", nearest, ecology, rng)
+	var attempts := 0
+	while _count("herd_bird") < HERD_BIRD_CLUTCHES and attempts < 200:
+		attempts += 1
+		var cell: Vector2i = candidates[rng.randi_range(0, candidates.size() - 1)]
+		if _far_from_sleepers(cell):
+			_add_sleeper("herd_bird", cell, ecology, rng)
 
 
 # For an animal that goes to sleep with no sleeper of its own (one placed
@@ -107,6 +141,8 @@ func show_state(index: int, state: String, ecology) -> void:
 		body.scale = Vector3(1.0, 0.45, 1.0)
 		for part in body.get_children():
 			(part as MeshInstance3D).material_override = _material(Color("a39d8e"), 0.95)
+			for fleck in part.get_children():
+				(fleck as MeshInstance3D).material_override = _material(Color("8f8a7c"), 0.95)
 	elif marker.has_meta("living_scale"):
 		body.scale = marker.get_meta("living_scale")
 
@@ -229,6 +265,16 @@ func _add_sleeper(species: String, cell: Vector2i, ecology, rng: RandomNumberGen
 				var pupa_case := _ellipsoid(0.055, Vector3(1.0, 2.2, 1.0), Vector3(cos(angle) * 0.14, 0.08, sin(angle) * 0.14), Color("d8c79a"))
 				pupa_case.rotation = Vector3(rng.randf_range(-0.35, 0.35), 0.0, rng.randf_range(-0.35, 0.35))
 				body.add_child(pupa_case)
+		"herd_bird":
+			# A few speckled eggs tucked in a crack against the rock.
+			for egg in range(4):
+				var angle := TAU * float(egg) / 4.0 + rng.randf_range(-0.3, 0.3)
+				var shell := _ellipsoid(0.045, Vector3(1.0, 1.3, 1.0), Vector3(cos(angle) * 0.07, 0.05, sin(angle) * 0.07), Color("cfc4a8"))
+				shell.rotation = Vector3(rng.randf_range(-0.6, 0.6), 0.0, rng.randf_range(-0.6, 0.6))
+				body.add_child(shell)
+				for fleck in range(3):
+					var spot := _ellipsoid(0.012, Vector3(1.0, 0.5, 1.0), Vector3(rng.randf_range(-0.03, 0.03), rng.randf_range(0.0, 0.05), 0.04), Color("6b4a32"))
+					shell.add_child(spot)
 		"wetland_engineer":
 			# A dark, dried mud casing in the bed of an old watercourse.
 			body.add_child(_ellipsoid(0.32, Vector3(1.25, 0.42, 1.0), Vector3(0.0, 0.03, 0.0), Color("5a4632")))

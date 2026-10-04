@@ -128,6 +128,10 @@ _Avoid_: Permanent river, passive water source
 A dam-building animal whose autonomous changes to water flow create and disrupt persistent aquatic habitat.
 _Avoid_: Beaver, dam tool, water generator
 
+**Herd Birds**:
+A small flock that lives with a grazer herd, feeding on the insects in its dung and seeing a hunting predator from above, through cover, so the herd runs before the predator can strike.
+_Avoid_: Oxpeckers, egrets, alarm bird, warning system
+
 **Wreck Shelter**:
 The compact area inside the wreck's cabin and immediately around the wreck where the Astronaut can deliberate and recover while its remaining support functions endure, without extending that protection into the living basin.
 _Avoid_: Base zone, safe level

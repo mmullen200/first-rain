@@ -85,6 +85,11 @@ const SLEEPER_ROSTER := {
 	"wetland_engineer": ["engineer:1"]
 }
 const PREDATOR_ROSTER := ["predator:1", "predator:2"]
+# Herd birds (#52) hatch from eggs at hoodoo feet when a herd of at least
+# HERD_BIRD_WAKE_GRAZERS grazes within SLEEPER_REACH of them for a few surveys.
+const HERD_BIRD_ROSTER := ["herd_bird:1", "herd_bird:2"]
+const HERD_BIRD_WAKE_GRAZERS := 2
+const HERD_BIRD_HATCH_OBSERVATIONS := 4
 const SLEEPER_STIRRING_OBSERVATIONS := 2
 # A sleeper senses habitat this many cells from where it lies.
 const SLEEPER_REACH := 3
@@ -114,6 +119,7 @@ const WeatherSimulation = preload("res://weather_simulation.gd")
 const AstronautFigure = preload("res://astronaut_figure.gd")
 const WreckSpaceplane = preload("res://wreck_spaceplane.gd")
 const VectorSwarm = preload("res://vector_swarm.gd")
+const HerdBirdFlock = preload("res://herd_bird_flock.gd")
 const GilaGlider = preload("res://gila_glider.gd")
 const GrazerFigure = preload("res://grazer_figure.gd")
 const HoodooField = preload("res://hoodoo_field.gd")
@@ -268,6 +274,7 @@ var waking_fixture_storm_pending := false
 var unsupported_residency_ticks: Dictionary = {}
 # Hoodoo cell -> {"state": dormant|stirring|founded|dead, "observations": int}.
 var dormant_queens: Dictionary = {}
+var clutch_survey_calls := 0
 var queen_survey_calls := 0
 var colony_queen_cell := Vector2i(-1, -1)
 var queen_husks: Array[MeshInstance3D] = []
@@ -339,8 +346,10 @@ func _ready() -> void:
 		_seed_flower_lineage_fixture()
 	if "--grazer-herd" in OS.get_cmdline_user_args():
 		_seed_grazer_herd_fixture()
+	if "--herd-birds" in OS.get_cmdline_user_args():
+		_seed_herd_birds_fixture()
 	evidence.begin_run(1, _evidence_snapshot())
-	if "--colony-foraging" in OS.get_cmdline_user_args() or "--hoodoo-devouring" in OS.get_cmdline_user_args() or "--queen-waking" in OS.get_cmdline_user_args() or "--predator-ecology" in OS.get_cmdline_user_args() or "--vector-pollination" in OS.get_cmdline_user_args() or "--wetland-engineer" in OS.get_cmdline_user_args() or "--waking-animals" in OS.get_cmdline_user_args() or "--flower-lineage" in OS.get_cmdline_user_args() or "--grazer-herd" in OS.get_cmdline_user_args():
+	if "--colony-foraging" in OS.get_cmdline_user_args() or "--hoodoo-devouring" in OS.get_cmdline_user_args() or "--queen-waking" in OS.get_cmdline_user_args() or "--predator-ecology" in OS.get_cmdline_user_args() or "--vector-pollination" in OS.get_cmdline_user_args() or "--wetland-engineer" in OS.get_cmdline_user_args() or "--waking-animals" in OS.get_cmdline_user_args() or "--flower-lineage" in OS.get_cmdline_user_args() or "--grazer-herd" in OS.get_cmdline_user_args() or "--herd-birds" in OS.get_cmdline_user_args():
 		_open_emergency_cache()
 	if "--queen-waking" in OS.get_cmdline_user_args():
 		_set_status("Violet fungus is spreading at the foot of a hoodoo. The dark plug at its base looks like a sealed door.", 5.0)
@@ -355,7 +364,9 @@ func _ready() -> void:
 		_set_status("Water murmurs through one shallow runnel. A perched pool waits behind a narrow dry lip.", 5.0)
 	if "--waking-animals" in OS.get_cmdline_user_args():
 		_set_status("Two grey humps lie half sunk in dry ground beside a patch of moss and cover. To the west, pale cases poke up among blossoms.", 5.0)
-	if "--grazer-herd" in OS.get_cmdline_user_args():
+	if "--herd-birds" in OS.get_cmdline_user_args():
+		_set_status("Small brown birds ride on the grazers' backs. Over on the green meadow to the east, something heavy and blotched noses through old remains.", 5.0)
+	elif "--grazer-herd" in OS.get_cmdline_user_args():
 		_set_status("A small herd of grazers crops a meadow that is starting to brown. Farther east, a damp meadow is still green.", 5.0)
 	if "--flower-lineage" in OS.get_cmdline_user_args():
 		_set_status("Three patches of flowers bloom along the slope: gold, violet, and far to the east, blue. A small swarm hums between the nearer two.", 5.0)
@@ -541,6 +552,20 @@ func _seed_grazer_herd_fixture() -> void:
 	camera.position = astronaut.position + Vector3(8.8, 10.8, 10.5)
 	camera.look_at(astronaut.position)
 	_refresh_ecology_visuals()
+	_update_ecological_animal_markers()
+
+
+# The grazer herd fixture with a flock of herd birds already riding the herd
+# (#52), and the predator lizard picking over remains on the green meadow the
+# herd will move to. Watch the birds flit between backs and feet, then burst
+# up and circle when the lizard comes within sight, and the herd run before
+# the lizard can close.
+func _seed_herd_birds_fixture() -> void:
+	_seed_grazer_herd_fixture()
+	animal_simulation.register_agent("herd_bird", "herd_bird:1", {"cell": HERD_FIXTURE_DRYING, "habitat_cell": HERD_FIXTURE_DRYING, "hunger": 0.5})
+	var lair := HERD_FIXTURE_GREEN + Vector2i(2, 1)
+	ecology.add_resources(lair, {"dead_biomass": 0.6})
+	animal_simulation.register_agent("predator", "predator:1", {"cell": lair, "habitat_cell": HERD_FIXTURE_GREEN, "hunt_rng": 12345, "hunger": 1.0})
 	_update_ecological_animal_markers()
 
 
@@ -738,6 +763,7 @@ func _physics_process(delta: float) -> void:
 	_update_ecology_grid(delta)
 	_update_grazer(delta)
 	_update_grazer_markers(delta)
+	_update_herd_birds(delta)
 	_update_vector_markers(delta)
 	_update_ground_animal_markers(delta)
 	_update_colony_worker_visual()
@@ -1072,6 +1098,7 @@ func _build_sleepers() -> void:
 	sleeper_field = SleeperField.new()
 	add_child(sleeper_field)
 	sleeper_field.build(ecology, hoodoo_field.hoodoo_cells, _drainage_affinity_snapshot())
+	sleeper_field.place_clutches(ecology, hoodoo_field.hoodoo_cells)
 	for index in range(sleeper_field.sleepers.size()):
 		sleeper_states.append({"state": "dormant", "observations": 0, "agent_id": "", "soak": 0.0})
 		sleeper_field.show_state(index, "dormant", ecology)
@@ -1444,6 +1471,8 @@ func _build_interface() -> void:
 		title.text = "FIRST RAIN  /  FLOWER LINEAGE PROTOTYPE"
 	elif "--grazer-herd" in OS.get_cmdline_user_args():
 		title.text = "FIRST RAIN  /  GRAZER HERD PROTOTYPE"
+	elif "--herd-birds" in OS.get_cmdline_user_args():
+		title.text = "FIRST RAIN  /  HERD BIRDS PROTOTYPE"
 	title.add_theme_font_size_override("font_size", 15)
 	title.add_theme_color_override("font_color", Color("e9b36e"))
 	canvas.add_child(title)
@@ -2138,6 +2167,73 @@ func _seed_integrated_animals() -> void:
 	_update_resident_habitat_support()
 	_update_dormant_queens()
 	_update_sleepers()
+	_update_bird_clutches()
+
+
+# Herd bird eggs hatch to the sound of a herd: at least two grazers awake
+# within SLEEPER_REACH of the clutch, survey after survey. If the herd moves
+# off while the eggs are stirring, the chicks die in the shell.
+func _update_bird_clutches() -> void:
+	clutch_survey_calls += 1
+	if clutch_survey_calls < _calls_per_habitat_observation():
+		return
+	clutch_survey_calls = 0
+	for index in range(sleeper_states.size()):
+		if String(sleeper_field.sleepers[index]["species"]) != "herd_bird":
+			continue
+		var sleeper: Dictionary = sleeper_states[index]
+		var state := String(sleeper["state"])
+		if state not in ["dormant", "stirring"]:
+			continue
+		var cell: Vector2i = sleeper_field.sleepers[index]["cell"]
+		var herd := _herd_near(cell, SLEEPER_REACH)
+		if herd.is_empty():
+			if state == "stirring" and life_persists:
+				_sleeper_settled(index)
+			elif state == "stirring":
+				_sleeper_died(index)
+			else:
+				sleeper["observations"] = 0
+			continue
+		if String(sleeper["agent_id"]).is_empty():
+			for stable_id in HERD_BIRD_ROSTER:
+				var claimed: bool = animal_simulation.agents.has(stable_id)
+				for other in sleeper_states:
+					claimed = claimed or String(other["agent_id"]) == stable_id
+				if not claimed:
+					sleeper["agent_id"] = stable_id
+					break
+			if String(sleeper["agent_id"]).is_empty():
+				continue
+		sleeper["observations"] = int(sleeper["observations"]) + 1
+		if int(sleeper["observations"]) == SLEEPER_STIRRING_OBSERVATIONS:
+			sleeper["state"] = "stirring"
+			sleeper_field.show_state(index, "stirring", ecology)
+			_add_discovery("Eggs at a hoodoo's foot rock and crack while a herd grazes close by")
+			_set_status("The speckled eggs in the crack at the hoodoo's foot are rocking. A herd is grazing close by.")
+			evidence.record_event(ecology.tick, "organism.herd_bird_stirring", String(sleeper["agent_id"]), [], {"cell": cell, "habitat_cell": herd["cell"]})
+		if int(sleeper["observations"]) >= HERD_BIRD_HATCH_OBSERVATIONS:
+			sleeper["state"] = "awake"
+			sleeper["observations"] = 0
+			sleeper_field.show_state(index, "awake", ecology)
+			_register_ecological_role("herd_bird", String(sleeper["agent_id"]), herd, cell)
+
+
+# A herd of at least HERD_BIRD_WAKE_GRAZERS awake grazers within `reach`.
+func _herd_near(cell: Vector2i, reach: int) -> Dictionary:
+	var count := 0
+	var centre := Vector2.ZERO
+	for stable_id in animal_simulation.agents:
+		var agent: Dictionary = animal_simulation.agents[stable_id]
+		if agent["species"] != "grazer" or not bool(agent["alive"]) or not bool(agent.get("present", true)):
+			continue
+		if _cell_distance(cell, agent["cell"]) <= reach:
+			count += 1
+			centre += Vector2(agent["cell"])
+	if count < HERD_BIRD_WAKE_GRAZERS:
+		return {}
+	centre /= float(count)
+	return {"cell": Vector2i(roundi(centre.x), roundi(centre.y)), "score": float(count), "evidence": {"nearby_grazers": count}}
 
 
 # Nothing walks into the basin. Every sleeper senses only the ground within
@@ -2286,7 +2382,8 @@ func _sleeper_died(index: int) -> void:
 	var died_text := {
 		"grazer": "The shell in the ground has stopped moving. The forage around it failed before it could get out.",
 		"vector": "The pupae have gone still and pale. The flowers around them faded too soon.",
-		"wetland_engineer": "The mud casing has dried hard again with the animal still inside. The water stopped too soon."
+		"wetland_engineer": "The mud casing has dried hard again with the animal still inside. The water stopped too soon.",
+		"herd_bird": "The eggs at the hoodoo's foot have gone still and grey. The herd moved off before they could hatch."
 	}
 	_set_status(String(died_text[species]))
 	_add_discovery("Woke too early — a sleeping animal stirred, lost what woke it, and died")
@@ -2442,6 +2539,8 @@ func _update_resident_habitat_support() -> void:
 func _habitat_at_cell(species: String, cell: Vector2i, habitat_snapshot: Dictionary = {}) -> Dictionary:
 	if species == "predator":
 		return _predator_habitat_at(cell)
+	if species == "herd_bird":
+		return _herd_near(cell, SLEEPER_REACH)
 	var snapshot := habitat_snapshot
 	if snapshot.is_empty():
 		snapshot = ecology.full_snapshot()
@@ -2479,7 +2578,8 @@ func _depart_ecological_role(stable_id: String, species: String, habitat_cell: V
 		"vector": "With the flowers gone, the flying animal settles into the soil and goes still in a new case.",
 		"grazer": "With food and cover gone, the grazer presses itself into the ground and its shell closes over.",
 		"wetland_engineer": "The water has stopped. The wetland animal curls up in the mud, and the mud dries hard around it.",
-		"predator": "With the grazers gone, the lizard runs, spreads its small wings into the wind and is carried off, up into the high air."
+		"predator": "With the grazers gone, the lizard runs, spreads its small wings into the wind and is carried off, up into the high air.",
+		"herd_bird": "With no herd left to follow, the little birds settle into a crack in the ground and go still."
 	}
 	_set_status(names.get(species, "An animal goes still after its local habitat collapses."))
 	_add_discovery("Going dormant — when its ground fails an animal sleeps where it is and can wake again; settlement is not a permanent unlock")
@@ -2851,7 +2951,8 @@ func _register_ecological_role(species: String, stable_id: String, habitat: Dict
 		"vector": "Flying animal — climbs out of a pupal case in the soil where flowers bloom around it, then crosses between separated blossoms",
 		"wetland_engineer": "Large wetland animal — breaks out of a dried mud casing once water runs through its old bed again",
 		"grazer": "Second grazer — a buried shell cracks open in soaked ground beside forage and cover",
-		"predator": "Predator — a heavy, banded lizard glides down out of the dust front onto the grazers' range; it had been drifting in the high air"
+		"predator": "Predator — a heavy, banded lizard glides down out of the dust front onto the grazers' range; it had been drifting in the high air",
+		"herd_bird": "Herd birds — small birds hatch from eggs at a hoodoo's foot and fly straight to the grazing herd"
 	}
 	var observation := String(arrival_observations.get(species, "New animal activity appears in a changed habitat"))
 	_add_discovery(observation)
@@ -2871,6 +2972,8 @@ func _update_ecological_animal_markers() -> void:
 	for id in animal_simulation.agents:
 		if id != "grazer:1" and not animal_markers.has(id) and animal_simulation.agents[id]["species"] == "grazer":
 			_add_grazer_marker(id)
+		if not animal_markers.has(id) and animal_simulation.agents[id]["species"] == "herd_bird":
+			_add_herd_bird_marker(id)
 	if colony_ant_stream_root != null:
 		colony_ant_stream_root.visible = false
 	for stable_id in animal_markers:
@@ -3021,6 +3124,58 @@ func _steer_grazer(id: String, actor: Node3D, agent: Dictionary, height_offset: 
 	actor.position = Vector3(next.x, _terrain_surface_height(next) + height_offset, next.y)
 
 
+func _add_herd_bird_marker(id: String) -> void:
+	var marker := Node3D.new()
+	marker.name = "AnimalMarker_" + id.replace(":", "_")
+	marker.add_child(HerdBirdFlock.new(5, id.hash()))
+	var label := Label3D.new()
+	label.text = "HERD BIRDS"
+	label.position.y = 1.6
+	label.font_size = 24
+	label.pixel_size = 0.0042
+	label.modulate = Color("f0a060")
+	label.outline_size = 7
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	marker.add_child(label)
+	add_child(marker)
+	animal_markers[id] = marker
+
+
+# Each flock rides with the grazers of its herd; the marker itself sits at the
+# herd's middle and carries only the label.
+func _update_herd_birds(delta: float) -> void:
+	for id in animal_markers:
+		if not String(id).begins_with("herd_bird"):
+			continue
+		var marker: Node3D = animal_markers[id]
+		var flock: Dictionary = animal_simulation.agent_state(id)
+		var awake: bool = not flock.is_empty() and bool(flock["alive"]) and bool(flock.get("present", true))
+		marker.visible = awake
+		if not awake:
+			continue
+		var hosts: Array[Node3D] = []
+		var middle := Vector3.ZERO
+		for grazer_id in animal_simulation.agents:
+			var grazer: Dictionary = animal_simulation.agents[grazer_id]
+			if grazer["species"] != "grazer" or not bool(grazer["alive"]) or not bool(grazer.get("present", true)) or String(grazer["herd_leader"]) != String(flock["host_herd"]):
+				continue
+			var body: Node3D = grazer_root if grazer_id == "grazer:1" else animal_markers.get(grazer_id)
+			if body != null and body.visible:
+				hosts.append(body)
+				middle += body.global_position
+		if hosts.is_empty():
+			# No herd yet: the flock waits over where it is.
+			var cell: Vector2i = flock["cell"]
+			var world: Vector2 = ecology.world_position(cell.x, cell.y)
+			marker.position = Vector3(world.x, ecology.terrain_height(cell), world.y)
+			continue
+		middle /= float(hosts.size())
+		marker.position = middle
+		var label: Label3D = marker.get_child(1)
+		label.text = "HERD BIRDS / " + String(flock["state"]).to_upper()
+		marker.get_child(0).update(delta, hosts, String(flock["state"]) == "alarm", middle)
+
+
 # Shows a grazer's age, sex and how far along a pregnancy is.
 func _dress_grazer(figure, agent: Dictionary) -> void:
 	if bool(agent.get("juvenile", false)) != figure.juvenile:
@@ -3062,7 +3217,7 @@ func _update_ground_animal_markers(delta: float) -> void:
 		if agent.is_empty() or not bool(agent["alive"]) or not bool(agent.get("present", true)):
 			continue
 		var species := String(agent["species"])
-		if species in ["grazer", "vector", "colony"]:
+		if species in ["grazer", "vector", "colony", "herd_bird"]:
 			continue
 		var marker: Node3D = animal_markers[id]
 		if not marker.visible:

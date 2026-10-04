@@ -7,7 +7,7 @@ extends RefCounted
 # observe snapshots/events. Species choose intentions internally; presentation
 # nodes never decide ecological outcomes.
 
-const SNAPSHOT_VERSION := 11
+const SNAPSHOT_VERSION := 12
 const JUVENILE_MATURATION_TICKS := 1800
 const PARENT_SENSE_RADIUS := 4
 const PARENT_MEMORY_TICKS := 120
@@ -82,6 +82,21 @@ const GRAZER_GESTATION_TICKS := 450
 const GRAZER_CALF_BODY := 0.24
 const GRAZER_PREGNANCY_FLOOR := 0.35
 const GRAZER_MALE_RECOVERY := 0.5
+# Herd birds (#52), after oxpeckers and cattle egrets: one agent is a small
+# flock that lives with a grazer herd, eating the insects in the herd's dung.
+# Flying above the herd they see a predator from HERD_BIRD_SIGHT cells and
+# raise an alarm that sets the whole herd running; without them only the
+# herd's lookout notices, only at HERD_LOOKOUT_SIGHT, and only when the
+# predator is out in the open.
+const HERD_BIRD_RANGE := 6
+const HERD_BIRD_SIGHT := 5
+const HERD_LOOKOUT_SIGHT := 2
+const HERD_LOOKOUT_COVER := 0.3
+const HERD_BIRD_ALARM_FEAR := 0.6
+const HERD_BIRD_ALARM_TICKS := 24
+const HERD_BIRD_STEP_TICKS := 3
+const HERD_BIRD_BITE := 0.01
+const HERD_BIRD_FLOCK_SIZE := 5
 # The share of each bite a grazer keeps as body; the rest becomes manure.
 const GRAZER_ASSIMILATION := 0.25
 const DIRECTIONS := [
@@ -110,14 +125,15 @@ func _init(ecology_model = null, simulation_seed := 1) -> void:
 func register_agent(species: String, stable_id: String, initial_state := {}) -> bool:
 	if ecology == null or stable_id.is_empty() or agents.has(stable_id):
 		return false
-	if species not in ["grazer", "predator", "colony", "vector", "wetland_engineer"]:
+	if species not in ["grazer", "predator", "colony", "vector", "wetland_engineer", "herd_bird"]:
 		return false
 	var initial_activity: String = String({
 		"grazer": "seeking",
 		"predator": "hunting",
 		"colony": "foraging",
 		"vector": "searching",
-		"wetland_engineer": "gathering"
+		"wetland_engineer": "gathering",
+		"herd_bird": "following"
 	}.get(species, "seeking"))
 	var cell: Vector2i = initial_state.get("cell", Vector2i.ZERO)
 	var bounded_cell := _bounded_cell(cell)
@@ -187,7 +203,11 @@ func register_agent(species: String, stable_id: String, initial_state := {}) -> 
 		"sex": String(initial_state.get("sex", _default_sex(species))),
 		"gestation_ticks": int(initial_state.get("gestation_ticks", 0)),
 		"carried_young": float(initial_state.get("carried_young", 0.0)),
-		"sire": String(initial_state.get("sire", ""))
+		"sire": String(initial_state.get("sire", "")),
+		"host_herd": "",
+		"alarm_ticks": 0,
+		"alarm_cell": bounded_cell,
+		"birds": int(initial_state.get("birds", HERD_BIRD_FLOCK_SIZE))
 	}
 	if species == "colony":
 		_reset_colony_workers(agent)
@@ -222,7 +242,8 @@ func set_agent_presence(stable_id: String, present: bool, habitat_cell := Vector
 			"predator": "hunting",
 			"colony": "foraging",
 			"vector": "searching",
-			"wetland_engineer": "gathering"
+			"wetland_engineer": "gathering",
+			"herd_bird": "following"
 		}.get(String(agent["species"]), "seeking")
 		if String(agent["species"]) == "colony":
 			agent["home_cell"] = destination
@@ -378,6 +399,8 @@ func _choose_intention(agent: Dictionary) -> Dictionary:
 	# Solitary territorial adults have no generic adjacent-pair birth shortcut.
 	if agent["species"] == "predator":
 		return _choose_predator_intention(agent)
+	if agent["species"] == "herd_bird":
+		return _choose_herd_bird_intention(agent)
 	if agent["species"] == "grazer" and bool(agent.get("juvenile", false)):
 		return _choose_grazer_intention(agent)
 	if agent["species"] == "grazer":
@@ -524,6 +547,16 @@ func _update_herd(group: Array[String]) -> void:
 	var lookout := ""
 	if mode != "travelling" and adults.size() >= 2:
 		lookout = adults[posmod(tick / HERD_LOOKOUT_TICKS + leader_id.hash(), adults.size())]
+	# The lookout spots a predator only when it is close; its fright spreads
+	# through the herd on the next tick like any other.
+	if not lookout.is_empty() and float(agents[lookout]["fear"]) <= 0.25:
+		var spotted := _nearest_predator(agents[lookout]["cell"], HERD_LOOKOUT_SIGHT)
+		# From the ground a lizard creeping through shrubs or mats is hidden;
+		# the birds overhead see it anyway.
+		if not spotted.is_empty() and _hunting_cover(agents[spotted]["cell"]) < HERD_LOOKOUT_COVER:
+			agents[lookout]["fear"] = HERD_BIRD_ALARM_FEAR
+			agents[lookout]["threat_cell"] = agents[spotted]["cell"]
+			_emit("organism.lookout_spotted", lookout, {"predator_id": spotted, "cell": agents[lookout]["cell"], "predator_cell": agents[spotted]["cell"]})
 
 	for id in group:
 		var member: Dictionary = agents[id]
@@ -543,6 +576,101 @@ func _update_herd(group: Array[String]) -> void:
 
 # The herd follows its most experienced adult: the one it already follows if
 # still there, otherwise the oldest line, then the heaviest.
+# The nearest predator that is on the prowl: hungry, not digesting, not
+# winded from a strike. A gorged or resting lizard is watched, not fled.
+func _nearest_predator(from: Vector2i, sight: int) -> String:
+	var result := ""
+	var best := sight + 1
+	for id in agents:
+		var other: Dictionary = agents[id]
+		if other["species"] != "predator" or not bool(other["alive"]) or not bool(other.get("present", true)):
+			continue
+		if float(other["hunger"]) < 0.4 or int(other["digestion_ticks"]) > 0 or int(other["hunt_cooldown"]) > 0:
+			continue
+		var distance := _cell_distance(from, other["cell"])
+		if distance < best:
+			best = distance
+			result = id
+	return result
+
+
+func _choose_herd_bird_intention(agent: Dictionary) -> Dictionary:
+	var id := String(agent["id"])
+	agent["hunger"] = minf(1.0, float(agent["hunger"]) + 0.01)
+	agent["move_cooldown"] = maxi(0, int(agent["move_cooldown"]) - 1)
+	agent["alarm_ticks"] = maxi(0, int(agent["alarm_ticks"]) - 1)
+	var cell: Vector2i = agent["cell"]
+	# The flock attaches to the nearest herd it can see and goes where it goes.
+	var host := ""
+	var host_distance := HERD_BIRD_RANGE + 1
+	for other_id in agents:
+		var other: Dictionary = agents[other_id]
+		if other["species"] != "grazer" or not bool(other["alive"]) or not bool(other.get("present", true)) or int(other.get("herd_size", 1)) < 2:
+			continue
+		var distance := _cell_distance(cell, other["cell"])
+		if distance < host_distance:
+			host_distance = distance
+			host = String(other["herd_leader"])
+	agent["host_herd"] = host
+	if host.is_empty():
+		agent["state"] = "searching"
+		agents[id] = agent
+		if int(agent["move_cooldown"]) > 0:
+			return {"type": "wait", "agent_id": id}
+		return {"type": "move", "agent_id": id, "cell": _roam_cell(agent), "state": "searching", "cooldown": HERD_BIRD_STEP_TICKS * 2}
+	var centre: Vector2 = agents[host]["herd_centre"]
+	var centre_cell := _bounded_cell(Vector2i(roundi(centre.x), roundi(centre.y)))
+	agent["habitat_cell"] = centre_cell
+	# From above the herd the flock sees a predator long before the herd does.
+	var predator := _nearest_predator(centre_cell, HERD_BIRD_SIGHT)
+	if not predator.is_empty() and int(agent["alarm_ticks"]) == 0:
+		agents[id] = agent
+		return {"type": "alarm", "agent_id": id, "threat_cell": agents[predator]["cell"]}
+	if int(agent["alarm_ticks"]) > 0:
+		agent["state"] = "alarm"
+		agents[id] = agent
+		return {"type": "move", "agent_id": id, "cell": centre_cell, "state": "alarm", "cooldown": 1}
+	# Return what was eaten as droppings away from where it fed.
+	if int(agent["digestion_ticks"]) > 0:
+		agent["digestion_ticks"] = int(agent["digestion_ticks"]) - 1
+		if int(agent["digestion_ticks"]) == 0 and float(agent["carried_material"].get("dead_biomass", 0.0)) > 0.0:
+			agents[id] = agent
+			return {"type": "deposit", "agent_id": id, "source_resource": "dead_biomass", "resource": "nutrients"}
+	if cell != centre_cell:
+		agent["state"] = "following"
+		agents[id] = agent
+		if int(agent["move_cooldown"]) > 0:
+			return {"type": "wait", "agent_id": id}
+		return {"type": "move", "agent_id": id, "cell": _juvenile_step(cell, centre_cell), "state": "following", "cooldown": HERD_BIRD_STEP_TICKS}
+	# Insects live in the herd's dung, so the flock feeds where the herd has
+	# been dropping it.
+	agent["state"] = "feeding"
+	agents[id] = agent
+	if float(agent["hunger"]) >= 0.5 and ecology.resource_amount(cell, "dead_biomass") >= HERD_BIRD_BITE:
+		return {"type": "consume", "agent_id": id, "resource": "dead_biomass", "amount": HERD_BIRD_BITE}
+	return {"type": "wait", "agent_id": id}
+
+
+# The flock's alarm: every grazer of the herd it rides with takes fright from
+# the predator at once and runs, before the predator is close enough to strike.
+func _raise_alarm(flock_id: String, threat_cell: Vector2i) -> void:
+	var flock: Dictionary = agents[flock_id]
+	flock["alarm_ticks"] = HERD_BIRD_ALARM_TICKS
+	flock["alarm_cell"] = threat_cell
+	flock["state"] = "alarm"
+	agents[flock_id] = flock
+	var warned: Array[String] = []
+	for id in agents:
+		var grazer: Dictionary = agents[id]
+		if grazer["species"] != "grazer" or not bool(grazer["alive"]) or not bool(grazer.get("present", true)) or String(grazer["herd_leader"]) != String(flock["host_herd"]):
+			continue
+		if float(grazer["fear"]) < HERD_BIRD_ALARM_FEAR:
+			grazer["fear"] = HERD_BIRD_ALARM_FEAR
+			grazer["threat_cell"] = threat_cell
+			warned.append(id)
+	_emit("organism.alarm_called", flock_id, {"threat_cell": threat_cell, "herd": flock["host_herd"], "warned": warned})
+
+
 func _herd_leader(group: Array[String], adults: Array[String]) -> String:
 	var candidates: Array[String] = adults if not adults.is_empty() else group
 	for id in candidates:
@@ -1040,8 +1168,10 @@ func _choose_predator_intention(agent: Dictionary) -> Dictionary:
 		agents[agent_id] = agent
 		return {"type": "wait", "agent_id": agent_id}
 	# Return the tracked nutrient currency after digestion, never create it.
+	# Ground that can take no more is skipped; it carries on and drops it on
+	# ground that can.
 	for resource in ["animal_biomass", "dead_biomass"]:
-		if float(agent["carried_material"].get(resource, 0.0)) > 0.000001:
+		if float(agent["carried_material"].get(resource, 0.0)) > 0.000001 and agent.get("blocked_deposit_cell", Vector2i(-1, -1)) != agent["cell"]:
 			agents[agent_id] = agent
 			return {"type": "deposit", "agent_id": agent_id, "source_resource": resource, "resource": "nutrients"}
 	agent["state"] = "recovering" if resting else "patrolling"
@@ -1103,9 +1233,14 @@ func _predator_prey_id(agent: Dictionary) -> String:
 	return result
 
 
+# Remains worth scavenging: a carcass-sized pile, not the grazers' scattered
+# dung (#52), which would otherwise keep a lizard fed without ever hunting.
+const PREDATOR_REMAINS := 0.25
+
+
 func _predator_detritus_cell(agent: Dictionary) -> Vector2i:
 	var result := Vector2i(-1, -1)
-	var best := 0.015
+	var best := 0.0
 	var origin: Vector2i = agent["cell"]
 	for y in range(origin.y - 2, origin.y + 3):
 		for x in range(origin.x - 2, origin.x + 3):
@@ -1113,6 +1248,8 @@ func _predator_detritus_cell(agent: Dictionary) -> Vector2i:
 			if not _in_predator_territory(agent, cell):
 				continue
 			var amount: float = ecology.resource_amount(cell, "dead_biomass")
+			if amount < PREDATOR_REMAINS:
+				continue
 			var score: float = amount / float(1 + _cell_distance(origin, cell))
 			if score > best:
 				best = score
@@ -1319,6 +1456,8 @@ func _resolve_intention(intention: Dictionary) -> void:
 			_reproduce(agent_id, String(intention["mate_id"]))
 		"give_birth":
 			_give_birth(agent_id)
+		"alarm":
+			_raise_alarm(agent_id, intention["threat_cell"])
 
 
 func _move_agent(agent_id: String, destination: Vector2i) -> void:
@@ -1328,9 +1467,9 @@ func _move_agent(agent_id: String, destination: Vector2i) -> void:
 	if agent["species"] == "predator" and not _in_predator_territory(agent, bounded):
 		return
 	agent["cell"] = bounded
-	var moving_states := {"grazer": "roaming", "predator": "hunting", "colony": "foraging", "vector": "flying", "wetland_engineer": "hauling"}
+	var moving_states := {"grazer": "roaming", "predator": "hunting", "colony": "foraging", "vector": "flying", "wetland_engineer": "hauling", "herd_bird": "following"}
 	agent["state"] = moving_states.get(agent["species"], "moving")
-	var pacing := {"grazer": 15, "predator": 8, "colony": 10, "vector": 6, "wetland_engineer": 11}
+	var pacing := {"grazer": 15, "predator": 8, "colony": 10, "vector": 6, "wetland_engineer": 11, "herd_bird": HERD_BIRD_STEP_TICKS}
 	agent["move_cooldown"] = pacing.get(agent["species"], 6)
 	if agent["species"] == "vector":
 		agent["move_cooldown"] = ceili(Vector2(bounded - origin).length() * 6.0)
@@ -1370,6 +1509,9 @@ func _consume_environment(agent_id: String, resource: String, requested: float) 
 	if agent["species"] == "grazer" and int(agent.get("herd_size", 1)) >= 2:
 		agent["state"] = "grazing"
 		agent["bites_here"] = int(agent.get("bites_here", 0)) + 1
+	if agent["species"] == "herd_bird":
+		agent["digestion_ticks"] = 20
+		agent["state"] = "feeding"
 	if agent["species"] == "predator":
 		agent["digestion_ticks"] = 32
 		agent["energy"] = minf(1.0, float(agent["energy"]) + consumed * 2.0)
@@ -1761,6 +1903,7 @@ func _deposit_carried(agent_id: String, source_resource: String, target_resource
 	var accepted: Dictionary = ecology.add_resources(agent["cell"], {target_resource: available})
 	var deposited := float(accepted.get(target_resource, 0.0))
 	agent["carried_material"][source_resource] = available - deposited
+	agent["blocked_deposit_cell"] = agent["cell"] if deposited <= 0.000001 else Vector2i(-1, -1)
 	agent["state"] = "roaming"
 	agents[agent_id] = agent
 	_check_transfer(deposited, available - float(agent["carried_material"][source_resource]), "%s_to_environment" % agent_id)

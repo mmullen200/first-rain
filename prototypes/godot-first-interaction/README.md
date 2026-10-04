@@ -1,6 +1,6 @@
 # First Rain: opening vertical-slice prototype
 
-Throwaway Godot vertical slice for deciding whether the opening teaches movement, finite supplies, scientific observation, ecological intervention, recovery, cultivation, and the first sighting of the Presence through embodied play. The current branch asks whether grazers read as a herd that slowly grows by breeding, without stepping around the map in grid squares (see Grazer herd, #51), while the standing-water sulfur pathway remains a distinct requirement for First Rain.
+Throwaway Godot vertical slice for deciding whether the opening teaches movement, finite supplies, scientific observation, ecological intervention, recovery, cultivation, and the first sighting of the Presence through embodied play. The current branch asks whether a flock of herd birds reads as the grazers' early warning against the predator (see Herd birds, #52), while the standing-water sulfur pathway remains a distinct requirement for First Rain.
 
 ## Run
 
@@ -202,6 +202,29 @@ The user asked on 2026-10-04 for "comprehensive, intensive herd behavior… they
 **Not yet built:** a calf that suckles or depends on its mother's milk. Calves don't stay in the herd's middle except by following their parent. Herds don't split when they grow too large, and nothing ages or dies of old age.
 
 **Playtest gate:** without labels or F9, the player can say the grazers are a herd and can point out the drifting while grazing, the resting together, the moving off toward the green, the lookout, a shared bolt, and a newborn joining the herd. They can also tell bulls from cows, notice a cow growing heavy, and connect that to the calf she later has. They should not see grid-square movement. Automated checks establish the behaviour, not whether a player reads it.
+
+## Herd birds (#52)
+
+Branch: `prototype/herd-birds`. Run with `-- --herd-birds`; its title is **HERD BIRDS PROTOTYPE**. It is the grazer herd scene with a flock of five herd birds already riding the herd. The predator lizard is picking over remains on the green meadow the herd will move to.
+
+The user chose these on 2026-10-04 as the first bird-like animal, after oxpeckers and cattle egrets.
+
+- **What they are.** White birds with grey wings, orange bills and yellow eye-rings, drawn larger than real oxpeckers so they read from the game camera. They ride on the grazers' backs and hop about their feet. Every few seconds a bird flits to another grazer or down to the ground.
+- **What they eat.** The insects in the herd's dung. They take small bites of the dead matter wherever the herd has been, and drop it back as droppings elsewhere. So they live only where a herd does.
+- **The alarm.** Flying above the herd, the flock sees a predator up to five cells away, even through shrubs and mats. When it does, every bird bursts up and circles high over the herd. Every grazer in that herd takes fright from the predator at once and runs. The flock calls again about every eight seconds while the predator is still near. It ignores a predator that isn't hunting: one that is full, digesting, or winded after a strike.
+- **Without birds.** The herd's lookout now notices a predator too, but only two cells away and only out in the open. A lizard creeping through cover reaches a herd that has no birds. Measured headlessly over 10 minutes of this scene: without birds the lizard made 7 hunting attacks; with birds it made none.
+- **Waking.** Herd birds sleep as clutches of speckled eggs, four in all, in cracks at the foot of hoodoos; one is always the nearest to the Shelter Bowl. Eggs stir after two surveys with a herd of two or more grazers within three cells, and hatch after four. If the herd leaves while they stir, they die (or settle back to sleep while life persists). A flock with no herd goes back to sleep where it is. At most two flocks are awake.
+
+**Predator fixes found on the way.** The lizard treated grazer dung as carrion. With a herd around, it lived on dung and almost never hunted. It now scavenges only carcass-sized remains (0.25 or more). A lizard whose ground could take no more of its digested remains used to freeze in place trying to drop them; it now walks on and drops them elsewhere.
+
+**Not yet built:** bird calls (sound), birds riding or warning other animals, flocks growing or breeding.
+
+**Playtest gate:** without labels or F9, the player:
+
+- notices the birds riding with the herd
+- connects the birds bursting up to the herd running
+- can say the birds warn the herd before the lizard gets close
+- notices a herd without birds being caught off guard
 
 ## Flower lineage question (#49)
 
@@ -433,6 +456,7 @@ The captured idle-opening failure can be replayed headlessly:
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/astronaut_footstep_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/life_persists_test.gd
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/grazer_herd_test.gd
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path prototypes/godot-first-interaction --script res://tests/herd_bird_test.gd
 ```
 
 The checks verify the opening, movement, grazer behavior, scanner evidence, replay record, toolkit economy, basin traversal, survival pacing, disturbance recovery, shared animal authority, fixed-hive worker transport, and the bounded habitat-search frame cost. Habitat checks demonstrate that roles settle independently from sustained local support, distant basin-wide counts cannot qualify them, brief fluctuations do not cause settlement or departure, sustained collapse causes departure without death, and habitat recovery permits return. The pacing check verifies that watering produces an immediate held local reading, a queen sleeps until fungus grows beside her hoodoo, visibly stirs and opens her chamber over tens of seconds before founding the colony beside the hoodoo, and dies if the fungus fails while she wakes. Integrated checks additionally verify Detritus-dependent fungus, separate pioneer requirements for rooted mats, pollination-gated canopy, the producer/consumer sulfur pathway, reproduction without spontaneous biomass, distinct colony/vector/engineer effects, seeded weather that produces ecological disturbances plus ecosystem-enabled First Rain without a fixed schedule or Presence trigger, and an end-to-end route from finite watering and transplantation through every terrestrial and aquatic role.
