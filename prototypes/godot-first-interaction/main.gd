@@ -10,11 +10,22 @@ const GRAZER_MOVE_SPEED := 0.38
 # keeps clear of other grazers (scaled down for juveniles), in metres.
 const GRAZER_CELL_SLOT := 0.5
 const GRAZER_BODY_RADIUS := 0.65
+# How a grazer walks between cells (#51): top speed per state in m/s, how fast
+# it turns (rad/s) and changes speed (m/s²), how far its grazing spot wanders
+# and how far ahead it aims while its herd is moving, in metres.
+const GRAZER_GAITS := {"travelling": 0.8, "rejoining": 0.85, "following parent": 0.85, "courting": 0.5, "fleeing": 1.8, "searching for parent": 0.6}
+const GRAZER_TURN_RATE := 1.1
+const GRAZER_ACCELERATION := 0.5
+const GRAZER_WANDER := 0.45
+const GRAZER_LOOKAHEAD := 0.7
 # Where each blossom in a flowering cell's cluster stands: x and z offset, and
 # stem height, in metres.
 # The flower-lineage quick start: patches along the Headwall spring's stream,
 # each a top-left cell and starting hue in degrees (gold, violet, blue), and
 # the pollinator's home between the first two.
+# The grazer herd fixture's drying meadow and, eight cells east, its green one.
+const HERD_FIXTURE_DRYING := Vector2i(7, 9)
+const HERD_FIXTURE_GREEN := Vector2i(15, 10)
 const FLOWER_FIXTURE_PATCHES := [[Vector2i(13, 9), 48.0], [Vector2i(16, 10), 280.0], [Vector2i(29, 17), 210.0]]
 const FLOWER_FIXTURE_HOME := Vector2i(16, 11)
 const FLOWER_SEEP_MOISTURE := 0.5
@@ -227,6 +238,8 @@ var grazer_step_timer := 0.0
 var grazer_state := "dormant"
 var grazer_manure_announced := false
 var animal_markers: Dictionary = {}
+# Per-grazer walking state for `_steer_grazer`: current speed and a clock.
+var grazer_steering: Dictionary = {}
 var predator_tracks: Dictionary = {}
 var animal_roles_announced: Dictionary = {}
 var colony_ant_stream_root: Node3D
@@ -286,7 +299,7 @@ var visited_zones: Dictionary = {}
 var scanner_before_survey := ""
 var reproductive_markers: Dictionary = {}
 # Cells the flower-lineage quick start keeps damp.
-var flower_fixture_seeps: Array[Vector2i] = []
+var fixture_seeps: Array[Vector2i] = []
 var seedling_observations: Dictionary = {}
 
 
@@ -324,8 +337,10 @@ func _ready() -> void:
 		_seed_waking_fixture()
 	if "--flower-lineage" in OS.get_cmdline_user_args():
 		_seed_flower_lineage_fixture()
+	if "--grazer-herd" in OS.get_cmdline_user_args():
+		_seed_grazer_herd_fixture()
 	evidence.begin_run(1, _evidence_snapshot())
-	if "--colony-foraging" in OS.get_cmdline_user_args() or "--hoodoo-devouring" in OS.get_cmdline_user_args() or "--queen-waking" in OS.get_cmdline_user_args() or "--predator-ecology" in OS.get_cmdline_user_args() or "--vector-pollination" in OS.get_cmdline_user_args() or "--wetland-engineer" in OS.get_cmdline_user_args() or "--waking-animals" in OS.get_cmdline_user_args() or "--flower-lineage" in OS.get_cmdline_user_args():
+	if "--colony-foraging" in OS.get_cmdline_user_args() or "--hoodoo-devouring" in OS.get_cmdline_user_args() or "--queen-waking" in OS.get_cmdline_user_args() or "--predator-ecology" in OS.get_cmdline_user_args() or "--vector-pollination" in OS.get_cmdline_user_args() or "--wetland-engineer" in OS.get_cmdline_user_args() or "--waking-animals" in OS.get_cmdline_user_args() or "--flower-lineage" in OS.get_cmdline_user_args() or "--grazer-herd" in OS.get_cmdline_user_args():
 		_open_emergency_cache()
 	if "--queen-waking" in OS.get_cmdline_user_args():
 		_set_status("Violet fungus is spreading at the foot of a hoodoo. The dark plug at its base looks like a sealed door.", 5.0)
@@ -340,6 +355,8 @@ func _ready() -> void:
 		_set_status("Water murmurs through one shallow runnel. A perched pool waits behind a narrow dry lip.", 5.0)
 	if "--waking-animals" in OS.get_cmdline_user_args():
 		_set_status("Two grey humps lie half sunk in dry ground beside a patch of moss and cover. To the west, pale cases poke up among blossoms.", 5.0)
+	if "--grazer-herd" in OS.get_cmdline_user_args():
+		_set_status("A small herd of grazers crops a meadow that is starting to brown. Farther east, a damp meadow is still green.", 5.0)
 	if "--flower-lineage" in OS.get_cmdline_user_args():
 		_set_status("Three patches of flowers bloom along the slope: gold, violet, and far to the east, blue. A small swarm hums between the nearer two.", 5.0)
 
@@ -441,7 +458,7 @@ func _seed_flower_lineage_fixture() -> void:
 		for y in range(corner.y - 1, corner.y + 3):
 			for x in range(corner.x - 1, corner.x + 3):
 				var i: int = y * ecology.WIDTH + x
-				flower_fixture_seeps.append(Vector2i(x, y))
+				fixture_seeps.append(Vector2i(x, y))
 				ecology.flower_hue[i] = Vector2.from_angle(deg_to_rad(float(patch[1])))
 				ecology.moisture[i] = 0.68
 				ecology.temperature[i] = 0.35
@@ -460,6 +477,58 @@ func _seed_flower_lineage_fixture() -> void:
 	var stand := Vector2i(15, 10)
 	var world: Vector2 = ecology.world_position(stand.x, stand.y)
 	astronaut.position = Vector3(world.x, ecology.terrain_height(stand) + 0.02, world.y)
+	_refresh_ecology_visuals()
+	_update_ecological_animal_markers()
+
+
+# A herd of five adults and a juvenile (#51) grazes a meadow that is slowly
+# drying out. A second meadow on a seep stays green eight cells to the east,
+# within sight. Watch the herd drift while it grazes, lie down together with
+# one on watch, move off together toward the green when its own ground thins,
+# and, after a few minutes of good feeding, breed.
+func _seed_grazer_herd_fixture() -> void:
+	for meadow in [[HERD_FIXTURE_DRYING, false], [HERD_FIXTURE_GREEN, true]]:
+		var centre: Vector2i = meadow[0]
+		for y in range(centre.y - 2, centre.y + 3):
+			for x in range(centre.x - 3, centre.x + 4):
+				var cell := Vector2i(x, y)
+				var index: int = y * ecology.WIDTH + x
+				ecology.moisture[index] = 0.62
+				ecology.temperature[index] = 0.38
+				ecology.toxicity[index] = 0.02
+				ecology.nutrients[index] = 0.5
+				if bool(meadow[1]):
+					fixture_seeps.append(cell)
+				if y == centre.y + 2 and x % 2 == 0:
+					ecology.add_resources(cell, {"canopy": 0.45})
+				else:
+					ecology.add_resources(cell, {"moss": 0.4, "rhizome": 0.3})
+	var start := HERD_FIXTURE_DRYING
+	for index in range(6):
+		var juvenile := index == 5
+		animal_simulation.register_agent("grazer", "grazer:%d" % (index + 1), {
+			"cell": start + Vector2i(index % 3 - 1, index / 3),
+			"habitat_cell": start,
+			"hunger": 0.5,
+			"body_biomass": 0.3 if juvenile else 0.9,
+			# Part-way into condition, so the first births come within minutes.
+			"reproductive_readiness": 0.0 if juvenile else 0.5 + 0.06 * index,
+			"juvenile": juvenile,
+			"parents": ["grazer:1"] if juvenile else [],
+			"parent_id": "grazer:1" if juvenile else ""
+		})
+	ecology_started = true
+	grazer_awake = true
+	grazer_label.visible = true
+	grazer_glow.visible = true
+	var first_world: Vector2 = ecology.world_position(start.x - 1, start.y)
+	grazer_root.position = Vector3(first_world.x, ecology.terrain_height(start) + 0.28, first_world.y)
+	# Open ground between the meadows, just clear of the wreck to the west.
+	var stand := start + Vector2i(4, 0)
+	var world: Vector2 = ecology.world_position(stand.x, stand.y)
+	astronaut.position = Vector3(world.x, ecology.terrain_height(stand) + 0.02, world.y)
+	camera.position = astronaut.position + Vector3(8.8, 10.8, 10.5)
+	camera.look_at(astronaut.position)
 	_refresh_ecology_visuals()
 	_update_ecological_animal_markers()
 
@@ -1362,6 +1431,8 @@ func _build_interface() -> void:
 		title.text = "FIRST RAIN  /  WAKING ANIMALS PROTOTYPE"
 	elif "--flower-lineage" in OS.get_cmdline_user_args():
 		title.text = "FIRST RAIN  /  FLOWER LINEAGE PROTOTYPE"
+	elif "--grazer-herd" in OS.get_cmdline_user_args():
+		title.text = "FIRST RAIN  /  GRAZER HERD PROTOTYPE"
 	title.add_theme_font_size_override("font_size", 15)
 	title.add_theme_color_override("font_color", Color("e9b36e"))
 	canvas.add_child(title)
@@ -1988,7 +2059,7 @@ func _update_ecology_grid(delta: float) -> void:
 		_seed_integrated_animals()
 		var animal_events: Array[Dictionary] = animal_simulation.step()
 		_handle_authoritative_animal_events(animal_events)
-		for seep in flower_fixture_seeps:
+		for seep in fixture_seeps:
 			var seep_index: int = seep.y * ecology.WIDTH + seep.x
 			ecology.moisture[seep_index] = maxf(ecology.moisture[seep_index], FLOWER_SEEP_MOISTURE)
 		_check_spring_opened()
@@ -2337,6 +2408,9 @@ func _update_resident_habitat_support() -> void:
 			continue
 		var species := String(agent["species"])
 		var habitat_cell: Vector2i = agent.get("habitat_cell", agent["cell"])
+		# A herd on the move is judged by the ground it is heading for (#51).
+		if species == "grazer" and int(agent.get("herd_size", 1)) >= 2 and String(agent.get("herd_mode", "")) == "travelling":
+			habitat_cell = agent["herd_goal"]
 		if species == "colony" and float(agent.get("garden", 0.0)) >= COLONY_GARDEN_KEEP:
 			# A colony with a living garden of its own is supported.
 			unsupported_residency_ticks[stable_id] = 0
@@ -2876,10 +2950,7 @@ func _update_grazer_markers(delta: float) -> void:
 		var marker: Node3D = animal_markers[id]
 		if agent.is_empty() or agent["species"] != "grazer" or not bool(agent["alive"]) or not bool(agent["present"]) or not marker.visible:
 			continue
-		var cell: Vector2i = agent["cell"]
-		var world: Vector2 = ecology.world_position(cell.x, cell.y) + _grazer_cell_slot(id)
-		var speed := 1.8 if agent["state"] == "fleeing" else (0.85 if agent["state"] == "following parent" else GRAZER_MOVE_SPEED)
-		_move_ground_actor(marker, world, 0.25, speed, delta)
+		_steer_grazer(id, marker, agent, 0.25, delta)
 		var figure = marker.get_child(0)
 		if bool(agent.get("juvenile", false)) != figure.juvenile:
 			figure.set_juvenile(bool(agent.get("juvenile", false)))
@@ -2890,6 +2961,51 @@ func _update_grazer_markers(delta: float) -> void:
 	_separate_grazers(shown, figures, heights)
 	for index in shown.size():
 		figures[index].animate(delta, states[index])
+
+
+# The simulation decides which 2 m cell a grazer is in; this only decides how
+# it walks there (#51). A grazer walks where it faces and turns at a limited
+# rate, so it curves rather than pivoting at cell centres. It eases its speed
+# up and down, aims a little ahead along its herd's heading while the herd is
+# on the move, and while grazing its spot in the cell wanders slowly so it
+# shuffles forward with its head down instead of standing still.
+func _steer_grazer(id: String, actor: Node3D, agent: Dictionary, height_offset: float, delta: float) -> void:
+	if delta <= 0.0:
+		return
+	var state := String(agent["state"])
+	var cell: Vector2i = agent["cell"]
+	var steer: Dictionary = grazer_steering.get(id, {"speed": 0.0, "time": float(hash(id) % 1000)})
+	steer["time"] = float(steer["time"]) + delta
+	var t := float(steer["time"])
+	# Only a grazing animal's spot wanders; resting and watching ones stay put.
+	var wander := Vector2.ZERO
+	if state in ["grazing", "drifting", "digesting", "roaming", "seeking", "near parent"]:
+		wander = Vector2(sin(t * 0.11 + float(hash(id) % 7)), cos(t * 0.083 + float(hash(id) % 11))) * GRAZER_WANDER
+	var target: Vector2 = ecology.world_position(cell.x, cell.y) + _grazer_cell_slot(id) * 0.6 + wander
+	if state == "travelling":
+		var herd_heading := Vector2.from_angle(float(agent.get("herd_heading", 0.0)))
+		target += herd_heading * GRAZER_LOOKAHEAD
+	var top_speed: float = GRAZER_GAITS.get(state, GRAZER_MOVE_SPEED)
+	var turn_rate := 3.2 if state == "fleeing" else GRAZER_TURN_RATE
+	var current := Vector2(actor.position.x, actor.position.z)
+	var to_target := target - current
+	var distance := to_target.length()
+	var facing := actor.rotation.y
+	var wanted_speed := 0.0
+	if distance > 0.06:
+		# Rotation 0 faces +Z, so a heading is atan2(x, z).
+		var wanted_facing := atan2(to_target.x, to_target.y)
+		var off_angle := wrapf(wanted_facing - facing, -PI, PI)
+		facing += clampf(off_angle, -turn_rate * delta, turn_rate * delta)
+		# Slows to turn sharply and to arrive; at rest a grazer only turns.
+		wanted_speed = top_speed * clampf(distance / 1.2, 0.0, 1.0) * maxf(0.0, cos(off_angle))
+	var accel := 3.0 if state == "fleeing" else GRAZER_ACCELERATION
+	var speed := move_toward(float(steer["speed"]), wanted_speed, accel * delta)
+	steer["speed"] = speed
+	grazer_steering[id] = steer
+	var next := current + Vector2(sin(facing), cos(facing)) * speed * delta
+	actor.rotation.y = facing
+	actor.position = Vector3(next.x, _terrain_surface_height(next) + height_offset, next.y)
 
 
 # Several grazers can share one 2 m cell; each heads for its own spot in it.
@@ -3103,8 +3219,7 @@ func _update_grazer(delta: float) -> void:
 	_set_grazer_state(authoritative["state"])
 	var target_world: Vector2 = ecology.world_position(grazer_cell.x, grazer_cell.y) + _grazer_cell_slot("grazer:1")
 	grazer_target_position = Vector3(target_world.x, _terrain_surface_height(target_world) + 0.28, target_world.y)
-	var speed := 1.8 if authoritative["state"] == "fleeing" else GRAZER_MOVE_SPEED
-	_move_ground_actor(grazer_root, target_world, 0.28, speed, delta)
+	_steer_grazer("grazer:1", grazer_root, authoritative, 0.28, delta)
 	# Posed in _update_grazer_markers, after every grazer has been kept apart.
 
 

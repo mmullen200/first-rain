@@ -19,7 +19,8 @@ extends Node3D
 # muzzle to the ground and sweeps it side to side while the jaw works;
 # fleeing stretches the neck out ahead, lifts the tail and pulls in the
 # tentacles; resting lets the head hang at mid-height, breathing, looking
-# slowly about. Two long slug-like eye tentacles point forward and up in a V
+# slowly about. In a herd (#51) a resting grazer sinks down onto folded legs
+# and the lookout stands with its neck raised, scanning widely. Two long slug-like eye tentacles point forward and up in a V
 # and two short feelers reach down toward the ground, each moving on its own.
 
 const HIND_HIP := Vector3(0.14, 0.56, -0.24)
@@ -56,6 +57,8 @@ var time := 0.0
 var walk := 0.0
 var alert := 0.0
 var feeding := 0.0
+var resting := 0.0
+var watching := 0.0
 var turn := 0.0
 var placed := false
 var last_position := Vector3.ZERO
@@ -189,7 +192,11 @@ func animate(delta: float, state: String) -> void:
 	var blend := clampf(delta * 4.0, 0.0, 1.0)
 	walk = lerpf(walk, clampf(travelled / delta / 0.25, 0.0, 1.0), clampf(delta * 5.0, 0.0, 1.0))
 	alert = lerpf(alert, 1.0 if state == "fleeing" else 0.0, blend)
-	feeding = lerpf(feeding, 1.0 if state == "feeding" and walk < 0.3 else 0.0, clampf(delta * 2.5, 0.0, 1.0))
+	feeding = lerpf(feeding, 1.0 if state in ["feeding", "grazing"] and walk < 0.3 else 0.0, clampf(delta * 2.5, 0.0, 1.0))
+	# Herd poses (#51): a resting grazer sinks down onto folded legs; the
+	# lookout stands tall with its neck raised and eye stalks spread.
+	resting = lerpf(resting, 1.0 if state == "resting" and walk < 0.2 else 0.0, clampf(delta * 0.8, 0.0, 1.0))
+	watching = lerpf(watching, 1.0 if state == "watching" else 0.0, clampf(delta * 1.5, 0.0, 1.0))
 	turn = lerpf(turn, clampf(turning, -2.5, 2.5), blend)
 
 	# A planted foot sweeps `stride` either side of its hip over the planted
@@ -199,7 +206,7 @@ func animate(delta: float, state: String) -> void:
 
 	var breathing := sin(time * 1.9) * 0.006 * (1.0 - walk)
 	var bob := -absf(sin(phase * 2.0)) * 0.014 * walk
-	body.position = Vector3(0.0, breathing + bob - 0.03 * feeding, 0.0)
+	body.position = Vector3(0.0, breathing + bob - 0.03 * feeding - 0.3 * resting, 0.0)
 	body.rotation = Vector3(0.05 * feeding - 0.04 * alert, 0.0, sin(phase) * 0.03 * walk)
 
 	_pose_neck()
@@ -217,8 +224,13 @@ func _pose_neck() -> void:
 	var bend := lerpf(0.35, 0.5, feeding)
 	drop = lerpf(drop, 0.02, alert)
 	bend = lerpf(bend, 0.15, alert)
+	drop = lerpf(drop, -0.35, watching)
+	bend = lerpf(bend, 0.3, watching)
+	drop = lerpf(drop, 0.0, resting)
+	bend = lerpf(bend, 0.55, resting)
 	var sweep := sin(time * 1.3) * 0.12 * feeding
-	var look := (sin(time * 0.37) * 0.08 + sin(time * 0.91) * 0.04) * (1.0 - walk) * (1.0 - feeding)
+	# A lookout swings its head through a wide, slow scan.
+	var look := (sin(time * 0.37) * 0.08 + sin(time * 0.91) * 0.04) * (1.0 - walk) * (1.0 - feeding) * (1.0 + 3.0 * watching)
 	var sway := sin(phase) * 0.025 * walk
 	for index in neck.size():
 		var joint := neck[index]
@@ -228,7 +240,7 @@ func _pose_neck() -> void:
 		joint.rotation = Vector3(pitch, yaw, 0.0)
 	var chew := maxf(0.0, sin(time * 9.0)) * feeding
 	# Feeding, the flat muzzle faces the ground.
-	head.rotation = Vector3(lerpf(-0.1, 0.3, feeding) - 0.15 * alert, 0.0, 0.0)
+	head.rotation = Vector3(lerpf(-0.1, 0.3, feeding) - 0.15 * alert + 0.3 * watching, 0.0, 0.0)
 	jaw.rotation.x = 0.28 * chew + 0.05 * (1.0 - feeding)
 
 
@@ -291,7 +303,7 @@ func _pose_legs(stride: float) -> void:
 		var foot := Vector3(side * FOOT_SPREAD, raised, base.z + swing)
 		# Hind knees bend forward and fore elbows back, more while the foot
 		# swings through.
-		var bend := (0.035 + raised * 0.9) * (1.0 if hind else -1.0)
+		var bend := (0.035 + raised * 0.9 + 0.2 * resting) * (1.0 if hind else -1.0)
 		var knee := (hip + foot) * 0.5 + Vector3(side * 0.01, 0.0, bend)
 		_point_limb(leg.get_child(0), hip, knee)
 		_point_limb(leg.get_child(1), knee, foot)

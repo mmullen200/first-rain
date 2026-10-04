@@ -7,7 +7,7 @@ extends RefCounted
 # observe snapshots/events. Species choose intentions internally; presentation
 # nodes never decide ecological outcomes.
 
-const SNAPSHOT_VERSION := 9
+const SNAPSHOT_VERSION := 10
 const JUVENILE_MATURATION_TICKS := 1800
 const PARENT_SENSE_RADIUS := 4
 const PARENT_MEMORY_TICKS := 120
@@ -51,6 +51,30 @@ const COLONY_HOODOO_LOAD := 0.0006
 # this many ticks, so it moves on through a patch and across to the next one
 # instead of circling the same few flowers (#49).
 const VECTOR_SCENT_MARK_TICKS := 60
+# Grazer herds (#51). Grazers within HERD_RADIUS of one another, chained, form
+# one herd. Each herd follows its most experienced adult, drifts while grazing
+# in one shared direction, rests together, keeps a lookout, panics together,
+# and moves off together when the ground around it is grazed out.
+const HERD_RADIUS := 4
+const HERD_SPREAD := 2
+const HERD_GRAZE_STEP_TICKS := 18
+const HERD_TRAVEL_STEP_TICKS := 8
+const HERD_REJOIN_STEP_TICKS := 7
+const HERD_GRAZE_BOUT_TICKS := 320
+const HERD_REST_TICKS := 100
+const HERD_LOOKOUT_TICKS := 45
+const HERD_MEMORY_TICKS := 120
+const HERD_GIVE_UP_FORAGE := 0.06
+const HERD_SCOUT_RADIUS := 8
+const HERD_ALARM_SHARE := 0.75
+const HERD_MAX_SIZE := 12
+# Breeding is slow: about five minutes of good times (well fed, unafraid, in a
+# herd, with forage to spare around it) before a pair is ready.
+const HERD_BREEDING_TICKS := 900
+const HERD_BREEDING_BODY := 0.7
+const HERD_FORAGE_PER_HEAD := 0.3
+# The share of each bite a grazer keeps as body; the rest becomes manure.
+const GRAZER_ASSIMILATION := 0.25
 const DIRECTIONS := [
 	Vector2i(1, 0), Vector2i(1, 1), Vector2i(0, 1), Vector2i(-1, 1),
 	Vector2i(-1, 0), Vector2i(-1, -1), Vector2i(0, -1), Vector2i(1, -1)
@@ -138,7 +162,18 @@ func register_agent(species: String, stable_id: String, initial_state := {}) -> 
 		"last_flower": Vector2i(-1, -1),
 		"last_visit_tick": -1000,
 		"scent_marks": {},
-		"spore_load": float(initial_state.get("spore_load", 0.0))
+		"spore_load": float(initial_state.get("spore_load", 0.0)),
+		"herd_leader": "",
+		"herd_size": 1,
+		"herd_centre": Vector2(bounded_cell),
+		"herd_mode": "grazing",
+		"herd_mode_ticks": int(initial_state.get("herd_mode_ticks", 0)),
+		"herd_heading": float(initial_state.get("herd_heading", 0.0)),
+		"herd_goal": bounded_cell,
+		"herd_lookout": "",
+		"herd_plenty": 0.0,
+		"herd_memory_ticks": 0,
+		"bites_here": 0
 	}
 	if species == "colony":
 		_reset_colony_workers(agent)
@@ -232,6 +267,7 @@ func step() -> Array[Dictionary]:
 	for seed_event in ecology.seed_events:
 		_emit(seed_event["taxonomy"], "plant:%s" % str(seed_event["cell"]), seed_event)
 	_resolve_interventions()
+	_update_herds()
 	var ids := agents.keys()
 	ids.sort()
 	var intentions: Array[Dictionary] = []
@@ -329,6 +365,8 @@ func _choose_intention(agent: Dictionary) -> Dictionary:
 		return _choose_predator_intention(agent)
 	if agent["species"] == "grazer" and bool(agent.get("juvenile", false)):
 		return _choose_grazer_intention(agent)
+	if agent["species"] == "grazer":
+		return _choose_herd_grazer_intention(agent)
 	var readiness: float = float(agent["reproductive_readiness"])
 	if float(agent["hunger"]) < 0.35 and float(agent["body_biomass"]) > 0.55 and float(agent["fear"]) < 0.3:
 		readiness = minf(1.0, readiness + 0.025)
@@ -352,6 +390,411 @@ func _choose_intention(agent: Dictionary) -> Dictionary:
 		"wetland_engineer":
 			return _choose_engineer_intention(agent)
 	return {"type": "wait", "agent_id": agent["id"]}
+
+
+# Grazer herds (#51). Every tick, grazers within HERD_RADIUS of one another
+# (chained) are one herd. The herd's shared state — what it is doing, the
+# direction it drifts, where it is heading, who keeps watch — lives on its
+# leader and is copied to every member, so each animal still decides its own
+# step from what it can see of its herd-mates.
+func _update_herds() -> void:
+	var ids := agents.keys()
+	ids.sort()
+	var unvisited: Array[String] = []
+	for id in ids:
+		var agent: Dictionary = agents[id]
+		if agent["species"] == "grazer" and bool(agent["alive"]) and bool(agent.get("present", true)):
+			unvisited.append(String(id))
+	while not unvisited.is_empty():
+		var group: Array[String] = [unvisited.pop_front()]
+		var index := 0
+		while index < group.size():
+			var cell: Vector2i = agents[group[index]]["cell"]
+			for other in unvisited.duplicate():
+				if _cell_distance(cell, agents[other]["cell"]) <= HERD_RADIUS:
+					group.append(other)
+					unvisited.erase(other)
+			index += 1
+		_update_herd(group)
+
+
+func _update_herd(group: Array[String]) -> void:
+	if group.size() == 1:
+		# A grazer alone remembers where its herd was for a while.
+		var lone: Dictionary = agents[group[0]]
+		if int(lone["herd_size"]) > 1:
+			lone["herd_memory_ticks"] = HERD_MEMORY_TICKS
+			_emit("organism.herd_lost", lone["id"], {"cell": lone["cell"], "herd_centre": lone["herd_centre"]})
+		else:
+			lone["herd_memory_ticks"] = maxi(0, int(lone["herd_memory_ticks"]) - 1)
+		lone["herd_size"] = 1
+		lone["herd_leader"] = ""
+		lone["herd_lookout"] = ""
+		agents[group[0]] = lone
+		return
+	var centre := Vector2.ZERO
+	var adults: Array[String] = []
+	for id in group:
+		centre += Vector2(agents[id]["cell"])
+		if not bool(agents[id].get("juvenile", false)):
+			adults.append(id)
+	centre /= float(group.size())
+	var centre_cell := _bounded_cell(Vector2i(roundi(centre.x), roundi(centre.y)))
+	var leader_id := _herd_leader(group, adults)
+	var leader: Dictionary = agents[leader_id]
+
+	# Fear spreads: when one bolts, the rest take fright from the same danger.
+	var alarm_id := ""
+	for id in group:
+		if float(agents[id]["fear"]) > 0.25 and (alarm_id.is_empty() or float(agents[id]["fear"]) > float(agents[alarm_id]["fear"])):
+			alarm_id = id
+	if not alarm_id.is_empty():
+		var shared := float(agents[alarm_id]["fear"]) * HERD_ALARM_SHARE
+		for id in group:
+			if float(agents[id]["fear"]) < shared:
+				if float(agents[id]["fear"]) <= 0.25 and shared > 0.25:
+					_emit("organism.herd_alarmed", id, {"from": alarm_id, "cell": agents[id]["cell"]})
+				agents[id]["fear"] = shared
+				agents[id]["threat_cell"] = agents[alarm_id]["threat_cell"]
+
+	var nearby_forage := 0.0
+	var nearby_cells := 0
+	var plenty := 0.0
+	for y in range(centre_cell.y - 3, centre_cell.y + 4):
+		for x in range(centre_cell.x - 3, centre_cell.x + 4):
+			var cell := Vector2i(x, y)
+			var forage := _forage(cell)
+			plenty += forage
+			if _cell_distance(cell, centre_cell) <= 2:
+				nearby_forage += forage
+				nearby_cells += 1
+	plenty /= float(group.size())
+	nearby_forage /= float(maxi(1, nearby_cells))
+
+	var mode := String(leader["herd_mode"])
+	var mode_ticks := int(leader["herd_mode_ticks"]) + 1
+	var heading := float(leader["herd_heading"])
+	var goal: Vector2i = leader["herd_goal"]
+	var next_mode := mode
+	match mode:
+		"grazing":
+			# The herd follows the green: it moves off when it can see ground
+			# clearly richer than the grazed-down ground it stands on.
+			if mode_ticks % 30 == 1:
+				var target := _herd_scout(centre_cell, maxf(HERD_GIVE_UP_FORAGE, nearby_forage * 1.6))
+				if target != centre_cell:
+					next_mode = "travelling"
+					goal = target
+			if next_mode == "grazing" and mode_ticks >= HERD_GRAZE_BOUT_TICKS:
+				next_mode = "resting"
+		"resting":
+			if mode_ticks >= HERD_REST_TICKS or not alarm_id.is_empty():
+				next_mode = "grazing"
+		"travelling":
+			if centre.distance_to(Vector2(goal)) <= 1.5 or mode_ticks > 300:
+				next_mode = "grazing"
+			else:
+				heading = (Vector2(goal) - centre).angle()
+		_:
+			next_mode = "grazing"
+	if next_mode != mode:
+		mode = next_mode
+		mode_ticks = 0
+		if mode == "travelling":
+			heading = (Vector2(goal) - centre).angle()
+		_emit("organism.herd_mode_changed", leader_id, {"mode": mode, "size": group.size(), "centre": centre_cell, "goal": goal})
+
+	# One adult at a time keeps watch while the others graze or lie down; the
+	# duty passes round the herd.
+	var lookout := ""
+	if mode != "travelling" and adults.size() >= 2:
+		lookout = adults[posmod(tick / HERD_LOOKOUT_TICKS + leader_id.hash(), adults.size())]
+
+	for id in group:
+		var member: Dictionary = agents[id]
+		member["herd_leader"] = leader_id
+		member["herd_size"] = group.size()
+		member["herd_centre"] = centre
+		member["herd_mode"] = mode
+		member["herd_mode_ticks"] = mode_ticks
+		member["herd_heading"] = heading
+		member["herd_goal"] = goal
+		member["herd_lookout"] = lookout
+		member["herd_plenty"] = plenty
+		member["herd_memory_ticks"] = HERD_MEMORY_TICKS
+		member["habitat_cell"] = centre_cell
+		agents[id] = member
+
+
+# The herd follows its most experienced adult: the one it already follows if
+# still there, otherwise the oldest line, then the heaviest.
+func _herd_leader(group: Array[String], adults: Array[String]) -> String:
+	var candidates: Array[String] = adults if not adults.is_empty() else group
+	for id in candidates:
+		var previous := String(agents[id]["herd_leader"])
+		if previous in candidates:
+			return previous
+	var best := candidates[0]
+	for id in candidates:
+		var a: Dictionary = agents[id]
+		var b: Dictionary = agents[best]
+		if int(a["generation"]) < int(b["generation"]) or (int(a["generation"]) == int(b["generation"]) and float(a["body_biomass"]) > float(b["body_biomass"])):
+			best = id
+	return best
+
+
+# Looks out to HERD_SCOUT_RADIUS for the nearest ground whose forage beats
+# `richer_than`; returns `from` when there is none.
+func _herd_scout(from: Vector2i, richer_than: float) -> Vector2i:
+	var best := from
+	var best_score := richer_than
+	for y in range(from.y - HERD_SCOUT_RADIUS, from.y + HERD_SCOUT_RADIUS + 1):
+		for x in range(from.x - HERD_SCOUT_RADIUS, from.x + HERD_SCOUT_RADIUS + 1):
+			var cell := Vector2i(x, y)
+			if _cell_distance(cell, from) < 3 or not _cell_is_viable(cell):
+				continue
+			var forage := 0.0
+			for offset in DIRECTIONS:
+				forage += _forage(cell + offset)
+			forage = (forage + _forage(cell)) / 9.0
+			var score := forage - 0.01 * Vector2(cell).distance_to(Vector2(from))
+			if score > best_score:
+				best_score = score
+				best = cell
+	return best
+
+
+func _forage(cell: Vector2i) -> float:
+	if cell.x < 0 or cell.x >= ecology.WIDTH or cell.y < 0 or cell.y >= ecology.HEIGHT:
+		return 0.0
+	return ecology.resource_amount(cell, "moss") + ecology.resource_amount(cell, "rhizome")
+
+
+func _choose_herd_grazer_intention(agent: Dictionary) -> Dictionary:
+	var in_herd := int(agent["herd_size"]) >= 2
+	var juvenile := bool(agent.get("juvenile", false))
+	if not juvenile:
+		var birth := _herd_breeding(agent)
+		if not birth.is_empty():
+			return birth
+	# A young juvenile follows its own parent (#32); an orphan follows the herd.
+	if juvenile and (not in_herd or int(agent["parent_memory_ticks"]) > 0):
+		return _choose_grazer_intention(agent)
+	if not in_herd:
+		var centre: Vector2 = agent["herd_centre"]
+		if int(agent["herd_memory_ticks"]) > 0 and float(agent["fear"]) <= 0.25 and Vector2(agent["cell"]).distance_to(centre) > 1.0:
+			return _herd_rejoin(agent)
+		return _choose_grazer_intention(agent)
+	return _choose_herd_member_intention(agent)
+
+
+func _herd_breeding(agent: Dictionary) -> Dictionary:
+	var readiness := float(agent["reproductive_readiness"])
+	if readiness >= 1.0:
+		var mate_id := _ready_mate_id(agent)
+		if not mate_id.is_empty():
+			return {"type": "reproduce", "agent_id": agent["id"], "mate_id": mate_id}
+	var good_times: bool = int(agent["herd_size"]) >= 2 and int(agent["herd_size"]) < HERD_MAX_SIZE and float(agent["body_biomass"]) >= HERD_BREEDING_BODY and float(agent["fear"]) < 0.2 and float(agent["herd_plenty"]) >= HERD_FORAGE_PER_HEAD
+	# Each animal comes into condition at its own pace, so births spread out.
+	var pace := 0.55 + 0.45 * _noise(String(agent["id"]), 0)
+	readiness += (pace if good_times else -0.5) / float(HERD_BREEDING_TICKS)
+	agent["reproductive_readiness"] = clampf(readiness, 0.0, 1.0)
+	agents[agent["id"]] = agent
+	return {}
+
+
+func _grazer_metabolism(agent: Dictionary) -> void:
+	agent["hunger"] = minf(1.0, float(agent["hunger"]) + 0.08)
+	agent["fear"] = maxf(0.0, float(agent["fear"]) - 0.025)
+	agent["move_cooldown"] = maxi(0, int(agent["move_cooldown"]) - 1)
+
+
+func _herd_rejoin(agent: Dictionary) -> Dictionary:
+	var id := String(agent["id"])
+	_grazer_metabolism(agent)
+	if bool(agent.get("juvenile", false)):
+		_observe_parent(agent)
+	agent["state"] = "rejoining"
+	agents[id] = agent
+	if int(agent["move_cooldown"]) > 0:
+		return {"type": "wait", "agent_id": id}
+	var centre: Vector2 = agent["herd_centre"]
+	return {"type": "move", "agent_id": id, "cell": _juvenile_step(agent["cell"], Vector2i(roundi(centre.x), roundi(centre.y))), "state": "rejoining", "cooldown": HERD_REJOIN_STEP_TICKS}
+
+
+func _choose_herd_member_intention(agent: Dictionary) -> Dictionary:
+	var id := String(agent["id"])
+	_grazer_metabolism(agent)
+	if bool(agent.get("juvenile", false)):
+		_observe_parent(agent)
+	var cell: Vector2i = agent["cell"]
+	var centre: Vector2 = agent["herd_centre"]
+	var ready := int(agent["move_cooldown"]) == 0
+	if float(agent["fear"]) > 0.25:
+		# Fright breaks off whatever it was doing: the first bound is at once.
+		ready = ready or agent["state"] != "fleeing"
+		agent["state"] = "fleeing"
+		agents[id] = agent
+		return {"type": "move", "agent_id": id, "cell": _herd_escape_cell(agent)} if ready else {"type": "wait", "agent_id": id}
+	# Manure is dropped away from where the grazer last fed.
+	if int(agent["digestion_ticks"]) > 0:
+		agent["digestion_ticks"] = int(agent["digestion_ticks"]) - 1
+		var digesting := String(agent["digesting_resource"])
+		if int(agent["digestion_ticks"]) == 0 and float(agent["carried_material"].get(digesting, 0.0)) > 0.0 and cell != agent["last_feeding_cell"]:
+			agents[id] = agent
+			return {"type": "deposit", "agent_id": id, "resource": "dead_biomass", "source_resource": digesting}
+		if int(agent["digestion_ticks"]) == 0 and cell == agent["last_feeding_cell"]:
+			agent["digestion_ticks"] = 1
+	# A straggler stops feeding and hurries back to the others.
+	if Vector2(cell).distance_to(centre) > HERD_SPREAD + 1.0:
+		agent["state"] = "rejoining"
+		agents[id] = agent
+		if not ready:
+			return {"type": "wait", "agent_id": id}
+		return {"type": "move", "agent_id": id, "cell": _herd_step(agent, "rejoining"), "state": "rejoining", "cooldown": HERD_REJOIN_STEP_TICKS}
+	# A ready adult walks over to a ready partner in the herd.
+	if float(agent["reproductive_readiness"]) >= 1.0 and not bool(agent.get("juvenile", false)):
+		var mate_id := _herd_ready_mate(agent)
+		if not mate_id.is_empty() and _cell_distance(cell, agents[mate_id]["cell"]) > 1:
+			agent["state"] = "courting"
+			agents[id] = agent
+			if not ready:
+				return {"type": "wait", "agent_id": id}
+			return {"type": "move", "agent_id": id, "cell": _juvenile_step(cell, agents[mate_id]["cell"]), "state": "courting", "cooldown": HERD_GRAZE_STEP_TICKS / 2}
+	var mode := String(agent["herd_mode"])
+	var lookout: bool = agent["herd_lookout"] == id
+	if mode == "resting":
+		agent["state"] = "watching" if lookout else "resting"
+		agents[id] = agent
+		return {"type": "wait", "agent_id": id}
+	if mode == "travelling":
+		agent["state"] = "travelling"
+		agents[id] = agent
+		if not ready:
+			return {"type": "wait", "agent_id": id}
+		return {"type": "move", "agent_id": id, "cell": _herd_step(agent, "travelling"), "state": "travelling", "cooldown": HERD_TRAVEL_STEP_TICKS}
+	if lookout:
+		agent["state"] = "watching"
+		agents[id] = agent
+		return {"type": "wait", "agent_id": id}
+	var food := "rhizome" if ecology.resource_amount(cell, "rhizome") >= ecology.resource_amount(cell, "moss") else "moss"
+	var has_food: bool = ecology.resource_amount(cell, food) >= 0.02
+	if float(agent["hunger"]) >= 0.65 and has_food:
+		agents[id] = agent
+		return {"type": "consume", "agent_id": id, "resource": food, "amount": 0.06 if bool(agent.get("juvenile", false)) else 0.12}
+	agent["state"] = "grazing" if has_food else "drifting"
+	agents[id] = agent
+	if not ready:
+		return {"type": "wait", "agent_id": id}
+	# The leader waits for the herd to catch up before drifting on.
+	if agent["herd_leader"] == id:
+		if (Vector2(cell) - centre).dot(Vector2.from_angle(float(agent["herd_heading"]))) > 1.0:
+			return {"type": "wait", "agent_id": id}
+		_steer_herd_heading(agent)
+	var next := _herd_step(agent, "grazing")
+	if next == cell:
+		agent["move_cooldown"] = HERD_GRAZE_STEP_TICKS / 3
+		agents[id] = agent
+		return {"type": "wait", "agent_id": id}
+	return {"type": "move", "agent_id": id, "cell": next, "state": agent["state"], "cooldown": HERD_GRAZE_STEP_TICKS}
+
+
+# While grazing the leader's heading wanders a little and leans toward the
+# richer ground ahead, and turns away from bad ground and the basin edge.
+func _steer_herd_heading(agent: Dictionary) -> void:
+	var cell: Vector2i = agent["cell"]
+	var heading := float(agent["herd_heading"]) + (_noise(String(agent["id"]), tick) - 0.5) * 0.6
+	var pull := Vector2.ZERO
+	for y in range(-3, 4):
+		for x in range(-3, 4):
+			var offset := Vector2i(x, y)
+			if offset != Vector2i.ZERO:
+				pull += Vector2(offset).normalized() * _forage(cell + offset)
+	if pull.length() > 0.05:
+		heading = lerp_angle(heading, pull.angle(), 0.3)
+	var ahead := cell + Vector2i(roundi(cos(heading) * 2.0), roundi(sin(heading) * 2.0))
+	if not _cell_is_viable(ahead) or ahead != _bounded_cell(ahead):
+		heading += PI * 0.6
+	agent["herd_heading"] = wrapf(heading, -PI, PI)
+	agents[agent["id"]] = agent
+
+
+# Each grazer picks its own next cell from what it can see of the herd: keep
+# near the others, not on top of them, along the shared heading, toward food.
+func _herd_step(agent: Dictionary, mode: String) -> Vector2i:
+	var id := String(agent["id"])
+	var cell: Vector2i = agent["cell"]
+	var centre: Vector2 = agent["herd_centre"]
+	var heading := Vector2.from_angle(float(agent["herd_heading"]))
+	var leading: bool = agent["herd_leader"] == id
+	var hungry := float(agent["hunger"]) >= 0.65
+	var result := cell
+	var best := -INF
+	for offset in [Vector2i.ZERO] + DIRECTIONS:
+		var next: Vector2i = cell + offset
+		if offset != Vector2i.ZERO and (not _cell_is_viable(next) or next != _bounded_cell(next)):
+			continue
+		var score := 0.0
+		var spread := 1.5 if mode == "travelling" else float(HERD_SPREAD)
+		var pull := 0.1 if leading and mode != "rejoining" else (1.2 if mode == "rejoining" else 0.5)
+		score -= maxf(0.0, Vector2(next).distance_to(centre) - spread) * pull
+		if offset != Vector2i.ZERO:
+			var alignment := 0.5 if mode == "travelling" else (0.3 if leading else 0.12)
+			score += Vector2(offset).normalized().dot(heading) * alignment - 0.03
+		if mode == "travelling" and leading:
+			score -= Vector2(next).distance_to(Vector2(agent["herd_goal"])) * 0.6
+		if mode == "grazing":
+			score += _forage(next) * (0.6 if hungry else 0.2)
+			# A grazer takes a few mouthfuls in one spot, then steps on.
+			if offset == Vector2i.ZERO:
+				score -= 0.12 * int(agent.get("bites_here", 0))
+		score -= 0.15 * _grazers_in(next, id)
+		score += _noise(id, tick + next.x * 31 + next.y * 17) * 0.03
+		if score > best:
+			best = score
+			result = next
+	return result
+
+
+func _herd_escape_cell(agent: Dictionary) -> Vector2i:
+	var origin: Vector2i = agent["cell"]
+	var threat: Vector2 = Vector2(agent["threat_cell"])
+	var centre: Vector2 = agent["herd_centre"]
+	var result := origin
+	var best := -INF
+	for direction in DIRECTIONS:
+		var cell: Vector2i = origin + direction
+		if not _cell_is_viable(cell) or cell != _bounded_cell(cell):
+			continue
+		# Away from the danger, into open ground, and bunched with the others.
+		var score: float = Vector2(cell).distance_to(threat) - _hunting_cover(cell) * 0.5 - maxf(0.0, Vector2(cell).distance_to(centre) - 1.5) * 0.4
+		if score > best:
+			best = score
+			result = cell
+	return result
+
+
+func _herd_ready_mate(agent: Dictionary) -> String:
+	var ids := agents.keys()
+	ids.sort()
+	for candidate_id in ids:
+		var candidate: Dictionary = agents[candidate_id]
+		if candidate_id != agent["id"] and candidate["species"] == "grazer" and bool(candidate["alive"]) and bool(candidate.get("present", true)) and not bool(candidate.get("juvenile", false)) and candidate["herd_leader"] == agent["herd_leader"] and float(candidate["reproductive_readiness"]) >= 1.0:
+			return candidate_id
+	return ""
+
+
+func _grazers_in(cell: Vector2i, excluding: String) -> int:
+	var count := 0
+	for id in agents:
+		var other: Dictionary = agents[id]
+		if id != excluding and other["species"] == "grazer" and bool(other["alive"]) and bool(other.get("present", true)) and other["cell"] == cell:
+			count += 1
+	return count
+
+
+func _noise(id: String, salt: int) -> float:
+	return float(posmod(("%d:%d:%s" % [seed, salt, id]).hash(), 10007)) / 10007.0
 
 
 func _choose_grazer_intention(agent: Dictionary) -> Dictionary:
@@ -744,6 +1187,9 @@ func _resolve_intention(intention: Dictionary) -> void:
 			pass
 		"move":
 			_move_agent(agent_id, intention["cell"])
+			if intention.has("state") and float(agents[agent_id]["fear"]) <= 0.25:
+				agents[agent_id]["state"] = intention["state"]
+				agents[agent_id]["move_cooldown"] = int(intention.get("cooldown", agents[agent_id]["move_cooldown"]))
 		"consume":
 			_consume_environment(agent_id, String(intention["resource"]), float(intention["amount"]))
 		"gather":
@@ -792,6 +1238,8 @@ func _move_agent(agent_id: String, destination: Vector2i) -> void:
 	if agent["species"] == "predator":
 		agent["energy"] = maxf(0.0, float(agent["energy"]) - (0.008 if bounded != origin else 0.0))
 		agent["state"] = "patrolling" if float(agent["hunger"]) < 0.4 else "searching"
+	if origin != bounded:
+		agent["bites_here"] = 0
 	agents[agent_id] = agent
 	if origin != bounded:
 		_emit("organism.moved", agent_id, {"from": origin, "to": bounded})
@@ -801,18 +1249,26 @@ func _consume_environment(agent_id: String, resource: String, requested: float) 
 	var agent: Dictionary = agents[agent_id]
 	var carried_before := float(agent["carried_material"].get(resource, 0.0))
 	var consumed: float = ecology.consume_resource(agent["cell"], resource, requested)
-	agent["carried_material"][resource] = carried_before + consumed
+	# A grazer keeps a share of each bite as body, up to full size.
+	var kept := 0.0
+	if agent["species"] == "grazer":
+		kept = clampf(minf(consumed * GRAZER_ASSIMILATION, 1.0 - float(agent["body_biomass"])), 0.0, consumed)
+		agent["body_biomass"] = float(agent["body_biomass"]) + kept
+	agent["carried_material"][resource] = carried_before + consumed - kept
 	agent["hunger"] = maxf(0.0, float(agent["hunger"]) - consumed * 6.5)
 	agent["digestion_ticks"] = 3
 	agent["digesting_resource"] = resource
 	agent["last_feeding_cell"] = agent["cell"]
 	agent["state"] = "digesting"
+	if agent["species"] == "grazer" and int(agent.get("herd_size", 1)) >= 2:
+		agent["state"] = "grazing"
+		agent["bites_here"] = int(agent.get("bites_here", 0)) + 1
 	if agent["species"] == "predator":
 		agent["digestion_ticks"] = 32
 		agent["energy"] = minf(1.0, float(agent["energy"]) + consumed * 2.0)
 		agent["state"] = "scavenging"
 	agents[agent_id] = agent
-	_check_transfer(consumed, float(agent["carried_material"][resource]) - carried_before, "environment_to_%s" % agent_id)
+	_check_transfer(consumed, float(agent["carried_material"][resource]) - carried_before + kept, "environment_to_%s" % agent_id)
 	if consumed > 0.0:
 		_emit("organism.%s_consumed" % resource, agent_id, {"cell": agent["cell"], "amount": consumed})
 		if agent["species"] == "predator":
