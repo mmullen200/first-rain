@@ -48,13 +48,19 @@ func _init() -> void:
 	var reproduction = AnimalSimulation.new(reproduction_ecology, 19)
 	reproduction.register_agent("grazer", "grazer:parent:a", {"cell": Vector2i(4, 4), "hunger": 0.0, "reproductive_readiness": 1.0})
 	reproduction.register_agent("grazer", "grazer:parent:b", {"cell": Vector2i(5, 4), "hunger": 0.0, "reproductive_readiness": 1.0})
-	var parent_biomass_before: float = reproduction.agent_state("grazer:parent:a")["body_biomass"] + reproduction.agent_state("grazer:parent:b")["body_biomass"]
+	# Grazers are a female and a male (#51 follow-up): mating starts a pregnancy
+	# and the calf is born after gestation, built from the mother's own body.
+	_assert(reproduction.agent_state("grazer:parent:a")["sex"] != reproduction.agent_state("grazer:parent:b")["sex"], "the first two grazers were not a female and a male")
 	reproduction.step()
-	_assert(_has_event(reproduction.event_history, "organism.reproduced"), "compatible animal population did not reproduce through the shared authority")
+	_assert(_has_event(reproduction.event_history, "organism.conceived"), "compatible grazers did not mate through the shared authority")
+	_assert(not _has_event(reproduction.event_history, "organism.reproduced"), "a calf was born without a pregnancy")
+	for ignored in AnimalSimulation.GRAZER_GESTATION_TICKS + 5:
+		reproduction.step()
+	_assert(_has_event(reproduction.event_history, "organism.reproduced"), "the pregnancy did not end in a birth")
 	var child_ids: Array = reproduction.agents.keys().filter(func(id): return String(id).begins_with("grazer:offspring:"))
 	_assert(child_ids.size() == 1, "one reproductive episode did not create exactly one stable-ID juvenile")
-	var family_biomass_after: float = reproduction.agent_state("grazer:parent:a")["body_biomass"] + reproduction.agent_state("grazer:parent:b")["body_biomass"] + reproduction.agent_state(child_ids[0])["body_biomass"]
-	_assert(is_equal_approx(parent_biomass_before, family_biomass_after), "reproduction created animal biomass from nothing")
+	_assert(is_equal_approx(float(reproduction.agent_state(child_ids[0])["body_biomass"]), AnimalSimulation.GRAZER_CALF_BODY), "the calf's body did not come wholly from its mother")
+	_assert(reproduction.conservation_violations.is_empty(), "reproduction created animal biomass from nothing: %s" % [reproduction.conservation_violations])
 
 	var shade_world := ecology.world_position(4, 4)
 	ecology.place_equipment_shade(shade_world)

@@ -41,8 +41,13 @@ const TAIL_LENGTH := 0.12
 # outward, both in radians.
 const TENTACLES := [[0.34, 0.02, 0.05, 0.08, 0.07, 0.32, 0.72], [0.12, 0.015, 0.1, -0.01, 0.2, 0.5, 1.75]]
 const TENTACLE_JOINTS := 4
+const BELLY_SCALE := Vector3(0.38, 0.26, 0.66)
 
 var juvenile := false
+var male := false
+# 0 to 1 through a pregnancy; swells the belly.
+var pregnancy := 0.0
+var belly_mesh: MeshInstance3D
 var body: Node3D
 var neck: Array[Node3D] = []
 var head: Node3D
@@ -88,7 +93,7 @@ func _init(is_juvenile := false) -> void:
 	# A light barrel of a body, hips higher than shoulders.
 	var torso := _sphere(body, 0.5, Vector3(0.46, 0.44, 0.86), Vector3(0.0, 0.56, -0.02), skin)
 	torso.rotation.x = 0.1
-	_sphere(body, 0.5, Vector3(0.38, 0.26, 0.66), Vector3(0.0, 0.45, 0.0), belly)
+	belly_mesh = _sphere(body, 0.5, BELLY_SCALE, Vector3(0.0, 0.45, 0.0), belly)
 	_sphere(body, 0.5, Vector3(0.34, 0.34, 0.34), Vector3(0.0, 0.6, -0.26), skin)
 	_sphere(body, 0.5, Vector3(0.34, 0.32, 0.32), Vector3(0.0, 0.52, 0.25), skin)
 	for side in [-1.0, 1.0]:
@@ -167,10 +172,33 @@ func _init(is_juvenile := false) -> void:
 
 func set_juvenile(value: bool) -> void:
 	juvenile = value
-	scale = Vector3.ONE * (0.58 if juvenile else 1.0)
-	skin.albedo_color = Color("a3ad98") if juvenile else Color("8d9483")
+	_show_sex()
+
+
+# Males (#51) are a little bigger and carry a tall, bright orange crest down the
+# neck; females have a low, dull crest. Juveniles of both are small and plain.
+func set_male(value: bool) -> void:
+	male = value
+	_show_sex()
+
+
+func _show_sex() -> void:
+	scale = Vector3.ONE * (0.58 if juvenile else (1.08 if male else 1.0))
+	skin.albedo_color = Color("a3ad98") if juvenile else (Color("858c7a") if male else Color("939a88"))
+	spine_material.albedo_color = Color("e5782c") if male and not juvenile else Color("c98d4a")
+	spine_material.emission = Color("6a2a04") if male and not juvenile else Color("3a2008")
 	for spine in spines:
-		spine.scale = Vector3.ONE * (0.5 if juvenile else 1.0)
+		var height := 0.5 if juvenile else (3.2 if male else 0.7)
+		var width := 0.5 if juvenile else (2.4 if male else 1.0)
+		spine.scale = Vector3(width, height, width)
+
+
+# A pregnant female's belly swells out and down as the calf grows.
+func set_pregnancy(progress: float) -> void:
+	pregnancy = clampf(progress, 0.0, 1.0)
+	var swell := pregnancy * pregnancy
+	belly_mesh.scale = BELLY_SCALE * Vector3(1.0 + 0.55 * swell, 1.0 + 0.8 * swell, 1.0 + 0.15 * swell)
+	belly_mesh.position.y = 0.45 - 0.07 * swell
 
 
 # `state` is the grazer's simulation state; only how the body carries itself

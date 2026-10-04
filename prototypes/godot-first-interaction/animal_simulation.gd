@@ -7,7 +7,7 @@ extends RefCounted
 # observe snapshots/events. Species choose intentions internally; presentation
 # nodes never decide ecological outcomes.
 
-const SNAPSHOT_VERSION := 10
+const SNAPSHOT_VERSION := 11
 const JUVENILE_MATURATION_TICKS := 1800
 const PARENT_SENSE_RADIUS := 4
 const PARENT_MEMORY_TICKS := 120
@@ -73,6 +73,15 @@ const HERD_MAX_SIZE := 12
 const HERD_BREEDING_TICKS := 900
 const HERD_BREEDING_BODY := 0.7
 const HERD_FORAGE_PER_HEAD := 0.3
+# Grazers are male or female. A ready male and a ready female mate; she
+# carries the calf for GRAZER_GESTATION_TICKS (about two and a half minutes),
+# moving GRAZER_CALF_BODY of her own body into it a little each tick, and gives
+# birth in the herd. A male can mate again sooner; she cannot until she has
+# calved. If she is starved or wounded below GRAZER_PREGNANCY_FLOOR she loses it.
+const GRAZER_GESTATION_TICKS := 450
+const GRAZER_CALF_BODY := 0.24
+const GRAZER_PREGNANCY_FLOOR := 0.35
+const GRAZER_MALE_RECOVERY := 0.5
 # The share of each bite a grazer keeps as body; the rest becomes manure.
 const GRAZER_ASSIMILATION := 0.25
 const DIRECTIONS := [
@@ -90,6 +99,7 @@ var conservation_violations: Array[String] = []
 var _pending_interventions: Array[Dictionary] = []
 var _next_event_sequence := 1
 var _next_birth_sequence := 1
+var _noise_rng := RandomNumberGenerator.new()
 
 
 func _init(ecology_model = null, simulation_seed := 1) -> void:
@@ -173,7 +183,11 @@ func register_agent(species: String, stable_id: String, initial_state := {}) -> 
 		"herd_lookout": "",
 		"herd_plenty": 0.0,
 		"herd_memory_ticks": 0,
-		"bites_here": 0
+		"bites_here": 0,
+		"sex": String(initial_state.get("sex", _default_sex(species))),
+		"gestation_ticks": int(initial_state.get("gestation_ticks", 0)),
+		"carried_young": float(initial_state.get("carried_young", 0.0)),
+		"sire": String(initial_state.get("sire", ""))
 	}
 	if species == "colony":
 		_reset_colony_workers(agent)
@@ -352,6 +366,7 @@ func _resolve_interventions() -> void:
 				if float(agent["body_biomass"]) <= 0.0001:
 					agent["alive"] = false
 					agent["state"] = "dead"
+					_lose_young(agent, "mother_died")
 					_emit("organism.died", agent_id, {"cause": "injury"})
 					if agent["species"] == "predator":
 						_emit("organism.territory_released", agent_id, {"cell": agent["habitat_cell"]})
@@ -589,6 +604,8 @@ func _choose_herd_grazer_intention(agent: Dictionary) -> Dictionary:
 
 
 func _herd_breeding(agent: Dictionary) -> Dictionary:
+	if int(agent["gestation_ticks"]) > 0:
+		return _carry_young(agent)
 	var readiness := float(agent["reproductive_readiness"])
 	if readiness >= 1.0:
 		var mate_id := _ready_mate_id(agent)
@@ -601,6 +618,90 @@ func _herd_breeding(agent: Dictionary) -> Dictionary:
 	agent["reproductive_readiness"] = clampf(readiness, 0.0, 1.0)
 	agents[agent["id"]] = agent
 	return {}
+
+
+# One tick of pregnancy: a little of the mother's body goes into the calf.
+func _carry_young(agent: Dictionary) -> Dictionary:
+	var id := String(agent["id"])
+	if float(agent["body_biomass"]) < GRAZER_PREGNANCY_FLOOR:
+		_lose_young(agent, "starved_or_wounded")
+		return {}
+	var share := minf(GRAZER_CALF_BODY / float(GRAZER_GESTATION_TICKS), maxf(0.0, float(agent["body_biomass"]) - GRAZER_PREGNANCY_FLOOR))
+	share = minf(share, GRAZER_CALF_BODY - float(agent["carried_young"]))
+	agent["body_biomass"] = float(agent["body_biomass"]) - share
+	agent["carried_young"] = float(agent["carried_young"]) + share
+	agent["gestation_ticks"] = int(agent["gestation_ticks"]) + 1
+	agents[id] = agent
+	if int(agent["gestation_ticks"]) > GRAZER_GESTATION_TICKS and float(agent["fear"]) <= 0.25:
+		return {"type": "give_birth", "agent_id": id}
+	return {}
+
+
+# A lost pregnancy, or a pregnant mother's death, returns the calf's body to
+# the ground as Detritus.
+func _lose_young(agent: Dictionary, cause: String) -> void:
+	var young := float(agent.get("carried_young", 0.0))
+	if int(agent.get("gestation_ticks", 0)) <= 0 and young <= 0.0:
+		return
+	var deposited := _deposit_to_environment(agent["cell"], "dead_biomass", young, String(agent["id"]))
+	_check_transfer(young, deposited, "%s_young_to_environment" % agent["id"])
+	agent["carried_young"] = young - deposited
+	agent["gestation_ticks"] = 0
+	agent["sire"] = ""
+	agent["reproductive_readiness"] = 0.0
+	agents[agent["id"]] = agent
+	_emit("organism.pregnancy_lost", agent["id"], {"cause": cause, "cell": agent["cell"], "amount": deposited})
+
+
+func _give_birth(mother_id: String) -> void:
+	var mother: Dictionary = agents[mother_id]
+	if int(mother["gestation_ticks"]) <= GRAZER_GESTATION_TICKS:
+		return
+	var calf_body := float(mother["carried_young"])
+	var sire := String(mother["sire"])
+	var child_id := "grazer:offspring:%03d" % _next_birth_sequence
+	_next_birth_sequence += 1
+	mother["carried_young"] = 0.0
+	mother["gestation_ticks"] = 0
+	mother["sire"] = ""
+	mother["reproductive_readiness"] = 0.0
+	agents[mother_id] = mother
+	var generation := int(mother["generation"])
+	if agents.has(sire):
+		generation = maxi(generation, int(agents[sire]["generation"]))
+	register_agent("grazer", child_id, {
+		"cell": mother["cell"],
+		"hunger": 0.2,
+		"body_biomass": calf_body,
+		"generation": generation + 1,
+		"parents": [mother_id, sire],
+		"parent_id": mother_id,
+		"juvenile": true,
+		"sex": "female" if _noise(child_id, 3) < 0.5 else "male",
+		"parent_last_seen": mother["cell"],
+		"parent_memory_ticks": PARENT_MEMORY_TICKS
+	})
+	_check_transfer(calf_body, float(agents[child_id]["body_biomass"]), "%s_calf_to_%s" % [mother_id, child_id])
+	_emit("organism.reproduced", child_id, {"parents": [mother_id, sire], "mother": mother_id, "sire": sire, "species": "grazer", "body_biomass": calf_body, "sex": agents[child_id]["sex"]})
+
+
+# Grazers alternate female, male as they are registered, unless told.
+func _default_sex(species: String) -> String:
+	if species != "grazer":
+		return ""
+	var grazers := 0
+	for id in agents:
+		if agents[id]["species"] == "grazer":
+			grazers += 1
+	return "female" if grazers % 2 == 0 else "male"
+
+
+# A ready grazer pairs only with a ready grazer of the other sex; a pregnant
+# female is not ready.
+func _compatible_mates(agent: Dictionary, candidate: Dictionary) -> bool:
+	if agent["species"] != "grazer":
+		return true
+	return candidate["sex"] != agent["sex"] and int(candidate["gestation_ticks"]) == 0 and int(agent["gestation_ticks"]) == 0 and not bool(candidate.get("juvenile", false))
 
 
 func _grazer_metabolism(agent: Dictionary) -> void:
@@ -779,7 +880,7 @@ func _herd_ready_mate(agent: Dictionary) -> String:
 	ids.sort()
 	for candidate_id in ids:
 		var candidate: Dictionary = agents[candidate_id]
-		if candidate_id != agent["id"] and candidate["species"] == "grazer" and bool(candidate["alive"]) and bool(candidate.get("present", true)) and not bool(candidate.get("juvenile", false)) and candidate["herd_leader"] == agent["herd_leader"] and float(candidate["reproductive_readiness"]) >= 1.0:
+		if candidate_id != agent["id"] and candidate["species"] == "grazer" and bool(candidate["alive"]) and bool(candidate.get("present", true)) and not bool(candidate.get("juvenile", false)) and candidate["herd_leader"] == agent["herd_leader"] and float(candidate["reproductive_readiness"]) >= 1.0 and _compatible_mates(agent, candidate):
 			return candidate_id
 	return ""
 
@@ -793,8 +894,12 @@ func _grazers_in(cell: Vector2i, excluding: String) -> int:
 	return count
 
 
+# A repeatable value in [0, 1) for this animal, tick and purpose. String
+# hashes of similar names lie close together, so the hash only seeds a
+# generator, which scatters them.
 func _noise(id: String, salt: int) -> float:
-	return float(posmod(("%d:%d:%s" % [seed, salt, id]).hash(), 10007)) / 10007.0
+	_noise_rng.seed = ("%d:%d:%s" % [seed, salt, id]).hash()
+	return _noise_rng.randf()
 
 
 func _choose_grazer_intention(agent: Dictionary) -> Dictionary:
@@ -1212,6 +1317,8 @@ func _resolve_intention(intention: Dictionary) -> void:
 			_predate(agent_id, String(intention["prey_id"]), float(intention["amount"]))
 		"reproduce":
 			_reproduce(agent_id, String(intention["mate_id"]))
+		"give_birth":
+			_give_birth(agent_id)
 
 
 func _move_agent(agent_id: String, destination: Vector2i) -> void:
@@ -1707,6 +1814,7 @@ func _predate(predator_id: String, prey_id: String, requested: float) -> void:
 		prey["alive"] = false
 		prey["state"] = "dead"
 		agents[prey_id] = prey
+		_lose_young(prey, "mother_died")
 		_emit("organism.died", prey_id, {"cause": "predation", "predator_id": predator_id})
 
 
@@ -1724,6 +1832,9 @@ func _reproduce(parent_id: String, mate_id: String) -> void:
 	if float(parent["reproductive_readiness"]) < 1.0 or float(mate["reproductive_readiness"]) < 1.0:
 		return
 	if _cell_distance(parent["cell"], mate["cell"]) > 1:
+		return
+	if parent["species"] == "grazer":
+		_conceive(parent, mate)
 		return
 	var contribution := minf(0.12, minf(float(parent["body_biomass"]) - 0.35, float(mate["body_biomass"]) - 0.35))
 	if contribution <= 0.0:
@@ -1750,6 +1861,21 @@ func _reproduce(parent_id: String, mate_id: String) -> void:
 	_emit("organism.reproduced", child_id, {"parents": [parent_id, mate_id], "species": parent["species"], "body_biomass": contribution * 2.0})
 
 
+func _conceive(parent: Dictionary, mate: Dictionary) -> void:
+	if not _compatible_mates(parent, mate):
+		return
+	var mother: Dictionary = parent if parent["sex"] == "female" else mate
+	var father: Dictionary = mate if parent["sex"] == "female" else parent
+	mother["gestation_ticks"] = 1
+	mother["carried_young"] = 0.0
+	mother["sire"] = father["id"]
+	mother["reproductive_readiness"] = 0.0
+	father["reproductive_readiness"] = GRAZER_MALE_RECOVERY
+	agents[mother["id"]] = mother
+	agents[father["id"]] = father
+	_emit("organism.conceived", mother["id"], {"sire": father["id"], "cell": mother["cell"]})
+
+
 func _ready_mate_id(agent: Dictionary) -> String:
 	var ids := agents.keys()
 	ids.sort()
@@ -1757,7 +1883,7 @@ func _ready_mate_id(agent: Dictionary) -> String:
 		if candidate_id == agent["id"]:
 			continue
 		var candidate: Dictionary = agents[candidate_id]
-		if bool(candidate["alive"]) and bool(candidate.get("present", true)) and candidate["species"] == agent["species"] and float(candidate["reproductive_readiness"]) >= 1.0 and _cell_distance(agent["cell"], candidate["cell"]) <= 1:
+		if bool(candidate["alive"]) and bool(candidate.get("present", true)) and candidate["species"] == agent["species"] and float(candidate["reproductive_readiness"]) >= 1.0 and _cell_distance(agent["cell"], candidate["cell"]) <= 1 and _compatible_mates(agent, candidate):
 			return candidate_id
 	return ""
 

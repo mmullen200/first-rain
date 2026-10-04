@@ -2,7 +2,7 @@ extends SceneTree
 
 # Grazer herds (#51): the herd stays together, rests in step with one on
 # watch, follows the green, panics together, breeds slowly and only in good
-# times, and on screen walks curving paths instead of pivoting cell to cell.
+# times (a bull and a cow, through a visible pregnancy), and on screen walks curving paths instead of pivoting cell to cell.
 
 const EcologyGrid = preload("res://ecology_grid.gd")
 const AnimalSimulation = preload("res://animal_simulation.gd")
@@ -20,9 +20,12 @@ func _run() -> void:
 	_check_shared_fright()
 	_check_slow_breeding()
 	_check_no_breeding_in_hard_times()
+	_check_sexes_and_pregnancy()
+	_check_lost_pregnancy()
+	_check_pregnancy_shows()
 	await _check_smooth_walking()
 	if failures.is_empty():
-		print("PASS: grazers keep together, rest in step with a lookout, follow the green, bolt together, breed slowly, and walk curving paths")
+		print("PASS: grazers keep together, rest in step with a lookout, follow the green, bolt together, breed slowly as bulls and cows through a visible pregnancy, and walk curving paths")
 		quit(0)
 		return
 	for failure in failures:
@@ -171,6 +174,83 @@ func _check_no_breeding_in_hard_times() -> void:
 		for event in simulation.step():
 			births += 1 if event["taxonomy"] == "organism.reproduced" else 0
 	_expect(births == 0, "the herd bred with no forage to spare (%d births)" % births)
+
+
+func _pair(sexes: Array):
+	var ecology = EcologyGrid.new()
+	_meadow(ecology, Vector2i(6, 6), Vector2i(10, 8), 0.6)
+	var simulation = AnimalSimulation.new(ecology, 7)
+	for index in sexes.size():
+		simulation.register_agent("grazer", "grazer:%d" % (index + 1), {"cell": Vector2i(9 + index, 9), "hunger": 0.0, "body_biomass": 0.9, "reproductive_readiness": 1.0, "sex": sexes[index]})
+	return simulation
+
+
+func _check_sexes_and_pregnancy() -> void:
+	var same = _pair(["female", "female"])
+	for ignored in 30:
+		same.step()
+	_expect(not _has(same.event_history, "organism.conceived"), "two females mated")
+	var simulation = _pair(["female", "male"])
+	simulation.step()
+	_expect(_has(simulation.event_history, "organism.conceived"), "a ready female and male beside each other did not mate")
+	_expect(int(simulation.agents["grazer:1"]["gestation_ticks"]) > 0 and String(simulation.agents["grazer:1"]["sire"]) == "grazer:2", "the female did not become pregnant by the male")
+	_expect(is_equal_approx(float(simulation.agents["grazer:2"]["reproductive_readiness"]), AnimalSimulation.GRAZER_MALE_RECOVERY), "the male did not keep part of his condition")
+	var born_at := -1
+	var birth_weight := 0.0
+	for tick in AnimalSimulation.GRAZER_GESTATION_TICKS + 40:
+		for event in simulation.step():
+			if event["taxonomy"] == "organism.reproduced" and born_at < 0:
+				born_at = tick
+				birth_weight = float(simulation.agents[event["subject"]]["body_biomass"])
+			_expect(event["taxonomy"] != "organism.conceived", "a pregnant female mated again")
+	_expect(born_at >= AnimalSimulation.GRAZER_GESTATION_TICKS - 5, "the calf came before the pregnancy ran its course (tick %d)" % born_at)
+	var calf_ids: Array = simulation.agents.keys().filter(func(id): return String(id).begins_with("grazer:offspring:"))
+	_expect(calf_ids.size() == 1, "one pregnancy did not give one calf")
+	if calf_ids.size() == 1:
+		var calf: Dictionary = simulation.agents[calf_ids[0]]
+		_expect(calf["parent_id"] == "grazer:1" and calf["parents"] == ["grazer:1", "grazer:2"], "the calf does not follow its mother or know its sire")
+		_expect(String(calf["sex"]) in ["female", "male"], "the calf has no sex")
+		_expect(absf(birth_weight - AnimalSimulation.GRAZER_CALF_BODY) < 0.001, "the calf was born weighing %.3f, not what its mother carried" % birth_weight)
+	_expect(int(simulation.agents["grazer:1"]["gestation_ticks"]) == 0 and float(simulation.agents["grazer:1"]["carried_young"]) == 0.0, "the mother was still carrying after the birth")
+	_expect(simulation.conservation_violations.is_empty(), "pregnancy broke conservation: %s" % [simulation.conservation_violations])
+
+
+func _check_lost_pregnancy() -> void:
+	var simulation = _pair(["female", "male"])
+	simulation.step()
+	for ignored in 100:
+		simulation.step()
+	var carried := float(simulation.agents["grazer:1"]["carried_young"])
+	_expect(carried > 0.0, "the mother was not building her calf")
+	var detritus_before: float = simulation.ecology.resource_amount(simulation.agents["grazer:1"]["cell"], "dead_biomass")
+	simulation.submit_intervention({"type": "injure", "agent_id": "grazer:1", "amount": 0.75})
+	simulation.step()
+	simulation.step()
+	_expect(_has(simulation.event_history, "organism.pregnancy_lost"), "a badly wounded mother kept her pregnancy")
+	_expect(int(simulation.agents["grazer:1"]["gestation_ticks"]) == 0, "the lost pregnancy did not end")
+	var detritus_after: float = simulation.ecology.resource_amount(simulation.agents["grazer:1"]["cell"], "dead_biomass")
+	_expect(detritus_after > detritus_before + carried * 0.5, "the lost calf's body did not go to the ground")
+	_expect(simulation.conservation_violations.is_empty(), "a lost pregnancy broke conservation: %s" % [simulation.conservation_violations])
+
+
+func _check_pregnancy_shows() -> void:
+	var GrazerFigure = load("res://grazer_figure.gd")
+	var cow = GrazerFigure.new()
+	var bull = GrazerFigure.new()
+	bull.set_male(true)
+	var flat: Vector3 = cow.belly_mesh.scale
+	cow.set_pregnancy(1.0)
+	_expect(cow.belly_mesh.scale.x > flat.x * 1.4 and cow.belly_mesh.scale.y > flat.y * 1.6, "a full-term belly does not visibly swell")
+	_expect(bull.spines[0].scale.y > cow.spines[0].scale.y * 2.5, "a bull's crest is not clearly taller than a cow's")
+	cow.free()
+	bull.free()
+
+
+func _has(events: Array, taxonomy: String) -> bool:
+	for event in events:
+		if event["taxonomy"] == taxonomy:
+			return true
+	return false
 
 
 func _check_smooth_walking() -> void:

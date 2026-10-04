@@ -481,7 +481,8 @@ func _seed_flower_lineage_fixture() -> void:
 	_update_ecological_animal_markers()
 
 
-# A herd of five adults and a juvenile (#51) grazes a meadow that is slowly
+# A herd of two bulls, three cows (one heavily pregnant) and a calf (#51)
+# grazes a meadow that is slowly
 # drying out. A second meadow on a seep stays green eight cells to the east,
 # within sight. Watch the herd drift while it grazes, lie down together with
 # one on watch, move off together toward the green when its own ground thins,
@@ -504,18 +505,28 @@ func _seed_grazer_herd_fixture() -> void:
 				else:
 					ecology.add_resources(cell, {"moss": 0.4, "rhizome": 0.3})
 	var start := HERD_FIXTURE_DRYING
-	for index in range(6):
-		var juvenile := index == 5
+	# [sex, readiness, juvenile, pregnancy ticks]. Grazer 1 is the lead bull;
+	# grazer 2 is already over halfway through a pregnancy, so her belly shows
+	# and she calves within about a minute; grazer 6 is grazer 3's calf. The
+	# others start part-way into condition so they pair up within minutes.
+	var herd := [["male", 0.65, false, 0], ["female", 0.0, false, 270], ["female", 0.6, false, 0], ["male", 0.8, false, 0], ["female", 0.7, false, 0], ["female", 0.0, true, 0]]
+	for index in herd.size():
+		var member: Array = herd[index]
+		var juvenile: bool = member[2]
+		var pregnant_ticks: int = member[3]
 		animal_simulation.register_agent("grazer", "grazer:%d" % (index + 1), {
 			"cell": start + Vector2i(index % 3 - 1, index / 3),
 			"habitat_cell": start,
 			"hunger": 0.5,
 			"body_biomass": 0.3 if juvenile else 0.9,
-			# Part-way into condition, so the first births come within minutes.
-			"reproductive_readiness": 0.0 if juvenile else 0.5 + 0.06 * index,
+			"sex": member[0],
+			"reproductive_readiness": member[1],
+			"gestation_ticks": pregnant_ticks,
+			"carried_young": animal_simulation.GRAZER_CALF_BODY * pregnant_ticks / animal_simulation.GRAZER_GESTATION_TICKS,
+			"sire": "grazer:4" if pregnant_ticks > 0 else "",
 			"juvenile": juvenile,
-			"parents": ["grazer:1"] if juvenile else [],
-			"parent_id": "grazer:1" if juvenile else ""
+			"parents": ["grazer:3", "grazer:1"] if juvenile else [],
+			"parent_id": "grazer:3" if juvenile else ""
 		})
 	ecology_started = true
 	grazer_awake = true
@@ -2882,7 +2893,7 @@ func _update_ecological_animal_markers() -> void:
 		var label: Label3D = marker.get_child(1)
 		label.text = String(label.text).split(" / ")[0] + " / " + String(agent["state"]).to_upper()
 		if agent["species"] == "grazer":
-			label.text = ("JUVENILE" if bool(agent.get("juvenile", false)) else "GRAZER") + " / " + String(agent["state"]).to_upper()
+			label.text = ("JUVENILE" if bool(agent.get("juvenile", false)) else "GRAZER") + " " + String(agent.get("sex", "")).to_upper() + (" / PREGNANT" if int(agent.get("gestation_ticks", 0)) > 0 else "") + " / " + String(agent["state"]).to_upper()
 			var maturity := clampf(float(agent.get("development_ticks", 0)) / AnimalSimulation.JUVENILE_MATURATION_TICKS, 0.0, 1.0)
 			marker.get_child(0).scale = Vector3.ONE * (lerpf(0.65, 1.0, maturity) if bool(agent.get("juvenile", false)) else 1.0)
 		if agent["species"] == "predator":
@@ -2941,6 +2952,7 @@ func _update_grazer_markers(delta: float) -> void:
 	if grazer_awake and grazer_root.visible:
 		var first: Dictionary = animal_simulation.agent_state("grazer:1")
 		if not first.is_empty() and bool(first["alive"]):
+			_dress_grazer(grazer_body, first)
 			shown.append(grazer_root)
 			figures.append(grazer_body)
 			heights.append(0.28)
@@ -2952,8 +2964,7 @@ func _update_grazer_markers(delta: float) -> void:
 			continue
 		_steer_grazer(id, marker, agent, 0.25, delta)
 		var figure = marker.get_child(0)
-		if bool(agent.get("juvenile", false)) != figure.juvenile:
-			figure.set_juvenile(bool(agent.get("juvenile", false)))
+		_dress_grazer(figure, agent)
 		shown.append(marker)
 		figures.append(figure)
 		heights.append(0.25)
@@ -2986,6 +2997,8 @@ func _steer_grazer(id: String, actor: Node3D, agent: Dictionary, height_offset: 
 		var herd_heading := Vector2.from_angle(float(agent.get("herd_heading", 0.0)))
 		target += herd_heading * GRAZER_LOOKAHEAD
 	var top_speed: float = GRAZER_GAITS.get(state, GRAZER_MOVE_SPEED)
+	# Heavily pregnant females walk a little slower.
+	top_speed *= 1.0 - 0.2 * clampf(float(agent.get("gestation_ticks", 0)) / float(animal_simulation.GRAZER_GESTATION_TICKS), 0.0, 1.0)
 	var turn_rate := 3.2 if state == "fleeing" else GRAZER_TURN_RATE
 	var current := Vector2(actor.position.x, actor.position.z)
 	var to_target := target - current
@@ -3006,6 +3019,17 @@ func _steer_grazer(id: String, actor: Node3D, agent: Dictionary, height_offset: 
 	var next := current + Vector2(sin(facing), cos(facing)) * speed * delta
 	actor.rotation.y = facing
 	actor.position = Vector3(next.x, _terrain_surface_height(next) + height_offset, next.y)
+
+
+# Shows a grazer's age, sex and how far along a pregnancy is.
+func _dress_grazer(figure, agent: Dictionary) -> void:
+	if bool(agent.get("juvenile", false)) != figure.juvenile:
+		figure.set_juvenile(bool(agent.get("juvenile", false)))
+	if (String(agent.get("sex", "")) == "male") != figure.male:
+		figure.set_male(String(agent.get("sex", "")) == "male")
+	var progress := float(agent.get("gestation_ticks", 0)) / float(animal_simulation.GRAZER_GESTATION_TICKS)
+	if not is_equal_approx(progress, figure.pregnancy):
+		figure.set_pregnancy(progress)
 
 
 # Several grazers can share one 2 m cell; each heads for its own spot in it.
