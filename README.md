@@ -50,11 +50,13 @@ First Rain is in an early prototyping phase in Godot. The current playable work 
 - the wreck is a crashed spaceplane with a walk-in cabin ([#44](https://github.com/mmullen200/first-rain/issues/44))
 - flower colours show which patches the pollinator has linked ([#49](https://github.com/mmullen200/first-rain/issues/49))
 - grazers live as herds that breed slowly as bulls and cows, with visible pregnancies ([#51](https://github.com/mmullen200/first-rain/issues/51))
+- herd birds, a small flock that rides with a grazer herd and warns it of the predator ([#52](https://github.com/mmullen200/first-rain/issues/52))
 
-Still on their own branches:
+Still on its own branch:
 
 - shrubs that arrange themselves into stripes across slopes (`prototype/shrub-stripes`, [#50](https://github.com/mmullen200/first-rain/issues/50)), not working yet
-- herd birds, a small flock that rides with a grazer herd and warns it of the predator (`prototype/herd-birds`, [#52](https://github.com/mmullen200/first-rain/issues/52)) Project direction and open questions are tracked in [issue #1](https://github.com/mmullen200/first-rain/issues/1).
+
+Project direction and open questions are tracked in [issue #1](https://github.com/mmullen200/first-rain/issues/1).
 
 Automated regressions establish that these systems behave consistently; they do not prove that the habitat changes, animal waking, herd behaviour, spatial puzzle, or path to First Rain are understandable or enjoyable. The earlier prototype issues were closed without recorded playtest results, so none of their playtest gates counts as passed; each new playtest finding is recorded in its own GitHub issue. Prototype quantities, timings, thresholds, visuals, and one-off fixtures are evidence for decisions rather than final production content.
 
